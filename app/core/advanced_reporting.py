@@ -1,12 +1,11 @@
-from fpdf import FPDF, YPos
-from fpdf.enums import Align
+from fpdf import FPDF
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import os
 import tempfile
-import numpy as np
+from pathlib import Path # <--- 1. IMPORT PATHLIB
 
 # --- Utility Function ---
 def create_versioned_file(base_filename):
@@ -30,13 +29,23 @@ class PDFReport(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.report_date = datetime.now().strftime("%B %d, %Y")
+        
+        # --- 2. THE FIX: BUILD ROBUST FILE PATHS ---
+        # Get the project root directory (which is 3 levels up from this file)
+        # app/core/advanced_reporting.py -> app/core -> app -> [project_root]
+        project_root = Path(__file__).parent.parent.parent
+        font_dir = project_root / "assets" / "fonts"
+
         try:
-            self.add_font("Noto", "", "assets/fonts/NotoSans-Regular.ttf")
-            self.add_font("Noto", "B", "assets/fonts/NotoSans-Bold.ttf")
-            self.add_font("Noto", "I", "assets/fonts/NotoSans-Italic.ttf")
+            self.add_font("Noto", "", font_dir / "NotoSans-Regular.ttf")
+            self.add_font("Noto", "B", font_dir / "NotoSans-Bold.ttf")
+            self.add_font("Noto", "I", font_dir / "NotoSans-Italic.ttf")
             self.font_family = "Noto"
-        except RuntimeError:
+        except RuntimeError as e:
+            # This error will now be more descriptive on the server
+            print(f"ERROR: Could not load font. Path: {font_dir}. Error: {e}")
             self.font_family = "Arial"
+
 
     def header(self):
         self.set_font(self.font_family, 'B', 12)
@@ -51,7 +60,7 @@ class PDFReport(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font(self.font_family, 'I', 8)
-        self.cell(0, 10, f"Page {self.page_no()}/{{nb}} | {self.report_date}", 0, 0, 'C')
+        self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, 'C')
 
     def chapter_title(self, title):
         self.set_font(self.font_family, 'B', 16)
@@ -86,13 +95,12 @@ class PDFReport(FPDF):
         chart_path = os.path.join(chart_dir, f"{chart_name}.png")
         fig.write_image(chart_path, width=800, height=450, scale=2)
         
-        # Fixed: Use self.l_margin for left margin alignment instead of Align.LEFT
-        self.image(chart_path, x=self.l_margin, w=self.w - self.l_margin - self.r_margin)
+        self.image(chart_path, w=self.w - self.l_margin - self.r_margin)
         
         os.remove(chart_path)
         self.ln(5)
 
-# --- AdvancedReporting Class (No changes needed here) ---
+# --- AdvancedReporting Class (no changes here) ---
 class AdvancedReporting:
     def __init__(self, analyzer):
         self.analyzer = analyzer
