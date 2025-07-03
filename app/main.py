@@ -617,7 +617,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Browns Cheese** 🧀")
     st.sidebar.markdown("Dry Ice Management System v3.0")
-    st.sidebar.markdown("© 2025 - Enhanced Analytics")
+    st.sidebar.markdown("© 2025 - Gathura Chege")
     
     # Additional insights in main area
     st.markdown("---")
