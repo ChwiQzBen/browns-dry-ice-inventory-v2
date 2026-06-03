@@ -10,7 +10,6 @@ import sys
 import os
 from pathlib import Path
 import sqlite3
-import analyzer
 import math
 from scipy import stats
 from statsmodels.tsa.arima.model import ARIMA
