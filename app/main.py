@@ -1256,7 +1256,7 @@ def main():
             insights_cols = st.columns([1, 1, 1], gap="large")
 
             with insights_cols[0]:
-                with st.container(border=True):
+                with st.container():
                     st.markdown("#### 📊 Order Pattern Analysis")
                     order_counts = df['Order_Quantity_kg'].value_counts().sort_index()
                     most_common_order = order_counts.idxmax()
@@ -1267,7 +1267,7 @@ def main():
                     st.metric("Busiest day", weekday_pattern.index[0], f"{weekday_pattern.iloc[0]} orders")
 
             with insights_cols[1]:
-                with st.container(border=True):
+                with st.container():
                     st.markdown("#### ⚙️ Efficiency Metrics")
                     avg_containers_per_order = df['Containers_Used'].mean()
                     container_efficiency = (df['Order_Quantity_kg'].sum() / (df['Containers_Used'].sum() * constants.CONTAINER_SIZE)) * 100
@@ -1285,7 +1285,7 @@ def main():
                     st.metric("Current cost per kg", f"KSh {current_cost_per_kg:.2f}", delta=None)
 
             with insights_cols[2]:
-                with st.container(border=True):
+                with st.container():
                     st.markdown("#### 📈 Optimization Impact")
                     if eoq > 0:
                         order_frequency_reduction = ((kpis.get('order_frequency', 0) - (kpis.get('current_monthly_volume', 0) / eoq)) / kpis.get('order_frequency', 1) * 100)
