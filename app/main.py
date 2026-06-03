@@ -13,7 +13,6 @@ import sqlite3
 import math
 from scipy import stats
 from statsmodels.tsa.arima.model import ARIMA
-import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_percentage_error
 from core.analyzer import DryIceAnalyzer
