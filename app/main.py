@@ -1423,7 +1423,7 @@ def main():
 
             st.markdown("### 📊 Recommended Inventory Policy")
             policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
-            st.dataframe(policy_data.style.format({'Value (kg)': '{:.1f}'}), use_container_width=True, hide_index=True)
+            st.dataframe(policy_data.style.format({'Value (kg)': '{:.1f}'}), use_container_width=True, )
 
             st.markdown("### 🎯 EOQ Implementation Impact")
             # The savings are now calculated in the main block. We just display them here.
@@ -1457,7 +1457,7 @@ def main():
                     f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
                 ]
             }
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, )
 
             st.markdown("#### 📈 5-Year Cumulative Savings Projection")
             years = list(range(1, 6))
@@ -2056,7 +2056,7 @@ def main():
             display_df['Date'] = display_df['date'].dt.strftime('%Y-%m-%d %H:%M')
             display_df['Type'] = display_df['type'].str.title()
             display_df['Quantity (kg)'] = display_df['quantity'].apply(lambda x: f"{x:,.2f}")
-            st.dataframe(display_df[['Date', 'Type', 'Quantity (kg)', 'description']], use_container_width=True, hide_index=True)
+            st.dataframe(display_df[['Date', 'Type', 'Quantity (kg)', 'description']], use_container_width=True,)
             
             st.markdown("### 📈 Transaction Summary (Filtered Period)")
             total_used = filtered_df[filtered_df['type']=='usage']['quantity'].sum()
