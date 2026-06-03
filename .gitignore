@@ -194,4 +194,4 @@ cython_debug/
 .cursorindexingignore
 
 repomix-output.xml
-reports/
+reports/dry_ice.db
