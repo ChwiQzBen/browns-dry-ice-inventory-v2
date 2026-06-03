@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 class SystemIntegrations:
     def __init__(self):
         self.supported_integrations = {
@@ -10,14 +12,11 @@ class SystemIntegrations:
     
     def setup_api_integration(self, system_type, credentials):
         """Setup external system integrations"""
-        # Validate credentials
         if not self.validate_credentials(system_type, credentials):
             return {"status": "error", "message": "Invalid credentials"}
         
-        # Create connection
         connection = self.create_connection(system_type, credentials)
         
-        # Store integration
         self.active_integrations[system_type] = {
             'connection': connection,
             'credentials': credentials,
@@ -33,17 +32,14 @@ class SystemIntegrations:
     
     def validate_credentials(self, system_type, credentials):
         """Validate integration credentials"""
-        # Actual validation would be system-specific
         return True
     
     def create_connection(self, system_type, credentials):
         """Create connection to external system"""
-        # Actual connection implementation would go here
         return f"{system_type}_connection"
     
     def create_data_mapping(self, system_type):
         """Create data mapping for integration"""
-        # This would be customized for each integration
         return {
             'inventory': f"{system_type}_inventory_field",
             'orders': f"{system_type}_orders_field",
@@ -62,5 +58,4 @@ class SystemIntegrations:
         if system_type not in self.active_integrations:
             return {"status": "error", "message": "Integration not set up"}
         
-        # Actual sync implementation would go here
         return {"status": "success", "records_synced": 42}

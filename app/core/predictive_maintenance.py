@@ -4,7 +4,12 @@ import config.constants as const
 
 class PredictiveMaintenance:
     def __init__(self):
-        self.container_health_indicators = const.INVENTORY_PARAMETERS['CONTAINER_HEALTH_INDICATORS']
+        self.container_health_indicators = const.INVENTORY_PARAMETERS.get('CONTAINER_HEALTH_INDICATORS', [
+    'insulation_efficiency',
+    'seal_integrity', 
+    'structural_condition',
+    'usage_cycles'
+])
     
     def predict_container_failure(self, container_data):
         """Predict when containers need maintenance"""

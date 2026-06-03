@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import os
 import tempfile
-from pathlib import Path # <--- 1. IMPORT PATHLIB
+from pathlib import Path
 
 # --- Utility Function ---
 def create_versioned_file(base_filename):
@@ -30,9 +30,6 @@ class PDFReport(FPDF):
         super().__init__(*args, **kwargs)
         self.report_date = datetime.now().strftime("%B %d, %Y")
         
-        # --- 2. THE FIX: BUILD ROBUST FILE PATHS ---
-        # Get the project root directory (which is 3 levels up from this file)
-        # app/core/advanced_reporting.py -> app/core -> app -> [project_root]
         project_root = Path(__file__).parent.parent.parent
         font_dir = project_root / "assets" / "fonts"
 
@@ -45,7 +42,6 @@ class PDFReport(FPDF):
             # This error will now be more descriptive on the server
             print(f"ERROR: Could not load font. Path: {font_dir}. Error: {e}")
             self.font_family = "Arial"
-
 
     def header(self):
         self.set_font(self.font_family, 'B', 12)
@@ -100,7 +96,7 @@ class PDFReport(FPDF):
         os.remove(chart_path)
         self.ln(5)
 
-# --- AdvancedReporting Class (no changes here) ---
+# --- AdvancedReporting Class ---
 class AdvancedReporting:
     def __init__(self, analyzer):
         self.analyzer = analyzer
@@ -108,13 +104,25 @@ class AdvancedReporting:
 
     def generate_custom_report(self, report_type, parameters, filename=None):
         try:
+            # Get the DataFrame - use self.df if available, otherwise fallback to analyzer methods
+            if hasattr(self, 'df') and self.df is not None:
+                df = self.df
+            elif hasattr(self.analyzer, 'data_loader') and hasattr(self.analyzer.data_loader, 'df'):
+                df = self.analyzer.data_loader.df
+            elif hasattr(self.analyzer, 'df'):
+                df = self.analyzer.df
+            elif hasattr(self.analyzer, 'data'):
+                df = self.analyzer.data
+            else:
+                raise AttributeError("No DataFrame available for report generation")
+            
             kpis = self.analyzer.calculate_kpis()
             eoq = self.analyzer.calculate_eoq()
             safety_stock = self.analyzer.calculate_safety_stock()
             cost_savings = self.analyzer.calculate_cost_savings(eoq)
             forecast_data = self.analyzer.forecast_demand(periods=30)
             
-            fig_forecast, fig_cost_comp = self._create_charts(forecast_data, cost_savings, kpis, eoq)
+            fig_forecast, fig_cost_comp = self._create_charts(forecast_data, cost_savings, kpis, eoq, df)
             recommendations = self._generate_recommendations(kpis, eoq, safety_stock, cost_savings)
             
             pdf = PDFReport()
@@ -129,8 +137,8 @@ class AdvancedReporting:
             pdf.chapter_title("Executive Summary")
             summary_text = (
                 f"This report provides a comprehensive analysis of the dry ice inventory for the period from "
-                f"{self.analyzer.data_loader.df['Date'].min().strftime('%d-%b-%Y')} to "
-                f"{self.analyzer.data_loader.df['Date'].max().strftime('%d-%b-%Y')}. "
+                f"{df['Date'].min().strftime('%d-%b-%Y')} to "
+                f"{df['Date'].max().strftime('%d-%b-%Y')}. "
                 f"The analysis identifies significant opportunities for cost savings and operational efficiency. "
                 f"By implementing an EOQ-based inventory policy, an estimated KSh {cost_savings['savings']:,.0f} "
                 f"can be saved monthly, representing a {cost_savings['percent_savings']:.1f}% reduction in inventory costs."
@@ -186,12 +194,11 @@ class AdvancedReporting:
             traceback.print_exc()
             raise e
 
-    def _create_charts(self, forecast_data, cost_savings, kpis, eoq):
+    def _create_charts(self, forecast_data, cost_savings, kpis, eoq, df):
         font_family = "Noto Sans" if os.path.exists("assets/fonts/NotoSans-Regular.ttf") else "Arial"
         fig_forecast, fig_cost_comp = None, None
         
         if forecast_data is not None:
-            df = self.analyzer.data_loader.df
             fig_forecast = go.Figure()
             fig_forecast.add_trace(go.Scatter(
                 x=df['Date'], y=df['Order_Quantity_kg'], mode='lines', name='Historical Orders', line=dict(color='#1f77b4')
@@ -211,12 +218,12 @@ class AdvancedReporting:
         cost_comparison_df = pd.DataFrame({
             'Cost Type': ['Ordering Cost', 'Holding Cost'],
             'Current System': [
-                (kpis['current_monthly_volume'] / kpis['avg_order_size']) * self.analyzer.constants['TRANSPORT_COST'],
-                (self.analyzer.constants['HOLDING_RATE'] * self.analyzer.constants['PRICE_PER_KG'] * kpis['avg_order_size'] / 2)
+                (kpis['current_monthly_volume'] / kpis['avg_order_size']) * self.analyzer.constants['transport_cost'],
+                (self.analyzer.constants['holding_rate'] * self.analyzer.constants['price_per_kg'] * kpis['avg_order_size'] / 2)
             ],
             'EOQ System': [
-                (kpis['current_monthly_volume'] / eoq) * self.analyzer.constants['TRANSPORT_COST'],
-                (self.analyzer.constants['HOLDING_RATE'] * self.analyzer.constants['PRICE_PER_KG'] * eoq / 2)
+                (kpis['current_monthly_volume'] / eoq) * self.analyzer.constants['transport_cost'],
+                (self.analyzer.constants['holding_rate'] * self.analyzer.constants['price_per_kg'] * eoq / 2)
             ]
         })
         fig_cost_comp = px.bar(

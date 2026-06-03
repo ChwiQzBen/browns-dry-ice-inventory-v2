@@ -3,6 +3,7 @@ from pathlib import Path
 import config.constants as const
 import numpy as np
 import warnings
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 class DataLoader:
@@ -17,13 +18,20 @@ class DataLoader:
         # Convert to datetime with dayfirst for European format
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         
-        # Filter for July 2024 to June 2025
+        # Filter for July 2024 to current date
         df = df[
             (df['Date'] >= '2024-07-01') & 
-            (df['Date'] <= '2025-06-30')
+            (df['Date'] <= datetime.now()) # type: ignore
         ]
         
         # Calculate effective quantity after sublimation
+        self.constants = {
+            'SUB_LOSS_RANGE': [1.51, 3.03],
+            'CONTAINER_SIZE': 150 ,
+            'TRANSPORT_COST': 1741.94*2,
+            'PRICE_PER_KG': 146.55,
+        }
+        
         avg_loss = sum(self.constants['SUB_LOSS_RANGE'])/2/100
         df['Effective_Quantity'] = df['Order_Quantity_kg'] * (1 - avg_loss)
         

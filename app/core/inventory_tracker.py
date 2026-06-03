@@ -22,16 +22,16 @@ class InventoryTracker:
         return self.dry_ice_analyzer.calculate_safety_stock()
 
         
-    def update_stock(self, quantity_used, transaction_type="Consumption"):
+    def update_stock(self, quantity_used, transaction_type="Consumption", transaction_date=None):
         """Real-time stock updates with transaction logging"""
         self.current_stock -= quantity_used
-        self._log_transaction(quantity_used, transaction_type)
+        self._log_transaction(quantity_used, transaction_type, transaction_date)
         return self.check_reorder_point()
         
-    def _log_transaction(self, quantity, transaction_type):
+    def _log_transaction(self, quantity, transaction_type, transaction_date=None):
         """Record stock transactions"""
         self.stock_history.append({
-            'timestamp': datetime.now(),
+            'timestamp': transaction_date if transaction_date else datetime.now(), # type: ignore
             'quantity': quantity,
             'type': transaction_type,
             'balance': self.current_stock
