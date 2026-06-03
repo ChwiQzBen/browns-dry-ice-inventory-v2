@@ -195,3 +195,4 @@ cython_debug/
 
 repomix-output.xml
 reports/dry_ice.db
+dry_ice.db
