@@ -1089,9 +1089,6 @@ def main():
             st.session_state.selected_period = correct_period
             st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
 
-        # 5. Rerun the app to reflect all changes immediately.
-        st.rerun()
-
     # Enhanced Stock Status Display
     stock_status = inventory_tracker.get_stock_status()
     st.sidebar.markdown(
