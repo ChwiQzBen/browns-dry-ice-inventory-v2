@@ -1385,45 +1385,44 @@ def main():
         if not df.empty:
             st.markdown("### 📦 Proactive Inventory Policy")
             st.success("✅ Inventory policy is dynamically calculated using the live forecast data from Tab 2.")
-            
-            st.markdown("### ❄️ Inventory Optimization Formulas")
-            col1, col2 = st.columns(2)
+        
+            # st.markdown("### ❄️ Inventory Optimization Formulas")
+            # col1, col2 = st.columns(2)
 
-            with col1:
-                st.markdown("#### Economic Order Quantity (EOQ)")
-                st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times D \times S}{H \times C}}')
-                st.latex(r'D_{\text{adj}} = %.1f \times %.4f = %.1f' % (monthly_demand_input, sublimation_factor, adjusted_demand))
-                st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times %.1f \times %.2f}{%.2f \times %.2f}} = %.1f \text{ kg}' % (adjusted_demand, constants.TRANSPORT_COST, constants.HOLDING_RATE, constants.PRICE_PER_KG, eoq))
+            # with col1:
+            #     st.markdown("#### Economic Order Quantity (EOQ)")
+            #     st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times D \times S}{H \times C}}')
+            #     st.latex(r'D_{\text{adj}} = %.1f \times %.4f = %.1f' % (monthly_demand_input, sublimation_factor, adjusted_demand))
+            #     st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times %.1f \times %.2f}{%.2f \times %.2f}} = %.1f \text{ kg}' % (adjusted_demand, constants.TRANSPORT_COST, constants.HOLDING_RATE, constants.PRICE_PER_KG, eoq))
 
-                st.markdown("**Where:**")
-                st.markdown(f"<span style='color:green;'>- D = Forecasted Monthly Demand = {monthly_demand_input:,.1f} kg</span>", unsafe_allow_html=True)
-                st.write(f"- S = Ordering Cost = KSh {constants.TRANSPORT_COST:,.2f}")
-                st.write(f"- H = Holding Rate = {constants.HOLDING_RATE*100:.1f}%")
-                st.write(f"- C = Unit Cost = KSh {constants.PRICE_PER_KG:.2f}/kg")
-                st.markdown(f"<p style='color:green; font-weight:bold;'>Result: EOQ = {eoq:.1f} kg</p>", unsafe_allow_html=True)
+            #     st.markdown("**Where:**")
+            #     st.markdown(f"<span style='color:green;'>- D = Forecasted Monthly Demand = {monthly_demand_input:,.1f} kg</span>", unsafe_allow_html=True)
+            #     st.write(f"- S = Ordering Cost = KSh {constants.TRANSPORT_COST:,.2f}")
+            #     st.write(f"- H = Holding Rate = {constants.HOLDING_RATE*100:.1f}%")
+            #     st.write(f"- C = Unit Cost = KSh {constants.PRICE_PER_KG:.2f}/kg")
+            #     st.markdown(f"<p style='color:green; font-weight:bold;'>Result: EOQ = {eoq:.1f} kg</p>", unsafe_allow_html=True)
 
-            with col2:
-                st.markdown("#### Safety Stock")
-                st.latex(r'\text{SS} = z \cdot \sigma_{\text{demand}} \cdot \sqrt{LT} \cdot (1 + \text{sublimation})')
-                st.latex(r'= %.2f \times %.1f \times \sqrt{%d} \times %.4f = %.1f \text{ kg}' % (z_score, demand_stddev_input, constants.LEAD_TIME_DAYS, sublimation_factor, safety_stock))
+            # with col2:
+            #     st.markdown("#### Safety Stock")
+            #     st.latex(r'\text{SS} = z \cdot \sigma_{\text{demand}} \cdot \sqrt{LT} \cdot (1 + \text{sublimation})')
+            #     st.latex(r'= %.2f \times %.1f \times \sqrt{%d} \times %.4f = %.1f \text{ kg}' % (z_score, demand_stddev_input, constants.LEAD_TIME_DAYS, sublimation_factor, safety_stock))
 
-                st.markdown("**Where:**")
-                st.write(f"- z = Z-score ({constants.SERVICE_LEVEL*100:.0f}%) = {z_score:.2f}")
-                st.markdown(f"<span style='color:green;'>- σ = Forecast Demand Std Dev = {demand_stddev_input:,.1f} kg</span>", unsafe_allow_html=True)
-                st.write(f"- LT = Lead Time = {constants.LEAD_TIME_DAYS} days")
-                st.write(f"- Sublimation Rate = {avg_sublimation:.2%}")
-                st.markdown(f"<p style='color:green; font-weight:bold;'>Result: Safety Stock = {safety_stock:.1f} kg</p>", unsafe_allow_html=True)
+            #     st.markdown("**Where:**")
+            #     st.write(f"- z = Z-score ({constants.SERVICE_LEVEL*100:.0f}%) = {z_score:.2f}")
+            #     st.markdown(f"<span style='color:green;'>- σ = Forecast Demand Std Dev = {demand_stddev_input:,.1f} kg</span>", unsafe_allow_html=True)
+            #     st.write(f"- LT = Lead Time = {constants.LEAD_TIME_DAYS} days")
+            #     st.write(f"- Sublimation Rate = {avg_sublimation:.2%}")
+            #     st.markdown(f"<p style='color:green; font-weight:bold;'>Result: Safety Stock = {safety_stock:.1f} kg</p>", unsafe_allow_html=True)
 
-            st.markdown("### 🔄 Reorder Point")
-            st.markdown(f"**Reorder Point = ({adjusted_demand:.1f}/30 × {constants.LEAD_TIME_DAYS}) + {safety_stock:.1f} = {reorder_point:.1f} kg**")
-            st.caption("*This policy is now dynamically updated based on the 30-day demand forecast.*")
+            # st.markdown("### 🔄 Reorder Point")
+            # st.markdown(f"**Reorder Point = ({adjusted_demand:.1f}/30 × {constants.LEAD_TIME_DAYS}) + {safety_stock:.1f} = {reorder_point:.1f} kg**")
+            # st.caption("*This policy is now dynamically updated based on the 30-day demand forecast.*")
 
-            st.markdown("### 📊 Recommended Inventory Policy")
-            policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
-            st.dataframe(policy_data.style.format({'Value (kg)': '{:.1f}'}), use_container_width=True, )
+            # st.markdown("### 📊 Recommended Inventory Policy")
+            # policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
+            # st.dataframe(policy_data.style.format({'Value (kg)': '{:.1f}'}), use_container_width=True)
 
             st.markdown("### 🎯 EOQ Implementation Impact")
-            # The savings are now calculated in the main block. We just display them here.
             annual_savings_percentage = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
 
             impact_cols = st.columns(4)
@@ -1431,12 +1430,12 @@ def main():
                 order_freq_delta_percent = ((eoq_monthly_orders - current_monthly_orders) / current_monthly_orders) * 100 if current_monthly_orders > 0 else 0
                 st.metric("Order Frequency Change", f"{eoq_monthly_orders:.1f} orders/month", f"{order_freq_delta_percent:.1f}%")
             with impact_cols[1]:
-                # THIS VALUE IS NOW CONSISTENT
                 st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", f"{annual_savings_percentage:.1f}% of total")
 
             implementation_cost = constants.IMPLEMENTATION_COST
             payback_period = implementation_cost / (annual_transport_savings / 12) if annual_transport_savings > 0 else 0
             roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else 0
+
             with impact_cols[2]:
                 st.metric("Payback Period", f"{payback_period:.1f} months")
             with impact_cols[3]:
@@ -1444,17 +1443,17 @@ def main():
 
             st.markdown("### 🔄 Current vs. Forecast-Driven System Comparison")
             comparison_data = {
-                'Metric': ['Orders per Month', 'Avg. Order Size (kg)', 'Monthly Transport Cost (KSh)', 'Annual Transport Cost (KSh)'],
-                'Current System (Historical)': [
-                    f"{current_monthly_orders:.1f}", f"{kpis.get('avg_order_size', 0):.0f}",
-                    f"{current_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{annual_transport_cost:,.0f}"
-                ],
-                'EOQ System (Forecast-Driven)': [
-                    f"{eoq_monthly_orders:.1f}", f"{eoq:.0f}",
-                    f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
-                ]
-            }
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, )
+            'Metric': ['Orders per Month', 'Avg. Order Size (kg)', 'Monthly Transport Cost (KSh)', 'Annual Transport Cost (KSh)'],
+            'Current System (Historical)': [
+                f"{current_monthly_orders:.1f}", f"{kpis.get('avg_order_size', 0):.0f}",
+                f"{current_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{annual_transport_cost:,.0f}"
+            ],
+            'EOQ System (Forecast-Driven)': [
+                f"{eoq_monthly_orders:.1f}", f"{eoq:.0f}",
+                f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
+            ]
+        }
+            # st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
 
             st.markdown("#### 📈 5-Year Cumulative Savings Projection")
             years = list(range(1, 6))
