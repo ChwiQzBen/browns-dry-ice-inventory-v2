@@ -40,9 +40,6 @@ def init_supabase():
         st.info("Please add SUPABASE_URL and SUPABASE_KEY to your Streamlit secrets")
         return None
 
-    # Optional: Keep SQLite as fallback
-    USE_SUPABASE = False  # Set to True after configuring secrets
-
 def fix_order_date():
     """Finds a specific incorrect date in the historical_orders table and updates it."""
 
