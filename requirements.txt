@@ -37,7 +37,6 @@ joblib==1.5.1
 jsonschema==4.24.0
 jsonschema-specifications==2025.4.1
 kaleido==0.2.1
-keras==2.13.1
 kiwisolver==1.4.7
 libclang==18.1.1
 logistro==1.1.0
@@ -83,13 +82,9 @@ six==1.17.0
 smmap==5.0.2
 stanio==0.5.1
 statsmodels==0.14.0
-streamlit==1.22.0
+streamlit>=1.30.0
+supabase==2.3.0
 tenacity==8.5.0
-tensorboard==2.13.0
-tensorboard-data-server==0.7.2
-tensorflow==2.13.0
-tensorflow-estimator==2.13.0
-tensorflow-io-gcs-filesystem==0.31.0
 termcolor==3.1.0
 threadpoolctl==3.6.0
 toml==0.10.2
@@ -105,4 +100,3 @@ watchdog==6.0.0
 Werkzeug==3.1.3
 wrapt==1.17.2
 zipp==3.23.0
-supabase>=2.0.0supabase>=2.0.0
