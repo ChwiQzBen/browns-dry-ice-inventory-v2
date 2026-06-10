@@ -24,7 +24,7 @@ from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
 import warnings
 from supabase import create_client, Client
-USE_SUPABASE = False
+USE_SUPABASE = True
 
 DATABASE_FILE = 'dry_ice.db'
 BAD_DATE = '2_024-09-26'
