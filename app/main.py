@@ -1320,8 +1320,8 @@ def main():
     sidebar_end_str = display_end_date.strftime('%d/%m/%Y')
 
     st.sidebar.write(f"**Analysis Period:** {sidebar_start_str} to {sidebar_end_str}")
-    st.sidebar.write(f"**Total Orders:** {len(df):,}", help="Total number of orders processed")
-    st.sidebar.write(f"**Data Points:** {df.shape[0]:,}", help="Total individual data records collected")
+    st.sidebar.write(f"**Total Orders:** {len(df):,}")
+    st.sidebar.write(f"**Data Points:** {df.shape[0]:,}")
 
     # Sidebar - Footer (Always Visible)
     st.sidebar.markdown("---")
