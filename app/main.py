@@ -23,10 +23,26 @@ from core.predictive_maintenance import PredictiveMaintenance
 from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
 import warnings
+from supabase import create_client, Client
+USE_SUPABASE = False
+
 DATABASE_FILE = 'dry_ice.db'
 BAD_DATE = '2_024-09-26'
 GOOD_DATE = '2024-09-26'
-# ---------------------
+@st.cache_resource
+def init_supabase():
+    """Initialize Supabase client using Streamlit secrets"""
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Failed to connect to Supabase: {e}")
+        st.info("Please add SUPABASE_URL and SUPABASE_KEY to your Streamlit secrets")
+        return None
+
+    # Optional: Keep SQLite as fallback
+    USE_SUPABASE = False  # Set to True after configuring secrets
 
 def fix_order_date():
     """Finds a specific incorrect date in the historical_orders table and updates it."""
@@ -95,11 +111,17 @@ constants = Constants()
 
 # SQLite Database Setup
 def init_db():
-    """Initialize SQLite database and create/update tables if they don't exist"""
+    """Initialize database (Supabase or SQLite)"""
+    if USE_SUPABASE and init_supabase():
+        # Supabase tables are created manually in the Supabase dashboard
+        # Or you can run a one-time setup script
+        st.success("Connected to Supabase cloud database")
+        return
+    
+    # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
-    # --- Create/Update transactions table ---
     c.execute('''CREATE TABLE IF NOT EXISTS transactions
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   date TEXT NOT NULL,
@@ -108,13 +130,12 @@ def init_db():
                   item TEXT NOT NULL,
                   description TEXT,
                   notes TEXT,
-                  analysis_period TEXT)''') # ADD analysis_period column
-    # Add column if it doesn't exist (for existing databases)
+                  analysis_period TEXT)''')
+    
     c.execute("PRAGMA table_info(transactions)")
     if 'analysis_period' not in [col[1] for col in c.fetchall()]:
         c.execute("ALTER TABLE transactions ADD COLUMN analysis_period TEXT")
 
-    # --- Create/Update inventory table (remains unchanged) ---
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   date TEXT NOT NULL,
@@ -122,13 +143,12 @@ def init_db():
                   transaction_id INTEGER,
                   FOREIGN KEY(transaction_id) REFERENCES transactions(id))''')
 
-    # --- Create/Update historical_orders table ---
     c.execute('''CREATE TABLE IF NOT EXISTS historical_orders
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   date TEXT NOT NULL,
                   order_quantity REAL NOT NULL,
-                  analysis_period TEXT)''') # ADD analysis_period column
-    # Add column if it doesn't exist (for existing databases)
+                  analysis_period TEXT)''')
+    
     c.execute("PRAGMA table_info(historical_orders)")
     if 'analysis_period' not in [col[1] for col in c.fetchall()]:
         c.execute("ALTER TABLE historical_orders ADD COLUMN analysis_period TEXT")
@@ -164,7 +184,66 @@ def clear_transactions_from_db():
             conn.close()
 
 def add_transaction_to_db(transaction_type, quantity, description, date, period):
-    """Add transaction to SQLite database for a specific analysis period"""
+    """Add transaction to Supabase or SQLite database"""
+    
+    # Try Supabase first if enabled
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                # Get current stock from Supabase
+                current_stock_response = supabase.table('inventory')\
+                    .select('stock_level')\
+                    .order('date', desc=True)\
+                    .limit(1)\
+                    .execute()
+                
+                current_stock = current_stock_response.data[0]['stock_level'] if current_stock_response.data else 0
+                
+                # Calculate new stock
+                if transaction_type == 'usage':
+                    new_stock = current_stock - quantity
+                else:  # receipt
+                    new_stock = current_stock + quantity
+                
+                # Insert transaction
+                transaction_data = {
+                    'date': date.isoformat(),
+                    'type': transaction_type,
+                    'quantity': quantity,
+                    'item': 'Dry Ice',
+                    'description': description,
+                    'notes': f"{description} - {quantity} kg",
+                    'analysis_period': period
+                }
+                
+                transaction_result = supabase.table('transactions').insert(transaction_data).execute()
+                transaction_id = transaction_result.data[0]['id']
+                
+                # Insert inventory record
+                inventory_data = {
+                    'date': date.isoformat(),
+                    'stock_level': new_stock,
+                    'transaction_id': transaction_id
+                }
+                supabase.table('inventory').insert(inventory_data).execute()
+                
+                # If receipt, add to historical orders
+                if transaction_type == 'receipt':
+                    order_data = {
+                        'date': date.isoformat(),
+                        'order_quantity': quantity,
+                        'analysis_period': period
+                    }
+                    supabase.table('historical_orders').insert(order_data).execute()
+                
+                return transaction_id
+                
+            except Exception as e:
+                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+                # Fall through to SQLite
+    
+    # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
@@ -175,7 +254,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
         'item': 'Dry Ice',
         'description': description,
         'notes': f"{description} - {quantity} kg",
-        'analysis_period': period  # Add period to transaction data
+        'analysis_period': period
     }
 
     c.execute('''INSERT INTO transactions
@@ -185,7 +264,6 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
 
     transaction_id = c.lastrowid
 
-    # Inventory updates as before
     if transaction_type == 'usage':
         c.execute('''INSERT INTO inventory (date, stock_level, transaction_id)
                      VALUES (?, (SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1) - ?, ?)''',
@@ -195,7 +273,6 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                      VALUES (?, (SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1) + ?, ?)''',
                   (date.isoformat(), quantity, transaction_id))
 
-        # Only record the historical order for the current period
         c.execute('''INSERT INTO historical_orders (date, order_quantity, analysis_period)
                      VALUES (?, ?, ?)''',
                   (date.isoformat(), quantity, period))
@@ -205,7 +282,34 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
     return transaction_id
 
 def get_transactions_from_db(period):
-    """Retrieve all transactions from SQLite database for a specific period"""
+    """Retrieve transactions from Supabase or SQLite"""
+    
+    # Try Supabase first
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                response = supabase.table('transactions')\
+                    .select('date, type, quantity, item, description, notes')\
+                    .eq('analysis_period', period)\
+                    .order('date', desc=True)\
+                    .execute()
+                
+                transaction_list = []
+                for t in response.data:
+                    transaction_list.append({
+                        'date': datetime.fromisoformat(t['date']),
+                        'type': t['type'],
+                        'quantity': t['quantity'],
+                        'item': t['item'],
+                        'description': t['description'],
+                        'notes': t['notes']
+                    })
+                return transaction_list
+            except Exception as e:
+                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+    
+    # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
@@ -226,7 +330,24 @@ def get_transactions_from_db(period):
     return transaction_list
 
 def get_current_stock_from_db():
-    """Get the current stock level from SQLite database"""
+    """Get current stock from Supabase or SQLite"""
+    
+    # Try Supabase first
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                response = supabase.table('inventory')\
+                    .select('stock_level')\
+                    .order('date', desc=True)\
+                    .limit(1)\
+                    .execute()
+                
+                return response.data[0]['stock_level'] if response.data else 0
+            except Exception as e:
+                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+    
+    # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
@@ -237,17 +358,34 @@ def get_current_stock_from_db():
 
     return result[0] if result else 0
 
-def update_current_stock_in_db(new_stock, date):
-    """Update the current stock level in SQLite database"""
+def get_current_stock_from_db():
+    """Get current stock from Supabase or SQLite"""
+    
+    # Try Supabase first
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                response = supabase.table('inventory')\
+                    .select('stock_level')\
+                    .order('date', desc=True)\
+                    .limit(1)\
+                    .execute()
+                
+                return response.data[0]['stock_level'] if response.data else 0
+            except Exception as e:
+                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+    
+    # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
-    c.execute('''INSERT INTO inventory (date, stock_level)
-                 VALUES (?, ?)''',
-              (date.isoformat(), new_stock))
+    c.execute('''SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1''')
+    result = c.fetchone()
 
-    conn.commit()
     conn.close()
+
+    return result[0] if result else 0
 
 def seed_historical_data():
     """
@@ -363,7 +501,49 @@ def get_period_from_date(order_date):
 
 
 def get_historical_orders_from_db(period):
-    """Retrieve historical orders from SQLite database for a specific analysis period"""
+    """Retrieve historical orders from Supabase or SQLite"""
+    
+    # Try Supabase first
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                response = supabase.table('historical_orders')\
+                    .select('date, order_quantity, analysis_period')\
+                    .eq('analysis_period', period)\
+                    .order('date')\
+                    .execute()
+                
+                if response.data:
+                    df = pd.DataFrame(response.data, columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
+                    
+                    # Handle date conversion
+                    original_dates = df['Date'].copy()
+                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                    
+                    invalid_rows_mask = df['Date'].isnull()
+                    
+                    if invalid_rows_mask.any():
+                        bad_data_df = pd.DataFrame({
+                            'Problematic_Date_String': original_dates[invalid_rows_mask],
+                            'Order_Quantity_kg': df.loc[invalid_rows_mask, 'Order_Quantity_kg'],
+                            'Analysis_Period': df.loc[invalid_rows_mask, 'analysis_period']
+                        })
+                        
+                        st.warning(
+                            f"⚠️ Found and ignored {len(bad_data_df)} row(s) with an invalid date format.",
+                            icon="❗"
+                        )
+                        with st.expander("Click here to see the problematic row(s)"):
+                            st.dataframe(bad_data_df, use_container_width=True)
+                        
+                        df.dropna(subset=['Date'], inplace=True)
+                    
+                    return df
+            except Exception as e:
+                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+    
+    # Fallback to SQLite (your existing code)
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
 
@@ -375,46 +555,30 @@ def get_historical_orders_from_db(period):
 
     if orders:
         df = pd.DataFrame(orders, columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
-
-        # --- START OF THE NEW, IMPROVED FIX ---
-
-        # 1. Keep a copy of the original date strings before we try to convert them.
         original_dates = df['Date'].copy()
-
-        # 2. Convert the 'Date' column. Any date that can't be parsed will become 'NaT' (Not a Time).
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-        # 3. Find the rows where the conversion failed (i.e., where 'Date' is now NaT).
+        
         invalid_rows_mask = df['Date'].isnull()
-
+        
         if invalid_rows_mask.any():
-            # 4. Get the full details of the rows that had bad dates.
-            # We use the mask to select the original bad date strings and other columns.
             bad_data_df = pd.DataFrame({
                 'Problematic_Date_String': original_dates[invalid_rows_mask],
                 'Order_Quantity_kg': df.loc[invalid_rows_mask, 'Order_Quantity_kg'],
                 'Analysis_Period': df.loc[invalid_rows_mask, 'analysis_period']
             })
-
-            # 5. Display a detailed, helpful warning to the user.
+            
             st.warning(
-                f"⚠️ Found and ignored {len(bad_data_df)} row(s) with an invalid date format. "
-                "This can happen from a typo during manual data entry. Please review and fix these records in your database.",
+                f"⚠️ Found and ignored {len(bad_data_df)} row(s) with an invalid date format.",
                 icon="❗"
             )
-            # Use an expander to show the problematic data without cluttering the UI.
             with st.expander("Click here to see the problematic row(s)"):
                 st.dataframe(bad_data_df, use_container_width=True)
-
-            # 6. Finally, remove the bad rows from the main DataFrame so the rest of the app works.
+            
             df.dropna(subset=['Date'], inplace=True)
-
-        # --- END OF THE NEW, IMPROVED FIX ---
-
+        
+        return df
     else:
-        df = pd.DataFrame(columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
-
-    return df
+        return pd.DataFrame(columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
 
 def add_transaction_to_history(transaction_type, quantity, description, date, period):
     """Add transaction to session state and to database for a specific period"""
