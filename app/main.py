@@ -25,7 +25,6 @@ from core.report_generator import ReportGenerator
 import warnings
 from supabase import create_client, Client
 USE_SUPABASE = True
-
 DATABASE_FILE = 'dry_ice.db'
 BAD_DATE = '2_024-09-26'
 GOOD_DATE = '2024-09-26'
@@ -357,35 +356,50 @@ def get_current_stock_from_db():
     conn.close()
 
     return result[0] if result else 0
-
-def get_current_stock_from_db():
-    """Get current stock from Supabase or SQLite"""
+def update_current_stock_in_db(new_stock, date):
+    """Update the current stock level in the database (Supabase or SQLite)"""
     
-    # Try Supabase first
+    # Try Supabase first if enabled
     if USE_SUPABASE:
         supabase = init_supabase()
         if supabase:
             try:
-                response = supabase.table('inventory')\
-                    .select('stock_level')\
-                    .order('date', desc=True)\
-                    .limit(1)\
-                    .execute()
+                # Handle date formatting
+                if hasattr(date, 'isoformat'):
+                    date_str = date.isoformat()
+                else:
+                    date_str = str(date)
                 
-                return response.data[0]['stock_level'] if response.data else 0
+                # Insert new inventory record
+                inventory_data = {
+                    'date': date_str,
+                    'stock_level': float(new_stock),
+                    'transaction_id': None  # Direct update, no associated transaction
+                }
+                supabase.table('inventory').insert(inventory_data).execute()
+                print(f"Stock updated in Supabase: {new_stock} kg on {date_str}")
+                return
             except Exception as e:
-                st.error(f"Supabase error: {e}. Falling back to SQLite.")
+                print(f"Supabase error updating stock: {e}. Falling back to SQLite.")
+                # Fall through to SQLite
     
     # Fallback to SQLite
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
+    
+    # Handle date formatting for SQLite
+    if hasattr(date, 'isoformat'):
+        date_str = date.isoformat()
+    else:
+        date_str = str(date)
 
-    c.execute('''SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1''')
-    result = c.fetchone()
+    c.execute('''INSERT INTO inventory (date, stock_level)
+                 VALUES (?, ?)''',
+              (date_str, float(new_stock)))
 
+    conn.commit()
     conn.close()
-
-    return result[0] if result else 0
+    print(f"Stock updated in SQLite: {new_stock} kg on {date_str}")
 
 def seed_historical_data():
     """
