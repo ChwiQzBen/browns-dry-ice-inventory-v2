@@ -111,7 +111,7 @@ def init_db():
     if USE_SUPABASE and init_supabase():
         # Supabase tables are created manually in the Supabase dashboard
         # Or you can run a one-time setup script
-        st.success("Connected to Supabase cloud database")
+        st.toast("☁️ Connected to cloud database", icon="✅")
         return
     
     # Fallback to SQLite
