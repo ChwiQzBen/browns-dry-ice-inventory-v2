@@ -1,3 +1,4 @@
+
 from fpdf import FPDF
 from datetime import datetime
 import pandas as pd
@@ -142,21 +143,46 @@ class AdvancedReporting:
         self.analyzer = analyzer
         self.df = df
         
-        # Set up constants
-        if constants:
-            self.constants = constants
-        elif analyzer and hasattr(analyzer, 'constants'):
-            self.constants = analyzer.constants
-        else:
-            # Use default constants
-            self.constants = type('Constants', (), {
+        # Helper function to convert dict to object
+        def to_object(source):
+            """Convert dictionary or other source to object with attributes"""
+            class ConstantsObj:
+                pass
+            obj = ConstantsObj()
+            
+            # Default values
+            defaults = {
                 'price_per_kg': PRICE_PER_KG,
                 'transport_cost': TRANSPORT_COST,
                 'holding_rate': HOLDING_RATE,
                 'sub_loss_range': SUB_LOSS_RANGE,
                 'lead_time_days': LEAD_TIME_DAYS,
                 'service_level': SERVICE_LEVEL
-            })()
+            }
+            
+            # Fill with source values
+            if isinstance(source, dict):
+                for key in defaults.keys():
+                    setattr(obj, key, source.get(key, defaults[key]))
+            elif source is not None:
+                for key in defaults.keys():
+                    if hasattr(source, key):
+                        setattr(obj, key, getattr(source, key))
+                    else:
+                        setattr(obj, key, defaults[key])
+            else:
+                for key, value in defaults.items():
+                    setattr(obj, key, value)
+            
+            return obj
+        
+        # Set up constants - convert to object if needed
+        if constants is not None:
+            self.constants = to_object(constants)
+        elif analyzer is not None and hasattr(analyzer, 'constants'):
+            self.constants = to_object(analyzer.constants)
+        else:
+            self.constants = to_object(None)
         
         self.report_date = datetime.now().strftime("%d-%m-%Y")
 
