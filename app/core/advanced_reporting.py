@@ -6,9 +6,20 @@ import plotly.express as px
 import os
 import tempfile
 from pathlib import Path
+import numpy as np
+from scipy import stats
+
+# --- Constants (should match your main app) ---
+PRICE_PER_KG = 146.55
+TRANSPORT_COST = 1741.94
+HOLDING_RATE = 0.03
+SUB_LOSS_RANGE = (1.51, 3.03)
+LEAD_TIME_DAYS = 1
+SERVICE_LEVEL = 0.95
 
 # --- Utility Function ---
 def create_versioned_file(base_filename):
+    """Create a versioned filename to avoid overwriting"""
     name, ext = os.path.splitext(base_filename)
     if not os.path.exists(base_filename):
         filename = base_filename
@@ -30,18 +41,31 @@ class PDFReport(FPDF):
         super().__init__(*args, **kwargs)
         self.report_date = datetime.now().strftime("%B %d, %Y")
         
-        project_root = Path(__file__).parent.parent.parent
-        font_dir = project_root / "assets" / "fonts"
-
-        try:
-            self.add_font("Noto", "", font_dir / "NotoSans-Regular.ttf")
-            self.add_font("Noto", "B", font_dir / "NotoSans-Bold.ttf")
-            self.add_font("Noto", "I", font_dir / "NotoSans-Italic.ttf")
-            self.font_family = "Noto"
-        except RuntimeError as e:
-            # This error will now be more descriptive on the server
-            print(f"ERROR: Could not load font. Path: {font_dir}. Error: {e}")
-            self.font_family = "Arial"
+        # Fixed font path - look in current directory and parent directories
+        font_paths = [
+            Path("assets/fonts/NotoSans-Regular.ttf"),
+            Path("../assets/fonts/NotoSans-Regular.ttf"),
+            Path("../../assets/fonts/NotoSans-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),  # Linux fallback
+        ]
+        
+        font_loaded = False
+        for font_path in font_paths:
+            if font_path.exists():
+                try:
+                    self.add_font("Noto", "", str(font_path))
+                    # Try to load bold version
+                    bold_path = font_path.parent / "NotoSans-Bold.ttf"
+                    if bold_path.exists():
+                        self.add_font("Noto", "B", str(bold_path))
+                    self.font_family = "Noto"
+                    font_loaded = True
+                    break
+                except:
+                    continue
+        
+        if not font_loaded:
+            self.font_family = "Helvetica"  # FPDF default
 
     def header(self):
         self.set_font(self.font_family, 'B', 12)
@@ -56,7 +80,7 @@ class PDFReport(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font(self.font_family, 'I', 8)
-        self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, 'C')
+        self.cell(0, 10, f"Page {self.page_no()}", 0, 0, 'C')
 
     def chapter_title(self, title):
         self.set_font(self.font_family, 'B', 16)
@@ -75,7 +99,7 @@ class PDFReport(FPDF):
         self.set_font(self.font_family, 'B', 10)
         self.cell(90, 8, f" {label}", 1, 0, 'L', fill=True)
         self.set_font(self.font_family, 'B', 12)
-        self.cell(90, 8, f"{value} {unit} ", 1, 1, 'R', fill=True)
+        self.cell(90, 8, f"{value} {unit}", 1, 1, 'R', fill=True)
         self.ln(2)
 
     def add_recommendation(self, text):
@@ -85,78 +109,119 @@ class PDFReport(FPDF):
         self.ln(2)
 
     def add_plotly_chart(self, fig, chart_name):
+        """Add a plotly chart to the PDF"""
         chart_dir = os.path.join(tempfile.gettempdir(), 'report_charts')
         os.makedirs(chart_dir, exist_ok=True)
         
         chart_path = os.path.join(chart_dir, f"{chart_name}.png")
+        
+        # Save the figure as PNG
         fig.write_image(chart_path, width=800, height=450, scale=2)
         
+        # Add to PDF
         self.image(chart_path, w=self.w - self.l_margin - self.r_margin)
         
-        os.remove(chart_path)
+        # Clean up
+        try:
+            os.remove(chart_path)
+        except:
+            pass
         self.ln(5)
 
 # --- AdvancedReporting Class ---
 class AdvancedReporting:
-    def __init__(self, analyzer):
+    def __init__(self, analyzer=None, df=None, constants=None):
+        """
+        Initialize with analyzer or direct parameters
+        
+        Args:
+            analyzer: Optional DryIceAnalyzer instance
+            df: Optional DataFrame
+            constants: Optional constants object with pricing and costs
+        """
         self.analyzer = analyzer
+        self.df = df
+        
+        # Set up constants
+        if constants:
+            self.constants = constants
+        elif analyzer and hasattr(analyzer, 'constants'):
+            self.constants = analyzer.constants
+        else:
+            # Use default constants
+            self.constants = type('Constants', (), {
+                'price_per_kg': PRICE_PER_KG,
+                'transport_cost': TRANSPORT_COST,
+                'holding_rate': HOLDING_RATE,
+                'sub_loss_range': SUB_LOSS_RANGE,
+                'lead_time_days': LEAD_TIME_DAYS,
+                'service_level': SERVICE_LEVEL
+            })()
+        
         self.report_date = datetime.now().strftime("%d-%m-%Y")
 
-    def generate_custom_report(self, report_type, parameters, filename=None):
+    def generate_custom_report(self, report_type, parameters=None, filename=None):
+        """Generate a custom PDF report"""
         try:
-            # Get the DataFrame - use self.df if available, otherwise fallback to analyzer methods
-            if hasattr(self, 'df') and self.df is not None:
-                df = self.df
-            elif hasattr(self.analyzer, 'data_loader') and hasattr(self.analyzer.data_loader, 'df'):
-                df = self.analyzer.data_loader.df
-            elif hasattr(self.analyzer, 'df'):
-                df = self.analyzer.df
-            elif hasattr(self.analyzer, 'data'):
-                df = self.analyzer.data
-            else:
-                raise AttributeError("No DataFrame available for report generation")
+            # Get DataFrame
+            if self.df is None and self.analyzer:
+                if hasattr(self.analyzer, 'df'):
+                    self.df = self.analyzer.df
+                elif hasattr(self.analyzer, 'data'):
+                    self.df = self.analyzer.data
             
-            kpis = self.analyzer.calculate_kpis()
-            eoq = self.analyzer.calculate_eoq()
-            safety_stock = self.analyzer.calculate_safety_stock()
-            cost_savings = self.analyzer.calculate_cost_savings(eoq)
-            forecast_data = self.analyzer.forecast_demand(periods=30)
+            if self.df is None or self.df.empty:
+                raise ValueError("No data available for report generation")
             
-            fig_forecast, fig_cost_comp = self._create_charts(forecast_data, cost_savings, kpis, eoq, df)
+            # Calculate KPIs and metrics
+            kpis = self._calculate_kpis()
+            eoq = self._calculate_eoq(kpis)
+            safety_stock = self._calculate_safety_stock(kpis)
+            cost_savings = self._calculate_cost_savings(eoq, kpis)
+            forecast_data = self._create_forecast()
+            
+            # Create charts
+            fig_forecast, fig_cost_comp = self._create_charts(forecast_data, cost_savings, kpis, eoq)
             recommendations = self._generate_recommendations(kpis, eoq, safety_stock, cost_savings)
             
+            # Generate PDF
             pdf = PDFReport()
             pdf.alias_nb_pages()
             pdf.add_page()
             
+            # Title
             pdf.set_font(pdf.font_family, 'B', 24)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 15, "Dry Ice Inventory Optimization Report", 0, 1, 'C')
             pdf.ln(5)
             
+            # Executive Summary
             pdf.chapter_title("Executive Summary")
             summary_text = (
                 f"This report provides a comprehensive analysis of the dry ice inventory for the period from "
-                f"{df['Date'].min().strftime('%d-%b-%Y')} to "
-                f"{df['Date'].max().strftime('%d-%b-%Y')}. "
+                f"{self.df['Date'].min().strftime('%d-%b-%Y')} to "
+                f"{self.df['Date'].max().strftime('%d-%b-%Y')}. "
                 f"The analysis identifies significant opportunities for cost savings and operational efficiency. "
-                f"By implementing an EOQ-based inventory policy, an estimated KSh {cost_savings['savings']:,.0f} "
-                f"can be saved monthly, representing a {cost_savings['percent_savings']:.1f}% reduction in inventory costs."
+                f"By implementing an EOQ-based inventory policy, an estimated KSh {cost_savings.get('savings', 0):,.0f} "
+                f"can be saved monthly, representing a {cost_savings.get('percent_savings', 0):.1f}% reduction in transport costs."
             )
             pdf.chapter_body(summary_text)
 
+            # KPIs
             pdf.chapter_title("Key Performance Indicators (KPIs)")
-            pdf.add_kpi_card("Potential Monthly Savings", f"KSh {cost_savings['savings']:,.0f}", "", color=(212, 237, 218))
+            pdf.add_kpi_card("Potential Monthly Savings", f"KSh {cost_savings.get('savings', 0):,.0f}", "", color=(212, 237, 218))
             pdf.add_kpi_card("Economic Order Quantity (EOQ)", f"{eoq:,.0f}", "kg")
             pdf.add_kpi_card("Recommended Safety Stock", f"{safety_stock:,.0f}", "kg")
             pdf.add_kpi_card("Reorder Point", f"{eoq + safety_stock:,.0f}", "kg")
-            pdf.add_kpi_card("Average Monthly Demand", f"{kpis['avg_monthly_demand']:,.0f}", "kg")
+            pdf.add_kpi_card("Average Monthly Demand", f"{kpis.get('avg_monthly_demand', 0):,.0f}", "kg")
             pdf.ln(10)
             
+            # Recommendations
             pdf.chapter_title("Top Recommendations")
             for rec in recommendations[:3]:
                 pdf.add_recommendation(rec)
 
+            # Forecast
             pdf.add_page()
             pdf.chapter_title("Demand Forecast Analysis")
             if fig_forecast:
@@ -169,7 +234,8 @@ class AdvancedReporting:
                 pdf.chapter_body(forecast_summary)
             else:
                 pdf.chapter_body("Forecast data could not be generated for this report.")
-                
+            
+            # Cost Analysis
             pdf.chapter_title("Cost Optimization Breakdown")
             if fig_cost_comp:
                 pdf.add_plotly_chart(fig_cost_comp, "cost_comparison")
@@ -180,8 +246,9 @@ class AdvancedReporting:
                 )
                 pdf.chapter_body(cost_summary)
             else:
-                 pdf.chapter_body("Cost comparison data could not be generated for this report.")
+                pdf.chapter_body("Cost comparison data could not be generated for this report.")
 
+            # Save file
             if filename is None:
                 filename = f"reports/{report_type}_report_{self.report_date}.pdf"
             versioned_filename = create_versioned_file(filename)
@@ -189,59 +256,201 @@ class AdvancedReporting:
             return versioned_filename
 
         except Exception as e:
-            print(f"FATAL ERROR during PDF generation: {e}")
+            print(f"Error during PDF generation: {e}")
             import traceback
             traceback.print_exc()
             raise e
 
-    def _create_charts(self, forecast_data, cost_savings, kpis, eoq, df):
-        font_family = "Noto Sans" if os.path.exists("assets/fonts/NotoSans-Regular.ttf") else "Arial"
+    def _calculate_kpis(self):
+        """Calculate KPIs from DataFrame"""
+        if self.df is None or self.df.empty:
+            return {
+                'total_orders': 0,
+                'total_volume': 0,
+                'avg_order_size': 0,
+                'std_order_size': 0,
+                'avg_monthly_demand': 0,
+                'order_frequency': 0
+            }
+        
+        # Ensure Date is datetime
+        self.df['Date'] = pd.to_datetime(self.df['Date'])
+        
+        # Calculate KPIs
+        total_orders = len(self.df)
+        total_volume = self.df['Order_Quantity_kg'].sum()
+        avg_order_size = self.df['Order_Quantity_kg'].mean()
+        std_order_size = self.df['Order_Quantity_kg'].std()
+        
+        # Calculate monthly demand
+        df_monthly = self.df.set_index('Date').resample('M')['Order_Quantity_kg'].sum()
+        avg_monthly_demand = df_monthly.mean() if len(df_monthly) > 0 else total_volume / max(1, len(self.df) / 4)
+        
+        # Calculate order frequency (orders per month)
+        months_span = (self.df['Date'].max() - self.df['Date'].min()).days / 30.44
+        order_frequency = total_orders / max(1, months_span)
+        
+        return {
+            'total_orders': total_orders,
+            'total_volume': total_volume,
+            'avg_order_size': avg_order_size,
+            'std_order_size': std_order_size,
+            'avg_monthly_demand': avg_monthly_demand,
+            'order_frequency': order_frequency
+        }
+
+    def _calculate_eoq(self, kpis):
+        """Calculate Economic Order Quantity"""
+        D = kpis.get('avg_monthly_demand', 0)
+        S = self.constants.transport_cost
+        H = self.constants.holding_rate * self.constants.price_per_kg
+        
+        if H <= 0 or D <= 0:
+            return 300  # Default fallback
+        
+        eoq = np.sqrt((2 * D * S) / H)
+        return eoq
+
+    def _calculate_safety_stock(self, kpis):
+        """Calculate safety stock"""
+        z_score = stats.norm.ppf(self.constants.service_level)
+        demand_std = kpis.get('std_order_size', 100)
+        lead_time = self.constants.lead_time_days
+        avg_sublimation = sum(self.constants.sub_loss_range) / 2 / 100
+        
+        safety_stock = z_score * demand_std * np.sqrt(lead_time) * (1 + avg_sublimation)
+        return max(50, safety_stock)  # Minimum 50kg safety stock
+
+    def _calculate_cost_savings(self, eoq, kpis):
+        """Calculate cost savings from EOQ implementation"""
+        current_monthly_orders = kpis.get('order_frequency', 0)
+        eoq_monthly_orders = kpis.get('avg_monthly_demand', 0) / max(1, eoq)
+        
+        current_monthly_transport = current_monthly_orders * self.constants.transport_cost
+        eoq_monthly_transport = eoq_monthly_orders * self.constants.transport_cost
+        
+        savings = max(0, current_monthly_transport - eoq_monthly_transport)
+        percent_savings = (savings / current_monthly_transport) * 100 if current_monthly_transport > 0 else 0
+        
+        return {
+            'savings': savings,
+            'percent_savings': percent_savings,
+            'current_monthly_orders': current_monthly_orders,
+            'eoq_monthly_orders': eoq_monthly_orders
+        }
+
+    def _create_forecast(self):
+        """Create simple forecast data"""
+        if self.df is None or self.df.empty:
+            return None
+        
+        # Simple moving average forecast
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        
+        try:
+            daily_demand = self.df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().fillna(0)
+            model = ExponentialSmoothing(daily_demand, seasonal_periods=7, trend='add', seasonal='add')
+            fit = model.fit()
+            forecast = fit.forecast(30)
+            
+            # Create forecast dataframe
+            last_date = daily_demand.index[-1]
+            future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=30)
+            
+            forecast_df = pd.DataFrame({
+                'ds': future_dates,
+                'yhat': forecast.values,
+                'yhat_lower': forecast.values * 0.8,
+                'yhat_upper': forecast.values * 1.2
+            })
+            
+            return forecast_df
+        except:
+            return None
+
+    def _create_charts(self, forecast_data, cost_savings, kpis, eoq):
+        """Create charts for the report"""
+        font_family = "Arial"
         fig_forecast, fig_cost_comp = None, None
         
-        if forecast_data is not None:
+        # Forecast chart
+        if forecast_data is not None and self.df is not None:
             fig_forecast = go.Figure()
             fig_forecast.add_trace(go.Scatter(
-                x=df['Date'], y=df['Order_Quantity_kg'], mode='lines', name='Historical Orders', line=dict(color='#1f77b4')
+                x=self.df['Date'], y=self.df['Order_Quantity_kg'], 
+                mode='lines', name='Historical Orders', 
+                line=dict(color='#1f77b4')
             ))
-            future_data = forecast_data[forecast_data['ds'] > df['Date'].max()]
-            fig_forecast.add_trace(go.Scatter(
-                x=future_data['ds'], y=future_data['yhat'], mode='lines', name='Forecast', line=dict(color='#ff7f0e', dash='dash')
-            ))
-            fig_forecast.add_trace(go.Scatter(
-                x=future_data['ds'], y=future_data['yhat_upper'], fill=None, mode='lines', line_color='rgba(0,0,0,0)', showlegend=False
-            ))
-            fig_forecast.add_trace(go.Scatter(
-                x=future_data['ds'], y=future_data['yhat_lower'], fill='tonexty', mode='lines', name='Confidence Interval', fillcolor='rgba(255,127,14,0.2)'
-            ))
-            fig_forecast.update_layout(title="30-Day Demand Forecast", template="plotly_white", font=dict(family=font_family))
+            
+            future_data = forecast_data[forecast_data['ds'] > self.df['Date'].max()]
+            if not future_data.empty:
+                fig_forecast.add_trace(go.Scatter(
+                    x=future_data['ds'], y=future_data['yhat'], 
+                    mode='lines', name='Forecast', 
+                    line=dict(color='#ff7f0e', dash='dash')
+                ))
+                fig_forecast.add_trace(go.Scatter(
+                    x=future_data['ds'], y=future_data['yhat_upper'], 
+                    fill=None, mode='lines', line_color='rgba(0,0,0,0)', 
+                    showlegend=False
+                ))
+                fig_forecast.add_trace(go.Scatter(
+                    x=future_data['ds'], y=future_data['yhat_lower'], 
+                    fill='tonexty', mode='lines', name='Confidence Interval', 
+                    fillcolor='rgba(255,127,14,0.2)'
+                ))
+            
+            fig_forecast.update_layout(
+                title="30-Day Demand Forecast", 
+                template="plotly_white", 
+                font=dict(family=font_family),
+                height=450
+            )
 
-        cost_comparison_df = pd.DataFrame({
-            'Cost Type': ['Ordering Cost', 'Holding Cost'],
-            'Current System': [
-                (kpis['current_monthly_volume'] / kpis['avg_order_size']) * self.analyzer.constants['transport_cost'],
-                (self.analyzer.constants['holding_rate'] * self.analyzer.constants['price_per_kg'] * kpis['avg_order_size'] / 2)
-            ],
-            'EOQ System': [
-                (kpis['current_monthly_volume'] / eoq) * self.analyzer.constants['transport_cost'],
-                (self.analyzer.constants['holding_rate'] * self.analyzer.constants['price_per_kg'] * eoq / 2)
-            ]
-        })
-        fig_cost_comp = px.bar(
-            cost_comparison_df, x='Cost Type', y=['Current System', 'EOQ System'],
-            title="Monthly Cost Comparison: Current vs. EOQ",
-            barmode='group', template="plotly_white",
-            labels={'value': 'Cost (KSh)', 'variable': 'System'},
-            color_discrete_map={'Current System': '#ff6b6b', 'EOQ System': '#4ecdc4'}
-        )
-        fig_cost_comp.update_layout(font=dict(family=font_family))
+        # Cost comparison chart
+        if kpis.get('avg_monthly_demand', 0) > 0 and eoq > 0:
+            current_orders = kpis.get('order_frequency', 0)
+            eoq_orders = kpis.get('avg_monthly_demand', 0) / eoq
+            
+            cost_comparison_df = pd.DataFrame({
+                'Cost Type': ['Ordering Cost', 'Holding Cost'],
+                'Current System': [
+                    current_orders * self.constants.transport_cost,
+                    (self.constants.holding_rate * self.constants.price_per_kg * kpis.get('avg_order_size', 0) / 2)
+                ],
+                'EOQ System': [
+                    eoq_orders * self.constants.transport_cost,
+                    (self.constants.holding_rate * self.constants.price_per_kg * eoq / 2)
+                ]
+            })
+            
+            fig_cost_comp = px.bar(
+                cost_comparison_df, x='Cost Type', y=['Current System', 'EOQ System'],
+                title="Monthly Cost Comparison: Current vs. EOQ",
+                barmode='group', template="plotly_white",
+                labels={'value': 'Cost (KSh)', 'variable': 'System'},
+                color_discrete_map={'Current System': '#ff6b6b', 'EOQ System': '#4ecdc4'}
+            )
+            fig_cost_comp.update_layout(font=dict(family=font_family), height=450)
         
         return fig_forecast, fig_cost_comp
 
     def _generate_recommendations(self, kpis, eoq, safety_stock, cost_savings):
-        return [
+        """Generate recommendations based on analysis"""
+        recommendations = [
             f"Adopt an EOQ-based ordering policy. Place orders for **{eoq:.0f} kg** at a time to minimize total inventory costs.",
             f"Establish a safety stock level of **{safety_stock:.0f} kg**. This buffer will protect against demand variability and prevent stockouts.",
-            f"Set a reorder point at **{eoq + safety_stock:.0f} kg**. A new order should be triggered automatically when inventory falls to this level.",
-            f"Negotiate with suppliers for better transport rates by highlighting a more predictable ordering schedule of **{kpis['current_monthly_volume'] / eoq:.1f} orders/month**.",
-            "Implement real-time inventory tracking to ensure accurate stock levels and timely reordering."
+            f"Set a reorder point at **{eoq + safety_stock:.0f} kg**. A new order should be triggered automatically when inventory falls to this level."
         ]
+        
+        if kpis.get('avg_monthly_demand', 0) > 0 and eoq > 0:
+            recommendations.append(
+                f"Negotiate with suppliers for better transport rates by highlighting a more predictable ordering schedule of "
+                f"**{kpis['avg_monthly_demand'] / eoq:.1f} orders/month**."
+            )
+        
+        recommendations.append(
+            "Implement real-time inventory tracking to ensure accurate stock levels and timely reordering."
+        )
+        
+        return recommendations
