@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 import numpy as np
 from scipy import stats
+import math
 
 # --- Constants (should match your main app) ---
 PRICE_PER_KG = 146.55
@@ -42,10 +43,9 @@ class PDFReport(FPDF):
         self.report_date = datetime.now().strftime("%B %d, %Y")
         
         # Use built-in fonts only (no external font files needed)
-        # This avoids the "Undefined font" error
         self.font_family = "Helvetica"
         
-        # Optional: Try to load custom fonts if they exist, but don't fail if they don't
+        # Optional: Try to load custom fonts if they exist
         font_paths = [
             Path("assets/fonts/NotoSans-Regular.ttf"),
             Path("../assets/fonts/NotoSans-Regular.ttf"),
@@ -133,23 +133,16 @@ class AdvancedReporting:
     def __init__(self, analyzer=None, df=None, constants=None):
         """
         Initialize with analyzer or direct parameters
-        
-        Args:
-            analyzer: Optional DryIceAnalyzer instance
-            df: Optional DataFrame
-            constants: Optional constants object with pricing and costs
         """
         self.analyzer = analyzer
         self.df = df
         
         # Helper function to convert dict to object
         def to_object(source):
-            """Convert dictionary or other source to object with attributes"""
             class ConstantsObj:
                 pass
             obj = ConstantsObj()
             
-            # Default values
             defaults = {
                 'price_per_kg': PRICE_PER_KG,
                 'transport_cost': TRANSPORT_COST,
@@ -159,7 +152,6 @@ class AdvancedReporting:
                 'service_level': SERVICE_LEVEL
             }
             
-            # Fill with source values
             if isinstance(source, dict):
                 for key in defaults.keys():
                     setattr(obj, key, source.get(key, defaults[key]))
@@ -175,7 +167,7 @@ class AdvancedReporting:
             
             return obj
         
-        # Set up constants - convert to object if needed
+        # Set up constants
         if constants is not None:
             self.constants = to_object(constants)
         elif analyzer is not None and hasattr(analyzer, 'constants'):
@@ -198,11 +190,44 @@ class AdvancedReporting:
             if self.df is None or self.df.empty:
                 raise ValueError("No data available for report generation")
             
-            # Calculate KPIs and metrics
+            # Calculate KPIs and metrics (matching main.py logic)
             kpis = self._calculate_kpis()
-            eoq = self._calculate_eoq(kpis)
-            safety_stock = self._calculate_safety_stock(kpis)
-            cost_savings = self._calculate_cost_savings(eoq, kpis)
+            
+            # CRITICAL FIX: Use ANNUAL demand for EOQ (matching industry standard)
+            monthly_demand = kpis.get('avg_monthly_demand', 0)
+            annual_demand = monthly_demand * 12
+            
+            # Calculate sublimation adjustment
+            avg_sublimation = sum(self.constants.sub_loss_range) / 2 / 100
+            sublimation_factor = 1 + avg_sublimation
+            adjusted_annual_demand = annual_demand * sublimation_factor
+            
+            # Calculate EOQ with ANNUAL demand (FIXED)
+            if (self.constants.holding_rate * self.constants.price_per_kg) > 0:
+                eoq = math.sqrt((2 * adjusted_annual_demand * self.constants.transport_cost) / 
+                               (self.constants.holding_rate * self.constants.price_per_kg))
+            else:
+                eoq = 300
+            
+            # Calculate safety stock (matching main.py logic)
+            z_score = stats.norm.ppf(self.constants.service_level)
+            demand_std = kpis.get('std_order_size', 100)
+            safety_stock = z_score * demand_std * math.sqrt(self.constants.lead_time_days) * sublimation_factor
+            safety_stock = max(50, safety_stock)
+            
+            # Calculate cost savings (matching main.py)
+            current_monthly_orders = kpis.get('order_frequency', 0)
+            eoq_monthly_orders = monthly_demand / eoq if eoq > 0 else 0
+            monthly_savings = max(0, (current_monthly_orders - eoq_monthly_orders) * self.constants.transport_cost)
+            
+            cost_savings = {
+                'savings': monthly_savings,
+                'percent_savings': (monthly_savings / (current_monthly_orders * self.constants.transport_cost)) * 100 if current_monthly_orders > 0 else 0,
+                'current_monthly_orders': current_monthly_orders,
+                'eoq_monthly_orders': eoq_monthly_orders
+            }
+            
+            # Create forecast data
             forecast_data = self._create_forecast()
             
             # Create charts
@@ -253,8 +278,7 @@ class AdvancedReporting:
                 pdf.add_plotly_chart(fig_forecast, "demand_forecast")
                 forecast_summary = (
                     "The 30-day demand forecast predicts fluctuating but consistent usage. "
-                    "The shaded area represents the 95% confidence interval, indicating the likely range of future demand. "
-                    "This forecast is crucial for planning orders and avoiding stockouts."
+                    "The shaded area represents the 95% confidence interval, indicating the likely range of future demand."
                 )
                 pdf.chapter_body(forecast_summary)
             else:
@@ -265,7 +289,7 @@ class AdvancedReporting:
             if fig_cost_comp:
                 pdf.add_plotly_chart(fig_cost_comp, "cost_comparison")
                 cost_summary = (
-                    "The chart above clearly illustrates the cost benefits of switching to an EOQ-based system. "
+                    "The chart above illustrates the cost benefits of switching to an EOQ-based system. "
                     "While holding costs increase slightly due to larger average inventory, the reduction in ordering "
                     "costs is substantial, leading to significant overall savings."
                 )
@@ -287,7 +311,7 @@ class AdvancedReporting:
             raise e
 
     def _calculate_kpis(self):
-        """Calculate KPIs from DataFrame"""
+        """Calculate KPIs from DataFrame - matches main.py logic"""
         if self.df is None or self.df.empty:
             return {
                 'total_orders': 0,
@@ -295,13 +319,13 @@ class AdvancedReporting:
                 'avg_order_size': 0,
                 'std_order_size': 0,
                 'avg_monthly_demand': 0,
-                'order_frequency': 0
+                'order_frequency': 0,
+                'current_monthly_volume': 0,
+                'total_orders': 0
             }
         
-        # Ensure Date is datetime
         self.df['Date'] = pd.to_datetime(self.df['Date'])
         
-        # Calculate KPIs
         total_orders = len(self.df)
         total_volume = self.df['Order_Quantity_kg'].sum()
         avg_order_size = self.df['Order_Quantity_kg'].mean()
@@ -312,8 +336,8 @@ class AdvancedReporting:
         avg_monthly_demand = df_monthly.mean() if len(df_monthly) > 0 else total_volume / max(1, len(self.df) / 4)
         
         # Calculate order frequency (orders per month)
-        months_span = (self.df['Date'].max() - self.df['Date'].min()).days / 30.44
-        order_frequency = total_orders / max(1, months_span)
+        months_span = max(1, (self.df['Date'].max() - self.df['Date'].min()).days / 30.44)
+        order_frequency = total_orders / months_span
         
         return {
             'total_orders': total_orders,
@@ -321,47 +345,8 @@ class AdvancedReporting:
             'avg_order_size': avg_order_size,
             'std_order_size': std_order_size,
             'avg_monthly_demand': avg_monthly_demand,
-            'order_frequency': order_frequency
-        }
-
-    def _calculate_eoq(self, kpis):
-        """Calculate Economic Order Quantity"""
-        D = kpis.get('avg_monthly_demand', 0)
-        S = self.constants.transport_cost
-        H = self.constants.holding_rate * self.constants.price_per_kg
-        
-        if H <= 0 or D <= 0:
-            return 300  # Default fallback
-        
-        eoq = np.sqrt((2 * D * S) / H)
-        return eoq
-
-    def _calculate_safety_stock(self, kpis):
-        """Calculate safety stock"""
-        z_score = stats.norm.ppf(self.constants.service_level)
-        demand_std = kpis.get('std_order_size', 100)
-        lead_time = self.constants.lead_time_days
-        avg_sublimation = sum(self.constants.sub_loss_range) / 2 / 100
-        
-        safety_stock = z_score * demand_std * np.sqrt(lead_time) * (1 + avg_sublimation)
-        return max(50, safety_stock)  # Minimum 50kg safety stock
-
-    def _calculate_cost_savings(self, eoq, kpis):
-        """Calculate cost savings from EOQ implementation"""
-        current_monthly_orders = kpis.get('order_frequency', 0)
-        eoq_monthly_orders = kpis.get('avg_monthly_demand', 0) / max(1, eoq)
-        
-        current_monthly_transport = current_monthly_orders * self.constants.transport_cost
-        eoq_monthly_transport = eoq_monthly_orders * self.constants.transport_cost
-        
-        savings = max(0, current_monthly_transport - eoq_monthly_transport)
-        percent_savings = (savings / current_monthly_transport) * 100 if current_monthly_transport > 0 else 0
-        
-        return {
-            'savings': savings,
-            'percent_savings': percent_savings,
-            'current_monthly_orders': current_monthly_orders,
-            'eoq_monthly_orders': eoq_monthly_orders
+            'order_frequency': order_frequency,
+            'current_monthly_volume': avg_monthly_demand
         }
 
     def _create_forecast(self):
@@ -369,16 +354,14 @@ class AdvancedReporting:
         if self.df is None or self.df.empty:
             return None
         
-        # Simple moving average forecast
-        from statsmodels.tsa.holtwinters import ExponentialSmoothing
-        
         try:
+            from statsmodels.tsa.holtwinters import ExponentialSmoothing
+            
             daily_demand = self.df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().fillna(0)
             model = ExponentialSmoothing(daily_demand, seasonal_periods=7, trend='add', seasonal='add')
             fit = model.fit()
             forecast = fit.forecast(30)
             
-            # Create forecast dataframe
             last_date = daily_demand.index[-1]
             future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=30)
             
@@ -398,7 +381,6 @@ class AdvancedReporting:
         font_family = "Arial"
         fig_forecast, fig_cost_comp = None, None
         
-        # Forecast chart
         if forecast_data is not None and self.df is not None:
             fig_forecast = go.Figure()
             fig_forecast.add_trace(go.Scatter(
@@ -432,7 +414,6 @@ class AdvancedReporting:
                 height=450
             )
 
-        # Cost comparison chart
         if kpis.get('avg_monthly_demand', 0) > 0 and eoq > 0:
             current_orders = kpis.get('order_frequency', 0)
             eoq_orders = kpis.get('avg_monthly_demand', 0) / eoq
