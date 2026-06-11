@@ -405,6 +405,22 @@ def seed_historical_data():
     """
     conn = sqlite3.connect('dry_ice.db')
     c = conn.cursor()
+    
+    # Check if the historical_orders table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='historical_orders'")
+    table_exists = c.fetchone()
+    
+    if not table_exists:
+        print("historical_orders table doesn't exist yet. Creating it...")
+        # Create the table if it doesn't exist
+        c.execute('''CREATE TABLE IF NOT EXISTS historical_orders
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      date TEXT NOT NULL,
+                      order_quantity REAL NOT NULL,
+                      analysis_period TEXT)''')
+        conn.commit()
+        conn.close()
+        return
 
     # --- Part 1: Seed data only if the table is completely empty ---
     c.execute('''SELECT COUNT(*) FROM historical_orders''')
@@ -489,7 +505,7 @@ def seed_historical_data():
         print("Database update complete.")
 
     conn.close()
-
+    
 def get_period_from_date(order_date):
     """
     Determines the correct financial period string (e.g., '2025/2026')
