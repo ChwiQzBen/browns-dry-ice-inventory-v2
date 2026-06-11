@@ -1,4 +1,3 @@
-
 from fpdf import FPDF
 from datetime import datetime
 import pandas as pd
@@ -42,31 +41,31 @@ class PDFReport(FPDF):
         super().__init__(*args, **kwargs)
         self.report_date = datetime.now().strftime("%B %d, %Y")
         
-        # Fixed font path - look in current directory and parent directories
+        # Use built-in fonts only (no external font files needed)
+        # This avoids the "Undefined font" error
+        self.font_family = "Helvetica"
+        
+        # Optional: Try to load custom fonts if they exist, but don't fail if they don't
         font_paths = [
             Path("assets/fonts/NotoSans-Regular.ttf"),
             Path("../assets/fonts/NotoSans-Regular.ttf"),
             Path("../../assets/fonts/NotoSans-Regular.ttf"),
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),  # Linux fallback
         ]
         
-        font_loaded = False
         for font_path in font_paths:
             if font_path.exists():
                 try:
                     self.add_font("Noto", "", str(font_path))
-                    # Try to load bold version
                     bold_path = font_path.parent / "NotoSans-Bold.ttf"
                     if bold_path.exists():
                         self.add_font("Noto", "B", str(bold_path))
+                    italic_path = font_path.parent / "NotoSans-Italic.ttf"
+                    if italic_path.exists():
+                        self.add_font("Noto", "I", str(italic_path))
                     self.font_family = "Noto"
-                    font_loaded = True
                     break
                 except:
                     continue
-        
-        if not font_loaded:
-            self.font_family = "Helvetica"  # FPDF default
 
     def header(self):
         self.set_font(self.font_family, 'B', 12)
