@@ -1251,7 +1251,20 @@ def main():
             date=receipt_date,
             period=correct_period  # Use the derived period, not the one from the sidebar
         )
-        # Mobile Quick Order Entry (only show on mobile devices)
+        # 3. Provide clear feedback to the user about what happened.
+        st.sidebar.success(
+            f"Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
+            f"It has been automatically assigned to the {correct_period} period."
+        )
+
+        # 4. (Optional but highly recommended UX improvement)
+        # If the order belongs to a different period, switch the dashboard view to that period.
+        if st.session_state.selected_period != correct_period:
+            st.session_state.selected_period = correct_period
+            st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
+        st.rerun()
+        
+    # Mobile Quick Order Entry (only show on mobile devices)
     if mobile_ui.is_mobile_device():
         st.sidebar.markdown("---")
         quick_order = mobile_ui.quick_order_entry()
@@ -1291,19 +1304,7 @@ def main():
                 
                 # Rerun to refresh the UI
                 st.rerun()
-
-        # 3. Provide clear feedback to the user about what happened.
-        st.sidebar.success(
-            f"Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
-            f"It has been automatically assigned to the {correct_period} period."
-        )
-
-        # 4. (Optional but highly recommended UX improvement)
-        # If the order belongs to a different period, switch the dashboard view to that period.
-        if st.session_state.selected_period != correct_period:
-            st.session_state.selected_period = correct_period
-            st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
-
+            
     # Enhanced Stock Status Display
     stock_status = inventory_tracker.get_stock_status()
     st.sidebar.markdown(
