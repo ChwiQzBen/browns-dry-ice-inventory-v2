@@ -1234,12 +1234,11 @@ def main():
             st.sidebar.success(f"Usage of {usage} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
         st.rerun()
 
-    # Record Receipt
+        # Record Receipt
     receipt_date = st.sidebar.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
     new_stock = st.sidebar.number_input("New Stock Received (kg)", min_value=0, value=0, step=50)
 
     if st.sidebar.button("Record Receipt"):
-        
         correct_period = get_period_from_date(receipt_date)
 
         inventory_tracker.current_stock += new_stock
@@ -1249,14 +1248,20 @@ def main():
             quantity=new_stock,
             description="Stock Receipt",
             date=receipt_date,
-            period=correct_period  # Use the derived period, not the one from the sidebar
+            period=correct_period
         )
+<<<<<<< HEAD
         # 3. Provide clear feedback to the user about what happened.
+=======
+        
+        # Provide clear feedback
+>>>>>>> 8b1bbf8f42a9a75aaa72356fd8967c2c2d3b423e
         st.sidebar.success(
             f"Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
             f"It has been automatically assigned to the {correct_period} period."
         )
 
+<<<<<<< HEAD
         # 4. (Optional but highly recommended UX improvement)
         # If the order belongs to a different period, switch the dashboard view to that period.
         if st.session_state.selected_period != correct_period:
@@ -1265,21 +1270,27 @@ def main():
         st.rerun()
         
     # Mobile Quick Order Entry (only show on mobile devices)
+=======
+        # If the order belongs to a different period, switch the dashboard view
+        if st.session_state.selected_period != correct_period:
+            st.session_state.selected_period = correct_period
+            st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
+        
+        st.rerun()
+
+    # Mobile Quick Order Entry (only show on mobile devices) - NOW CORRECTLY OUTSIDE THE BUTTON
+>>>>>>> 8b1bbf8f42a9a75aaa72356fd8967c2c2d3b423e
     if mobile_ui.is_mobile_device():
         st.sidebar.markdown("---")
         quick_order = mobile_ui.quick_order_entry()
         
         if quick_order:
-            # Process the quick order
             with st.spinner("Processing your order..."):
-                # Add to database as a receipt
                 correct_period = get_period_from_date(quick_order['delivery_date'])
                 
-                # Update inventory
                 inventory_tracker.current_stock += quick_order['quantity']
                 update_current_stock_in_db(inventory_tracker.current_stock, quick_order['delivery_date'])
                 
-                # Add to transaction history
                 add_transaction_to_history(
                     transaction_type="receipt",
                     quantity=quick_order['quantity'],
@@ -1288,7 +1299,6 @@ def main():
                     period=correct_period
                 )
                 
-                # Show success message
                 st.sidebar.success(f"""
                 ✅ **Order Placed Successfully!**
                 
@@ -1297,12 +1307,10 @@ def main():
                 Delivery: {quick_order['delivery_date'].strftime('%Y-%m-%d')}
                 """)
                 
-                # Optional: Add to session state for tracking
                 if 'quick_orders' not in st.session_state:
                     st.session_state.quick_orders = []
                 st.session_state.quick_orders.append(quick_order)
                 
-                # Rerun to refresh the UI
                 st.rerun()
             
     # Enhanced Stock Status Display
