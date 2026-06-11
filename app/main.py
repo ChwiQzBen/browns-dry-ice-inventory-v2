@@ -1251,6 +1251,46 @@ def main():
             date=receipt_date,
             period=correct_period  # Use the derived period, not the one from the sidebar
         )
+        # Mobile Quick Order Entry (only show on mobile devices)
+    if mobile_ui.is_mobile_device():
+        st.sidebar.markdown("---")
+        quick_order = mobile_ui.quick_order_entry()
+        
+        if quick_order:
+            # Process the quick order
+            with st.spinner("Processing your order..."):
+                # Add to database as a receipt
+                correct_period = get_period_from_date(quick_order['delivery_date'])
+                
+                # Update inventory
+                inventory_tracker.current_stock += quick_order['quantity']
+                update_current_stock_in_db(inventory_tracker.current_stock, quick_order['delivery_date'])
+                
+                # Add to transaction history
+                add_transaction_to_history(
+                    transaction_type="receipt",
+                    quantity=quick_order['quantity'],
+                    description=f"Quick Order: {quick_order['product']} - {quick_order['notes'] if quick_order['notes'] else 'No notes'}",
+                    date=quick_order['delivery_date'],
+                    period=correct_period
+                )
+                
+                # Show success message
+                st.sidebar.success(f"""
+                ✅ **Order Placed Successfully!**
+                
+                Product: {quick_order['product']}
+                Quantity: {quick_order['quantity']} kg
+                Delivery: {quick_order['delivery_date'].strftime('%Y-%m-%d')}
+                """)
+                
+                # Optional: Add to session state for tracking
+                if 'quick_orders' not in st.session_state:
+                    st.session_state.quick_orders = []
+                st.session_state.quick_orders.append(quick_order)
+                
+                # Rerun to refresh the UI
+                st.rerun()
 
         # 3. Provide clear feedback to the user about what happened.
         st.sidebar.success(
