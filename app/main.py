@@ -595,21 +595,20 @@ def get_historical_orders_from_db(period):
                     .execute()
                 
                 if response.data:
-                    df = pd.DataFrame(response.data, columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
+                    # FIX: Convert list of dicts to DataFrame correctly
+                    df = pd.DataFrame(response.data)
+                    df = df.rename(columns={
+                        'date': 'Date',
+                        'order_quantity': 'Order_Quantity_kg'
+                    })
                     
-                    # Handle date conversion
-                    original_dates = df['Date'].copy()
+                    # Convert date strings to datetime
                     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                     
+                    # Check for invalid dates
                     invalid_rows_mask = df['Date'].isnull()
-                    
                     if invalid_rows_mask.any():
-                        bad_data_df = pd.DataFrame({
-                            'Problematic_Date_String': original_dates[invalid_rows_mask],
-                            'Order_Quantity_kg': df.loc[invalid_rows_mask, 'Order_Quantity_kg'],
-                            'Analysis_Period': df.loc[invalid_rows_mask, 'analysis_period']
-                        })
-                        
+                        bad_data_df = df[invalid_rows_mask].copy()
                         st.warning(
                             f"⚠️ Found and ignored {len(bad_data_df)} row(s) with an invalid date format.",
                             icon="❗"
@@ -617,7 +616,7 @@ def get_historical_orders_from_db(period):
                         with st.expander("Click here to see the problematic row(s)"):
                             st.dataframe(bad_data_df, use_container_width=True)
                         
-                        df.dropna(subset=['Date'], inplace=True)
+                        df = df[~invalid_rows_mask].copy()
                     
                     return df
             except Exception as e:
