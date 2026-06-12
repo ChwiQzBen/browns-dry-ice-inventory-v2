@@ -1438,29 +1438,29 @@ def main():
     st.markdown("### 📈 Key Performance Indicators")
 
     # --- ROW 1 ---
-    cols1 = st.columns(4)
-    with cols1[0]:
-        st.metric("Total Orders", f"{kpis.get('total_orders', 0):,}")
-    with cols1[1]:
-        st.metric("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg")
-    with cols1[2]:
-        st.metric("Annual Spending", f"KSh {total_annual_spending:,.0f}")
-    with cols1[3]:
+    #cols1 = st.columns(4)
+    #with cols1[0]:
+    #    st.metric("Total Orders", f"{kpis.get('total_orders', 0):,}")
+    #with cols1[1]:
+    #    st.metric("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg")
+    #with cols1[2]:
+    #    st.metric("Annual Spending", f"KSh {total_annual_spending:,.0f}")
+    #with cols1[3]:
         # THIS METRIC IS NOW CONSISTENT
-        st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}")
+    #    st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}")
 
     # --- ROW 2 ---
-    cols2 = st.columns(4)
-    with cols2[0]:
-        st.metric("Safety Stock", f"{safety_stock:,.1f} kg")
-    with cols2[1]:
-        st.metric("Economic EOQ", f"{eoq:,.1f} kg")
-    with cols2[2]:
-        st.metric("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%")
-    with cols2[3]:
-        monthly_savings = annual_transport_savings / 12
-        monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
-        percent_savings = (monthly_savings / monthly_transport_cost) * 100 if monthly_transport_cost > 0 else 0
+    #cols2 = st.columns(4)
+    #with cols2[0]:
+    #    st.metric("Safety Stock", f"{safety_stock:,.1f} kg")
+    #with cols2[1]:
+    #    st.metric("Economic EOQ", f"{eoq:,.1f} kg")
+    #with cols2[2]:
+    #    st.metric("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%")
+    #with cols2[3]:
+    monthly_savings = annual_transport_savings / 12
+    monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
+    percent_savings = (monthly_savings / monthly_transport_cost) * 100 if monthly_transport_cost > 0 else 0
 
     metrics_list = [
         ("Total Orders", f"{kpis.get('total_orders', 0):,}", None),
