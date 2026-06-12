@@ -1239,6 +1239,7 @@ def main():
     # Initialize SmartAlerts after inventory_tracker is created
     alerts_system = SmartAlerts(inventory_tracker)
     mobile_ui.optimize_for_mobile()
+    mobile_ui.show_mobile_welcome()
 
     # Header
     start_date_str = display_start_date.strftime('%B %d, %Y') # e.g., July 01, 2025
@@ -1460,14 +1461,30 @@ def main():
         monthly_savings = annual_transport_savings / 12
         monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
         percent_savings = (monthly_savings / monthly_transport_cost) * 100 if monthly_transport_cost > 0 else 0
-        st.metric("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%")
+
+    metrics_list = [
+        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None),
+        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None),
+        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None),
+        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None),
+        ("Safety Stock", f"{safety_stock:,.1f} kg", None),
+        ("Economic EOQ", f"{eoq:,.1f} kg", None),
+        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None),
+        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%"),
+    ]
+    mobile_ui.get_responsive_metric_display(metrics_list)
 
     # Display Alerts
+    mobile_ui.show_stock_alerts(
+        current_stock=inventory_tracker.current_stock,
+        reorder_point=reorder_point,
+        safety_stock=safety_stock
+    )
     alerts = alerts_system.check_conditions(
         current_demand=usage,
         avg_demand=kpis.get('avg_order_size', 0),
         std_demand=kpis.get('std_order_size', 0),
-        current_cost=analyzer.constants['transport_cost'] * 1.15,
+        current_cost=analyzer.constants['transport_cost'],
         avg_cost=analyzer.constants['transport_cost']
     )
     if alerts:
@@ -1495,12 +1512,16 @@ def main():
             Order Pattern & Cost Analysis
             </h2>
             """, unsafe_allow_html=True)
-            with st.expander("Visual Analysis", expanded=True):
+            with st.expander("Visual Analysis", expanded=not mobile_ui.should_collapse_advanced()):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.plotly_chart(fig_orders, use_container_width=True)
+                    fig_orders = mobile_ui.optimize_chart_for_mobile(fig_orders)
+                    st.plotly_chart(fig_orders, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
                 with col2:
-                    st.plotly_chart(fig_cost, use_container_width=True)
+                    fig_cost = mobile_ui.optimize_chart_for_mobile(fig_cost)
+                    st.plotly_chart(fig_cost, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
 
             st.markdown("""
             <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-top: 30px;'>
@@ -1588,7 +1609,9 @@ def main():
             if not fig_ensemble:
                 st.warning("Unable to generate forecast. Please check data quality or model configurations.")
             else:
-                st.plotly_chart(fig_ensemble, use_container_width=True)
+                fig_ensemble = mobile_ui.optimize_chart_for_mobile(fig_ensemble)
+                st.plotly_chart(fig_ensemble, use_container_width=True,
+                    config=mobile_ui.get_mobile_chart_config())
 
             # --- Core Forecast Metrics ---
             adjusted_total_demand = total_forecasted_demand * sublimation_factor
@@ -1646,7 +1669,7 @@ def main():
                 st.write("There is a 10% chance demand will exceed this level. Use this for setting safety stock and risk buffers.")
 
             # --- Individual Model Breakdown ---
-            with st.expander("🔬 View Individual Model Performance"):
+            with st.expander("🔬 View Individual Model Performance", expanded=not mobile_ui.should_collapse_advanced()):
                 st.markdown("The final forecast is a weighted average of these underlying models.")
                 model_cols = st.columns(len(model_forecasts))
                 for i, (model_name, daily_avg) in enumerate(model_forecasts.items()):
@@ -1670,9 +1693,9 @@ def main():
 
             with col1:
                 st.markdown("#### Economic Order Quantity (EOQ)")
-                st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times D \times S}{H \times C}}')
-                st.latex(r'D_{\text{adj}} = %.1f \times %.4f = %.1f' % (monthly_demand_input, sublimation_factor, adjusted_demand))
-                st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times %.1f \times %.2f}{%.2f \times %.2f}} = %.1f \text{ kg}' % (adjusted_demand, constants.TRANSPORT_COST, constants.HOLDING_RATE, constants.PRICE_PER_KG, eoq))
+            #    st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times D \times S}{H \times C}}')
+            #    st.latex(r'D_{\text{adj}} = %.1f \times %.4f = %.1f' % (monthly_demand_input, sublimation_factor, adjusted_demand))
+            #    st.latex(r'\text{EOQ} = \sqrt{\frac{2 \times %.1f \times %.2f}{%.2f \times %.2f}} = %.1f \text{ kg}' % (adjusted_demand, constants.TRANSPORT_COST, constants.HOLDING_RATE, constants.PRICE_PER_KG, eoq))
 
                 st.markdown("**Where:**")
                 st.markdown(f"<span style='color:green;'>- D = Forecasted Monthly Demand = {monthly_demand_input:,.1f} kg</span>", unsafe_allow_html=True)
@@ -1683,8 +1706,8 @@ def main():
 
             with col2:
                 st.markdown("#### Safety Stock")
-                st.latex(r'\text{SS} = z \cdot \sigma_{\text{demand}} \cdot \sqrt{LT} \cdot (1 + \text{sublimation})')
-                st.latex(r'= %.2f \times %.1f \times \sqrt{%d} \times %.4f = %.1f \text{ kg}' % (z_score, demand_stddev_input, constants.LEAD_TIME_DAYS, sublimation_factor, safety_stock))
+            #    st.latex(r'\text{SS} = z \cdot \sigma_{\text{demand}} \cdot \sqrt{LT} \cdot (1 + \text{sublimation})')
+            #    st.latex(r'= %.2f \times %.1f \times \sqrt{%d} \times %.4f = %.1f \text{ kg}' % (z_score, demand_stddev_input, constants.LEAD_TIME_DAYS, sublimation_factor, safety_stock))
 
                 st.markdown("**Where:**")
                 st.write(f"- z = Z-score ({constants.SERVICE_LEVEL*100:.0f}%) = {z_score:.2f}")
@@ -1699,7 +1722,7 @@ def main():
 
             st.markdown("### 📊 Recommended Inventory Policy")
             policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
-            st.dataframe(policy_data.style.format({'Value (kg)': '{:.1f}'}), use_container_width=True, )
+            mobile_ui.display_mobile_table(policy_data, max_height=200)
 
             st.markdown("### 🎯 EOQ Implementation Impact")
             # The savings are now calculated in the main block. We just display them here.
@@ -1741,8 +1764,10 @@ def main():
             fig_savings = go.Figure()
             fig_savings.add_trace(go.Scatter(x=years, y=cumulative_savings, name="Cumulative Savings", line=dict(color='#3498db', width=3), mode='lines+markers'))
             fig_savings.add_hline(y=implementation_cost, line_dash="dot", annotation_text="Implementation Cost", line_color="red")
-            fig_savings.update_layout(title="Projected Savings from Adopting Forecast-Driven EOQ", xaxis_title="Year", yaxis_title="Cumulative Savings (KSh)", height=400)
-            st.plotly_chart(fig_savings, use_container_width=True)
+            fig_savings.update_layout(title="Projected Savings from Adopting Forecast-Driven EOQ", xaxis_title="Year", yaxis_title="Cumulative Savings (KSh)", height=mobile_ui.get_chart_height())
+            fig_savings = mobile_ui.optimize_chart_for_mobile(fig_savings)
+            st.plotly_chart(fig_savings, use_container_width=True,
+                config=mobile_ui.get_mobile_chart_config())
         else:
             st.warning("📦 Cannot calculate inventory policy without historical data for this period.")
             st.info("Please record some receipts to build up an order history for inventory optimization.")
@@ -1819,9 +1844,10 @@ def main():
             ), row=1, col=2)
 
             fig.update_layout(height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig, use_container_width=True)
-           
-            # 3. Monthly Charts
+            fig = mobile_ui.optimize_chart_for_mobile(fig)
+            st.plotly_chart(fig, use_container_width=True,
+                config=mobile_ui.get_mobile_chart_config())
+
             st.markdown("#### 📈 Monthly Cost Trends (KSh)")
             
             df_monthly = df.copy()
@@ -1869,14 +1895,18 @@ def main():
                 legend_title="Cost Type"
             )
 
-            st.plotly_chart(fig_monthly_cost, use_container_width=True)
+            fig_monthly_cost = mobile_ui.optimize_chart_for_mobile(fig_monthly_cost)
+            st.plotly_chart(fig_monthly_cost, use_container_width=True,
+                config=mobile_ui.get_mobile_chart_config())
 
             st.markdown("#### 📊 Monthly Physical Quantities (kg)")
             fig_monthly_volume = px.bar(
                 monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
                 title="Monthly Dry Ice Quantities (kg)", labels={'value': 'Quantity (kg)', 'variable': 'Quantity Type'}
             )
-            st.plotly_chart(fig_monthly_volume, use_container_width=True)
+            fig_monthly_volume = mobile_ui.optimize_chart_for_mobile(fig_monthly_volume)
+            st.plotly_chart(fig_monthly_volume, use_container_width=True,
+                config=mobile_ui.get_mobile_chart_config())
 
             # 4. Savings Summary (5-COLUMN LAYOUT)
             st.markdown("### 💰 Savings Summary")
@@ -2060,13 +2090,15 @@ def main():
             name='Milestones'
         ))
         fig.update_layout(
-            height=350,
+            height=mobile_ui.get_chart_height(),
             showlegend=False,
             yaxis=dict(showticklabels=False, title=None),
             xaxis=dict(title='Implementation Quarters'),
             plot_bgcolor='rgba(0,0,0,0)'
         )
-        st.plotly_chart(fig, use_container_width=True)
+        fig = mobile_ui.optimize_chart_for_mobile(fig)
+        st.plotly_chart(fig, use_container_width=True,
+            config=mobile_ui.get_mobile_chart_config())
 
         # Roadmap dataframe with original content
         roadmap_data = {
@@ -2275,7 +2307,9 @@ def main():
             title="Monthly Maintenance Costs (KSh)",
             color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'}
         )
-        st.plotly_chart(fig_cost, use_container_width=True)
+        fig_cost = mobile_ui.optimize_chart_for_mobile(fig_cost)
+        st.plotly_chart(fig_cost, use_container_width=True,
+            config=mobile_ui.get_mobile_chart_config())
 
         # ROI calculator
         st.markdown("#### 📈 Maintenance ROI")
@@ -2299,6 +2333,19 @@ def main():
     with tab7:
         st.markdown("## 📜 Inventory Transaction History")
 
+        # --- IMPORT BUTTON (ALWAYS VISIBLE - MOVED OUTSIDE THE IF/ELSE) ---
+        #st.markdown("### ☁️ Sync to Cloud")
+        #col_import, col_import2 = st.columns([1, 3])
+        # with col_import:
+        #    if st.button("📤 Import Local CSV to Supabase", type="primary", key="import_to_supabase"):
+        #        with st.spinner("Importing transactions to Supabase..."):
+        #            import_csv_to_supabase()
+        #            st.rerun()
+        #with col_import2:
+        #    st.caption("Imports transactions from 'transactions_export.csv' to Supabase cloud database")
+        
+        #st.divider()
+
         # --- SECTION 1: PERIOD-SPECIFIC TRANSACTION HISTORY ---
         if not st.session_state.transactions:
             st.info("No transactions recorded for this period yet. Use the sidebar to record usage or receipts.")
@@ -2307,7 +2354,7 @@ def main():
             trans_df['date'] = pd.to_datetime(trans_df['date'])
             trans_df = trans_df.sort_values('date', ascending=False)
             
-            st.markdown("### 🔍 Filter Transactions")
+            #    st.markdown("### 🔍 Filter Transactions")
             filter_col1, filter_col2, filter_col3 = st.columns(3)
             with filter_col1:
                 transaction_type = st.selectbox("Transaction Type", ["All", "usage", "receipt"], key="trans_type_filter")
@@ -2327,12 +2374,15 @@ def main():
             if show_limit != "All":
                 filtered_df = filtered_df.head(int(show_limit))
 
-            st.markdown("### 📋 Transaction Records")
-            display_df = filtered_df.copy()
-            display_df['Date'] = display_df['date'].dt.strftime('%Y-%m-%d %H:%M')
-            display_df['Type'] = display_df['type'].str.title()
-            display_df['Quantity (kg)'] = display_df['quantity'].apply(lambda x: f"{x:,.2f}")
-            st.dataframe(display_df[['Date', 'Type', 'Quantity (kg)', 'description']], use_container_width=True,)
+            with st.expander("📋 View Transaction Records", expanded=not mobile_ui.should_collapse_advanced()):
+                display_df = filtered_df.copy()
+                display_df['Date'] = display_df['date'].dt.strftime('%Y-%m-%d %H:%M')
+                display_df['Type'] = display_df['type'].str.title()
+                display_df['Quantity (kg)'] = display_df['quantity'].apply(lambda x: f"{x:,.2f}")
+                mobile_ui.display_mobile_table(
+                    display_df[['Date', 'Type', 'Quantity (kg)', 'description']],
+                    max_height=400
+                )
             
             st.markdown("### 📈 Transaction Summary (Filtered Period)")
             total_used = filtered_df[filtered_df['type']=='usage']['quantity'].sum()
@@ -2345,7 +2395,7 @@ def main():
             stat_col3.metric("Net Change", f"{net_change:,.1f} kg", delta=f"{net_change:,.1f} kg")
             stat_col4.metric("Total Transactions", len(filtered_df))
 
-            # --- NEW: EXPORT DATA SECTION ---
+            # --- EXPORT DATA SECTION ---
             st.markdown("### 📥 Export Filtered Data")
             if not filtered_df.empty:
                 csv = filtered_df.to_csv(index=False).encode('utf-8')
@@ -2358,60 +2408,48 @@ def main():
             else:
                 st.caption("No data in the current filter to export.")
 
-            # --- ADD THIS NEW SECTION RIGHT HERE ---
-            st.markdown("### ☁️ Sync to Cloud")
-            col_import, col_import2 = st.columns([1, 3])
-            with col_import:
-                if st.button("📤 Import Local CSV to Supabase", type="primary", key="import_to_supabase"):
-                    with st.spinner("Importing transactions to Supabase..."):
-                        import_csv_to_supabase()
-                        st.rerun()
-            with col_import2:
-                st.caption("Imports transactions from 'transactions_export.csv' to Supabase cloud database")
-
-
         # --- DIVIDER TO SEPARATE SECTIONS ---
-        st.divider()
+        #st.divider()
 
         # --- SECTION 2: GLOBAL STATUS & HELP ---
         st.markdown("### 📊 Current Status")
         
         st.metric("Current Stock Level", f"{inventory_tracker.current_stock:,.1f} kg")
 
-        with st.expander("ℹ️ How to Use This Page"):
-            st.markdown("""
-            1.  **Record Usage:** Use the sidebar to log daily consumption.
-            2.  **Record Receipt:** Use the sidebar when new stock arrives.
-            3.  **View Transactions:** All transactions will appear here automatically.
-            4.  **Filter Data:** Use the filters above to narrow down results.
-            5.  **Export Data:** Download buttons appear when transaction data exists.
-            """)
+        #with st.expander("ℹ️ How to Use This Page"):
+        #    st.markdown("""
+        #    1.  **Record Usage:** Use the sidebar to log daily consumption.
+        #    2.  **Record Receipt:** Use the sidebar when new stock arrives.
+        #    3.  **View Transactions:** All transactions will appear here automatically.
+        #    4.  **Filter Data:** Use the filters above to narrow down results.
+        #    5.  **Export Data:** Download buttons appear when transaction data exists.
+        #    """)
 
         # --- SECTION 3: DATA MANAGEMENT ---
-        st.divider()
-        st.markdown("### ⚠️ Data Management")
-        st.warning("This action will permanently delete ALL transaction and order data for ALL periods. Use with caution.")
+        # st.divider()
+        #st.markdown("### ⚠️ Data Management")
+        #st.warning("This action will permanently delete ALL transaction and order data for ALL periods. Use with caution.")
         
-        if 'confirm_clear_pressed' not in st.session_state:
-            st.session_state.confirm_clear_pressed = False
+        #if 'confirm_clear_pressed' not in st.session_state:
+        #     st.session_state.confirm_clear_pressed = False
 
-        if st.button("Clear All Transactions and Orders", type="secondary"):
-            st.session_state.confirm_clear_pressed = True
+        #if st.button("Clear All Transactions and Orders", type="secondary"):
+        #    st.session_state.confirm_clear_pressed = True
 
-        if st.session_state.confirm_clear_pressed:
-            st.error("Are you sure? This cannot be undone.")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("CONFIRM PERMANENT DELETION", type="primary"):
-                    clear_transactions_from_db()
-                    st.session_state.transactions = []
-                    st.session_state.confirm_clear_pressed = False
-                    st.success("All transaction and order data has been permanently cleared!")
-                    st.rerun()
-            with col2:
-                if st.button("Cancel"):
-                    st.session_state.confirm_clear_pressed = False
-                    st.rerun()
+        #if st.session_state.confirm_clear_pressed:
+        #    st.error("Are you sure? This cannot be undone.")
+        #    col1, col2 = st.columns(2)
+        #    with col1:
+        #        if st.button("CONFIRM PERMANENT DELETION", type="primary"):
+        #            clear_transactions_from_db()
+        #            st.session_state.transactions = []
+        #            st.session_state.confirm_clear_pressed = False
+        #            st.success("All transaction and order data has been permanently cleared!")
+        #            st.rerun()
+        #    with col2:
+        #        if st.button("Cancel"):
+        #            st.session_state.confirm_clear_pressed = False
+        #            st.rerun()
 
 if __name__ == "__main__":
     main()
