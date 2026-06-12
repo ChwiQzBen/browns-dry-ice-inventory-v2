@@ -41,49 +41,55 @@ def init_supabase():
         return None
 
 def fix_order_date():
-    """Finds a specific incorrect date in the historical_orders table and updates it."""
+    """Finds and fixes the incorrect date in both Supabase and SQLite."""
+    
+    # Fix in Supabase first
+    if USE_SUPABASE:
+        supabase = init_supabase()
+        if supabase:
+            try:
+                result = supabase.table('historical_orders')\
+                    .select('id')\
+                    .eq('date', BAD_DATE)\
+                    .execute()
+                
+                if result.data:
+                    for row in result.data:
+                        supabase.table('historical_orders')\
+                            .update({'date': GOOD_DATE})\
+                            .eq('id', row['id'])\
+                            .execute()
+                    print(f"Supabase: Fixed {len(result.data)} row(s) from '{BAD_DATE}' to '{GOOD_DATE}'.")
+                else:
+                    print(f"Supabase: No bad date found. Already clean.")
+            except Exception as e:
+                print(f"Supabase fix_order_date error: {e}")
 
+    # Fix in SQLite as well
     if not os.path.exists(DATABASE_FILE):
-        print(f"Error: Database file '{DATABASE_FILE}' not found.")
         return
 
     conn = sqlite3.connect(DATABASE_FILE)
     c = conn.cursor()
 
-    print(f"Connected to database '{DATABASE_FILE}'.")
-
     try:
-        # First, check if the bad record exists
         c.execute("SELECT id FROM historical_orders WHERE date = ?", (BAD_DATE,))
         record = c.fetchone()
 
         if not record:
-            print(f"No record found with the date '{BAD_DATE}'. It might already be fixed.")
+            print(f"SQLite: No bad date found. Already clean.")
+            conn.close()
             return
 
-        print(f"Found record with incorrect date '{BAD_DATE}'. Attempting to update...")
-
-        # This is the core command: UPDATE the row WHERE the date matches the bad one.
         c.execute("UPDATE historical_orders SET date = ? WHERE date = ?", (GOOD_DATE, BAD_DATE))
-
-        # Commit the changes to save them permanently to the file.
         conn.commit()
-
-        # Check how many rows were affected. It should be 1.
-        if c.rowcount > 0:
-            print(f"Success! Updated {c.rowcount} row(s) from '{BAD_DATE}' to '{GOOD_DATE}'.")
-        else:
-            print("Update executed, but no rows were changed. This is unexpected.")
+        print(f"SQLite: Fixed {c.rowcount} row(s) from '{BAD_DATE}' to '{GOOD_DATE}'.")
 
     except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-        print("Rolling back any changes.")
-        conn.rollback() # Undo changes if there was an error
-
+        print(f"SQLite fix_order_date error: {e}")
+        conn.rollback()
     finally:
-        # Always close the connection.
         conn.close()
-        print("Database connection closed.")
 
 
 st.set_page_config(
@@ -1020,6 +1026,7 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
 def main():
     # Initialize database
     init_db()
+    fix_order_date()
     seed_historical_data()
     
     st.sidebar.header("🗓️ Analysis Period")
