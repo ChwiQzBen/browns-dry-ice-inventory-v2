@@ -505,7 +505,7 @@ def seed_historical_data():
         print("Database update complete.")
 
     conn.close()
-    
+
 def get_period_from_date(order_date):
     """
     Determines the correct financial period string (e.g., '2025/2026')
@@ -524,7 +524,54 @@ def get_period_from_date(order_date):
         # If it's June or earlier, the financial year started in the previous year.
         start_year = order_date.year - 1
 
-    return f"{start_year}/{start_year + 1}"    
+    return f"{start_year}/{start_year + 1}"   
+def import_csv_to_supabase():
+    """Import transaction CSV data to Supabase (one-time migration)"""
+    if not USE_SUPABASE:
+        st.warning("Supabase is not enabled")
+        return False
+    
+    supabase = init_supabase()
+    if not supabase:
+        return False
+    
+    csv_file = 'transactions_export.csv'
+    if not os.path.exists(csv_file):
+        st.error(f"CSV file '{csv_file}' not found. Run export_to_csv.py first.")
+        return False
+    
+    try:
+        df = pd.read_csv(csv_file)
+        df['date'] = pd.to_datetime(df['date']).dt.date
+        
+        inserted = 0
+        for _, row in df.iterrows():
+            # Check if exists
+            existing = supabase.table('transactions')\
+                .select('id')\
+                .eq('date', row['date'].isoformat())\
+                .eq('quantity', float(row['quantity']))\
+                .eq('type', row['type'])\
+                .execute()
+            
+            if not existing.data:
+                transaction_data = {
+                    'date': row['date'].isoformat(),
+                    'type': row['type'],
+                    'quantity': float(row['quantity']),
+                    'item': row['item'],
+                    'description': row['description'],
+                    'notes': row['notes'],
+                    'analysis_period': '2025/2026'
+                }
+                supabase.table('transactions').insert(transaction_data).execute()
+                inserted += 1
+        
+        st.success(f"✅ Imported {inserted} transactions to Supabase!")
+        return True
+    except Exception as e:
+        st.error(f"Import failed: {e}")
+        return False 
 
 
 def get_historical_orders_from_db(period):
@@ -974,7 +1021,7 @@ def main():
     # Initialize database
     init_db()
     seed_historical_data()
-
+    
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
 
@@ -2310,6 +2357,17 @@ def main():
                 )
             else:
                 st.caption("No data in the current filter to export.")
+
+            # --- ADD THIS NEW SECTION RIGHT HERE ---
+            st.markdown("### ☁️ Sync to Cloud")
+            col_import, col_import2 = st.columns([1, 3])
+            with col_import:
+                if st.button("📤 Import Local CSV to Supabase", type="primary", key="import_to_supabase"):
+                    with st.spinner("Importing transactions to Supabase..."):
+                        import_csv_to_supabase()
+                        st.rerun()
+            with col_import2:
+                st.caption("Imports transactions from 'transactions_export.csv' to Supabase cloud database")
 
 
         # --- DIVIDER TO SEPARATE SECTIONS ---
