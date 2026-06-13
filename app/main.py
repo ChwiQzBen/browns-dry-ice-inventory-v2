@@ -1264,6 +1264,8 @@ def main():
             <h3 style="color: #6B9AB8; margin: 0;">DRY ICE INVENTORY OPTIMIZER</h3>
         </div>
         """, unsafe_allow_html=True)
+    st.markdown(f'<div style="text-align:center;font-size:1.2rem;margin-bottom:2rem;">Analysis Period: {start_date_str} to {end_date_str}</div>',
+            unsafe_allow_html=True)        
 
     st.sidebar.header("📦 Real-time Inventory")
 
