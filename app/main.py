@@ -1693,7 +1693,7 @@ def main():
             st.markdown("### 📦 Proactive Inventory Policy")
             st.success("✅ Inventory policy is dynamically calculated using the live forecast data from Tab 2.")
             
-            st.markdown("### ❄️ Inventory Optimization Formulas")
+            #st.markdown("### ❄️ Inventory Optimization Formulas")
             col1, col2 = st.columns(2)
 
             with col1:
@@ -2291,11 +2291,11 @@ def main():
             use_container_width=True
         )
 
-        overdue_items = maintenance_data[maintenance_data['Days Overdue'] > 0]
-        if not overdue_items.empty:
-            st.markdown("#### ⚠️ Maintenance Alerts")
-            for _, item in overdue_items.iterrows():
-                st.error(f" **{item['Equipment']}** is {item['Days Overdue']} days overdue!")
+        #overdue_items = maintenance_data[maintenance_data['Days Overdue'] > 0]
+        #if not overdue_items.empty:
+            #st.markdown("#### ⚠️ Maintenance Alerts")
+            #for _, item in overdue_items.iterrows():
+            #    st.error(f" **{item['Equipment']}** is {item['Days Overdue']} days overdue!")
 
         # Cost tracking
         st.markdown("#### 💰 Maintenance Costs")
