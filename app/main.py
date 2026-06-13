@@ -1251,20 +1251,16 @@ def main():
     start_date_str = display_start_date.strftime('%B %d, %Y')
     end_date_str = display_end_date.strftime('%B %d, %Y')
 
-    # Center using columns
+    # Centered with better proportions
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("assets/browns_logo.jpg", width=200)
-
-    # Then centered text below
-    st.markdown("""
-    <div style="text-align: center;">
-    <h3 style="color: #6B9AB8; margin: 5px 0 0 0;">DRY ICE INVENTORY OPTIMIZER</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f'<div style="text-align:center;font-size:1.2rem;margin-bottom:2rem;">Analysis Period: {start_date_str} to {end_date_str}</div>',
-            unsafe_allow_html=True)
+        st.image("assets/browns_logo.jpg", width=280)
+        st.markdown("""
+        <div style="text-align: center;">
+        <h3 style="color: #6B9AB8; margin: 15px 0 5px 0; font-size: 1.5rem;">DRY ICE INVENTORY OPTIMIZER</h3>
+        <div style="font-size: 1.1rem; margin-bottom: 2rem; color: #666;">Analysis Period: {} to {}</div>
+        </div>
+        """.format(start_date_str, end_date_str), unsafe_allow_html=True)
 
     st.sidebar.header("📦 Real-time Inventory")
 
