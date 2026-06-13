@@ -1254,7 +1254,7 @@ def main():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         try:
-            st.image("assets/browns_logo.png", width=150)
+            st.image("assets/browns_logo.png", width=250)
         except:
             # Fallback if logo file not found
             st.markdown("""
