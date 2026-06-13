@@ -1248,22 +1248,18 @@ def main():
     mobile_ui.show_mobile_welcome()
 
     # Header
-    start_date_str = display_start_date.strftime('%B %d, %Y') # e.g., July 01, 2025
-    end_date_str = display_end_date.strftime('%B %d, %Y')   # e.g., June 30, 2026
+    start_date_str = display_start_date.strftime('%B %d, %Y')
+    end_date_str = display_end_date.strftime('%B %d, %Y')
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        try:
-         st.image("assets/browns_logo.jpg", width=250)
-        except Exception as e:
-        # Fallback if logo file not found
-            st.markdown("""
-        <div style="text-align: center;">
-            <div style="font-size: 4rem;">❄️</div>
-            <h1 style="color: #2E5266; margin: 0;">Brown's Food Co.</h1>
-            <h3 style="color: #6B9AB8; margin: 0;">DRY ICE INVENTORY OPTIMIZER</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        st.image("assets/browns_logo.jpg", width=200)
+    st.markdown("""
+    <div style="text-align: center;">
+        <h3 style="color: #6B9AB8; margin: 0;">DRY ICE INVENTORY OPTIMIZER</h3>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.markdown(f'<div style="text-align:center;font-size:1.2rem;margin-bottom:2rem;">Analysis Period: {start_date_str} to {end_date_str}</div>',
             unsafe_allow_html=True)        
 
