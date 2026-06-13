@@ -1254,19 +1254,16 @@ def main():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         try:
-            logo_path = os.path.join(os.path.dirname(__file__), "assets", "browns_logo.png")
-            st.image(logo_path, width=250)
-        except:
-            # Fallback if logo file not found
+         st.image("assets/browns_logo.jpg", width=250)
+        except Exception as e:
+        # Fallback if logo file not found
             st.markdown("""
-            <div style="text-align: center;">
-                <div style="font-size: 4rem;">❄️</div>
-                <h1 style="color: #2E5266; margin: 0;">Brown's Food Co.</h1>
-                <h3 style="color: #6B9AB8; margin: 0;">DRY ICE INVENTORY OPTIMIZER</h3>
-            </div>
-            """, unsafe_allow_html=True)
-    st.markdown(f'<div style="text-align:center;font-size:1.2rem;margin-bottom:2rem;">Analysis Period: {start_date_str} to {end_date_str}</div>',
-                unsafe_allow_html=True)
+        <div style="text-align: center;">
+            <div style="font-size: 4rem;">❄️</div>
+            <h1 style="color: #2E5266; margin: 0;">Brown's Food Co.</h1>
+            <h3 style="color: #6B9AB8; margin: 0;">DRY ICE INVENTORY OPTIMIZER</h3>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.sidebar.header("📦 Real-time Inventory")
 
