@@ -1621,6 +1621,7 @@ def main():
             adjusted_total_demand = total_forecasted_demand * sublimation_factor
             avg_daily_forecast = np.mean(ensemble_forecast_values)
 
+            st.markdown("---")  # <- ADD THIS DIVIDER
             st.markdown("#### 📈 Forecast Summary (Next 30 Days)")
             summary_cols = st.columns(4)
             with summary_cols[0]:
