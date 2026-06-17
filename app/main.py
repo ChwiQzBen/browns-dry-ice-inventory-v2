@@ -974,7 +974,7 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
         'Total_Cost': df['Transport_Cost'] + df['Total_Cost']
     })
 
-    fig_cost = px.area(cost_data, x='Date', y=['Transport_Cost', 'Product_Cost'],
+    fig_cost_overview = px.area(cost_data, x='Date', y=['Transport_Cost', 'Product_Cost'],
                       title="Cost Breakdown Over Time",
                       color_discrete_map={
                           'Transport_Cost': '#ff6b6b',
@@ -1020,7 +1020,7 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
 
         fig_forecast.update_layout(title="Demand Forecast (30 Days)")
 
-    return fig_orders, fig_cost, fig_forecast
+    return fig_orders, fig_cost_overview, fig_forecast
 
 def main():
     # Initialize database
@@ -1209,7 +1209,7 @@ def main():
     # --- 5. Generate Other Charts and Visualizations ---
     # The original Prophet forecast_data object for chart in Tab 1
     forecast_data = analyzer.forecast_demand()
-    fig_orders, fig_cost, fig_forecast = create_enhanced_charts(
+    fig_orders, fig_cost_overview, fig_forecast = create_enhanced_charts(
         df=df, analyzer=analyzer, kpis=kpis, forecast_data=forecast_data, safety_stock=safety_stock
     )
     
@@ -1523,8 +1523,8 @@ def main():
                     st.plotly_chart(fig_orders, use_container_width=True,
                         config=mobile_ui.get_mobile_chart_config())
                 with col2:
-                    fig_cost = mobile_ui.optimize_chart_for_mobile(fig_cost)
-                    st.plotly_chart(fig_cost, use_container_width=True,
+                    fig_cost_overview = mobile_ui.optimize_chart_for_mobile(fig_cost_overview)
+                    st.plotly_chart(fig_cost_overview, use_container_width=True,
                         config=mobile_ui.get_mobile_chart_config())
 
             st.markdown("""
@@ -1726,7 +1726,7 @@ def main():
 
             st.markdown("### 📊 Recommended Inventory Policy")
             policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
-            mobile_ui.display_mobile_table(policy_data, max_height=200)
+            st.dataframe(policy_data, use_container_width=True, height=180)
 
             st.markdown("### 🎯 EOQ Implementation Impact")
             # The savings are now calculated in the main block. We just display them here.
@@ -1760,7 +1760,7 @@ def main():
                     f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
                 ]
             }
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, )
+            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, height=180)
 
             st.markdown("#### 📈 5-Year Cumulative Savings Projection")
             years = list(range(1, 6))
@@ -1805,10 +1805,10 @@ def main():
                 ]
             }
             cost_components = pd.DataFrame(cost_components_data)
-            st.dataframe(cost_components.style.format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'}).applymap(lambda x: 'font-weight: bold', subset=['Component']).bar(subset=['Annual Cost (KSh)'], color='#5fba7d'), use_container_width=True)
+            st.dataframe(cost_components.style.format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'}).applymap(lambda x: 'font-weight: bold', subset=['Component']).bar(subset=['Annual Cost (KSh)'], color='#5fba7d'), use_container_width=True, height=220)
 
             st.markdown("#### 📊 Cost Structure Visualization")
-            fig = make_subplots(
+            fig_cost_breakdown = make_subplots(
                 rows=1, cols=2,
                 specs=[[{"type": "pie"}, {"type": "bar"}]],
                 subplot_titles=("Cost Distribution", "Cost per kg Analysis"),
@@ -1816,7 +1816,7 @@ def main():
             )
 
             # Trace 1: Pie Chart with labels and percentages
-            fig.add_trace(go.Pie(
+            fig_cost_breakdown.add_trace(go.Pie(
                 labels=cost_components['Component'][:-1],
                 values=cost_components['Annual Cost (KSh)'][:-1],
                 marker_colors=['#3498db','#e74c3c','#f39c12','#2ecc71'],
@@ -1839,7 +1839,7 @@ def main():
                 ]
             }
             cost_per_kg = pd.DataFrame(cost_per_kg_data)
-            fig.add_trace(go.Bar(
+            fig_cost_breakdown.add_trace(go.Bar(
                 x=cost_per_kg['Metric'],
                 y=cost_per_kg['Cost per kg (KSh)'],
                 marker_color=['#3498db','#e74c3c','#f39c12','#2ecc71'],
@@ -1847,9 +1847,9 @@ def main():
                 textposition='auto'
             ), row=1, col=2)
 
-            fig.update_layout(height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
-            fig = mobile_ui.optimize_chart_for_mobile(fig)
-            st.plotly_chart(fig, use_container_width=True,
+            fig_cost_breakdown.update_layout(height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
+            fig_cost_breakdown = mobile_ui.optimize_chart_for_mobile(fig_cost_breakdown)
+            st.plotly_chart(fig_cost_breakdown, use_container_width=True,
                 config=mobile_ui.get_mobile_chart_config())
 
             st.markdown("#### 📈 Monthly Cost Trends (KSh)")
@@ -2024,7 +2024,7 @@ def main():
             ]
         })
 
-        st.dataframe(metrics_to_track, use_container_width=True)
+        st.dataframe(metrics_to_track, use_container_width=True, height=250)
 
         # Implementation timeline
         st.markdown("#### 📅 Implementation Timeline")
@@ -2047,7 +2047,7 @@ def main():
             ]
         })
 
-        st.dataframe(timeline_data, use_container_width=True)
+        st.dataframe(timeline_data, use_container_width=True, height=220)
 
         st.markdown("#### 🌍 Long-term Improvements")
         st.markdown("""
@@ -2082,8 +2082,8 @@ def main():
 
         # Interactive Plotly timeline
         st.subheader("⏱️ Implementation Timeline")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
+        fig_timeline = go.Figure()
+        fig_timeline.add_trace(go.Scatter(
             x=['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+'],
             y=[1, 2, 3, 4],
             mode='markers+lines+text',
@@ -2093,15 +2093,15 @@ def main():
             textposition='top center',
             name='Milestones'
         ))
-        fig.update_layout(
+        fig_timeline.update_layout(
             height=mobile_ui.get_chart_height(),
             showlegend=False,
             yaxis=dict(showticklabels=False, title=None),
             xaxis=dict(title='Implementation Quarters'),
             plot_bgcolor='rgba(0,0,0,0)'
         )
-        fig = mobile_ui.optimize_chart_for_mobile(fig)
-        st.plotly_chart(fig, use_container_width=True,
+        fig_timeline = mobile_ui.optimize_chart_for_mobile(fig_timeline)
+        st.plotly_chart(fig_timeline, use_container_width=True,
             config=mobile_ui.get_mobile_chart_config())
 
         # Roadmap dataframe with original content
