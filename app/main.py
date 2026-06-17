@@ -1651,6 +1651,7 @@ def main():
                 )
 
             # --- Probabilistic Forecast for Risk Management ---
+            st.markdown("---")
             st.markdown("#### 📊 Risk-Based Demand Scenarios")
             st.markdown("Instead of a single number, it's better to plan for a range of possibilities. This shows a likely scenario versus a high-demand (worst-case) scenario.")
 
@@ -1808,6 +1809,7 @@ def main():
             cost_components = pd.DataFrame(cost_components_data)
             st.dataframe(cost_components.style.format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'}).applymap(lambda x: 'font-weight: bold', subset=['Component']).bar(subset=['Annual Cost (KSh)'], color='#5fba7d'), use_container_width=True, height=220)
 
+            st.markdown("---")
             st.markdown("#### 📊 Cost Structure Visualization")
             fig_cost_breakdown = make_subplots(
                 rows=1, cols=2,
@@ -1853,6 +1855,8 @@ def main():
             st.plotly_chart(fig_cost_breakdown, use_container_width=True,
                 config=mobile_ui.get_mobile_chart_config())
 
+
+            st.markdown("---")
             st.markdown("#### 📈 Monthly Cost Trends (KSh)")
             
             df_monthly = df.copy()
@@ -1903,7 +1907,10 @@ def main():
             fig_monthly_cost = mobile_ui.optimize_chart_for_mobile(fig_monthly_cost)
             st.plotly_chart(fig_monthly_cost, use_container_width=True,
                 config=mobile_ui.get_mobile_chart_config())
+            
 
+
+            st.markdown("---")
             st.markdown("#### 📊 Monthly Physical Quantities (kg)")
             fig_monthly_volume = px.bar(
                 monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
@@ -1913,7 +1920,9 @@ def main():
             st.plotly_chart(fig_monthly_volume, use_container_width=True,
                 config=mobile_ui.get_mobile_chart_config())
 
+
             # 4. Savings Summary (5-COLUMN LAYOUT)
+            st.markdown("---")
             st.markdown("### 💰 Savings Summary")
             
             monthly_transport_savings = annual_transport_savings / 12
@@ -1939,6 +1948,9 @@ def main():
             # ----------------------------------
             # 5. Key Insights & Recommendations
             # ----------------------------------
+
+            
+            st.markdown("---")
             st.markdown("#### 📋 Key Insights & Recommendations")
             st.markdown(f"""
             - **EOQ Implementation**: Save KSh {annual_transport_savings:,.0f} annually on transport costs.
@@ -2219,11 +2231,13 @@ def main():
                 st.metric(label, value)
 
         # Risk assessment
+        st.markdown("---")
         st.markdown("#### 📊 Risk Assessment")
         risk_color = "🔴" if failure_risk == "High" else "🟡" if failure_risk == "Medium" else "🟢"
         st.metric("Failure Risk Level", f"{risk_color} {failure_risk}")
 
         # Maintenance recommendations
+        st.markdown("---")
         st.markdown("####  Maintenance Recommendations")
         recommendations = []
         if container_data['insulation_efficiency'] < 70:
@@ -2257,6 +2271,7 @@ def main():
                 st.metric(label, value, delta=delta)
 
         # Maintenance schedule
+        st.markdown("---")
         st.markdown("#### 📅 Maintenance Schedule")
         maintenance_data = pd.DataFrame({
             'Equipment': ['Storage Unit #1', 'Storage Unit #2', 'Container CTN-001', 'Container CTN-002', 'Container CTN-003', 'Monitoring System'],
@@ -2298,6 +2313,7 @@ def main():
             #    st.error(f" **{item['Equipment']}** is {item['Days Overdue']} days overdue!")
 
         # Cost tracking
+        st.markdown("---")
         st.markdown("#### 💰 Maintenance Costs")
         cost_data = pd.DataFrame({
             'Month': pd.date_range('2024-01-01', periods=6, freq='M'),
@@ -2317,6 +2333,7 @@ def main():
             config=mobile_ui.get_mobile_chart_config())
 
         # ROI calculator
+        st.markdown("---")
         st.markdown("#### 📈 Maintenance ROI")
         roi_cols = st.columns(3)
         with roi_cols[0]:
