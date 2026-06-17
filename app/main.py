@@ -1,5 +1,6 @@
 from datetime import datetime
 import streamlit as st
+import gc
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -283,6 +284,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
     conn.close()
     return transaction_id
 
+@st.cache_data(ttl=300)
 def get_transactions_from_db(period):
     """Retrieve transactions from Supabase or SQLite"""
     
@@ -579,7 +581,7 @@ def import_csv_to_supabase():
         st.error(f"Import failed: {e}")
         return False 
 
-
+@st.cache_data(ttl=300)
 def get_historical_orders_from_db(period):
     """Retrieve historical orders from Supabase or SQLite"""
     
@@ -680,7 +682,7 @@ def add_transaction_to_history(transaction_type, quantity, description, date, pe
     st.session_state.transactions.append(transaction)
 
 
-
+@st.cache_data(ttl=1800, show_spinner=False)
 def create_ensemble_forecast(df, forecast_days=30):
     """
     Create ensemble forecast combining Prophet, LSTM, ARIMA and Monte Carlo.
@@ -855,7 +857,7 @@ def create_ensemble_forecast(df, forecast_days=30):
     lstm_forecast = np.full(forecast_days, max(0, np.mean(values)) if len(values) > 0 else 0)
 
     # 5. Monte Carlo forecast
-    def discrete_event_monte_carlo(df_mc, n_simulations=1000, days_to_forecast=30):
+    def discrete_event_monte_carlo(df_mc, n_simulations=200, days_to_forecast=30):
         df_mc = df_mc[df_mc['Order_Quantity_kg'] > 0].sort_values('Date').reset_index(drop=True)
         if len(df_mc) < 2: 
             return np.full(days_to_forecast, max(0, np.mean(values)) if len(values) > 0 else 0)
@@ -1148,17 +1150,20 @@ def main():
 
     # --- 1. Generate Forecast (Logic from former Tab 2) ---
     if not df.empty:
-        daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
-        daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
-        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
-        total_forecasted_demand = np.sum(ensemble_forecast_values)
-        forecast_std_dev = np.std(ensemble_forecast_values)
+        with st.spinner("🔄 Generating forecast... This may take a moment."):
+            daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
+            daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
+            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
+            total_forecasted_demand = np.sum(ensemble_forecast_values)
+            forecast_std_dev = np.std(ensemble_forecast_values)
     else:
         # Provide default values if no data exists
         fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = None, np.array([0]), {}, 0
         total_forecasted_demand = 0
         forecast_std_dev = 0
 
+    # Garbage collection to free memory
+    gc.collect()
     if total_forecasted_demand <= 0:
         st.warning("⚠️ Forecast resulted in zero/negative demand. Using intelligent fallback.")
         # Use historical KPIs as fallback
@@ -1949,7 +1954,7 @@ def main():
             # 5. Key Insights & Recommendations
             # ----------------------------------
 
-            
+
             st.markdown("---")
             st.markdown("#### 📋 Key Insights & Recommendations")
             st.markdown(f"""
