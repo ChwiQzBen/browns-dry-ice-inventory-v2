@@ -2305,14 +2305,14 @@ def main():
             'Emergency': [0, 0, 1500, 0, 0, 2200]
         })
 
-        fig_cost = px.bar(
+        fig_maintenance_cost = px.bar(
             cost_data.melt(id_vars=['Month'], var_name='Type', value_name='Cost'),
             x='Month', y='Cost', color='Type',
             title="Monthly Maintenance Costs (KSh)",
             color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'}
         )
-        fig_cost = mobile_ui.optimize_chart_for_mobile(fig_cost)
-        st.plotly_chart(fig_cost, use_container_width=True,
+        fig_maintenance_cost = mobile_ui.optimize_chart_for_mobile(fig_maintenance_cost)
+        st.plotly_chart(fig_maintenance_cost, use_container_width=True,
             config=mobile_ui.get_mobile_chart_config())
 
         # ROI calculator
