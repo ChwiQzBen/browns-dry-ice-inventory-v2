@@ -1095,55 +1095,175 @@ def main():
         st.session_state.transactions = get_transactions_from_db(st.session_state.selected_period)
         st.session_state.last_loaded_period = st.session_state.selected_period # Update the tracker
     
-    # Custom CSS for better styling
     st.markdown("""
     <style>
     .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #1f77b4;
+    text-align: center;
+    margin-bottom: 2rem;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
     }
     .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin: 0.5rem 0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem;
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+    margin: 0.5rem 0;
     }
     .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+    padding: 1rem;
+    border-radius: 5px;
+    margin: 1rem 0;
     }
     .info-box {
-        background-color: #d1ecf1;
-        border: 1px solid #bee5eb;
-        color: #0c5460;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+    background-color: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
+    padding: 1rem;
+    border-radius: 5px;
+    margin: 1rem 0;
     }
     .alert-critical {
-        background-color: #f8d7da;
-        border-left: 5px solid #dc3545;
-        padding: 10px;
-        margin: 10px 0;
+    background-color: #f8d7da;
+    border-left: 5px solid #dc3545;
+    padding: 10px;
+    margin: 10px 0;
     }
     .alert-warning {
-        background-color: #fff3cd;
-        border-left: 5px solid #ffc107;
-        padding: 10px;
-        margin: 10px 0;
+    background-color: #fff3cd;
+    border-left: 5px solid #ffc107;
+    padding: 10px;
+    margin: 10px 0;
     }
     [data-testid="stMetricValue"] {
-        font-size: 20px; /* Adjust this value as needed */
+    font-size: 20px;
+    }
+
+    /* ===== FIX ALL OVERLAPS ===== */
+    /* Fix tab content spacing */
+    .stTabs [role="tabpanel"] {
+    padding-top: 30px !important;
+    padding-bottom: 20px !important;
+    }
+
+    /* Fix all column spacing */
+    .stColumns {
+    gap: 15px !important;
+    margin-top: 10px !important;
+    margin-bottom: 10px !important;
+    }
+
+    /* Fix metric containers - prevent overlap */
+    .stMetric {
+    padding: 10px 5px !important;
+    margin: 5px 0 !important;
+    border: 1px solid #e8e8e8 !important;
+    border-radius: 8px !important;
+    background: #fafafa !important;
+    min-height: 80px !important;
+    }
+
+    /* Fix metric labels - prevent text wrapping/cutting */
+    .stMetric label {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    margin-bottom: 6px !important;
+    font-weight: 500 !important;
+    color: #444 !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    }
+
+    /* Fix metric values */
+    .stMetric .stMetricValue {
+    font-size: 22px !important;
+    line-height: 1.3 !important;
+    font-weight: 600 !important;
+    color: #1f77b4 !important;
+    margin-top: 2px !important;
+    }
+
+    /* Fix metric delta */
+    .stMetric .stMetricDelta {
+    font-size: 13px !important;
+    margin-top: 2px !important;
+    }
+
+    /* Fix markdown spacing */
+    .stMarkdown {
+    margin-bottom: 15px !important;
+    }
+
+    /* Fix heading spacing */
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
+    margin-top: 20px !important;
+    margin-bottom: 15px !important;
+    }
+
+    /* Fix plotly chart spacing */
+    .stPlotlyChart {
+    margin-top: 15px !important;
+    margin-bottom: 25px !important;
+    }
+
+    /* Fix container padding */
+    .stContainer {
+    padding: 5px 0 !important;
+    }
+
+    /* Fix horizontal rule spacing */
+    hr {
+    margin: 30px 0 !important;
+    }
+
+    /* Fix expander spacing */
+    .streamlit-expanderHeader {
+    font-weight: 500 !important;
+    padding: 10px 0 !important;
+    }
+
+    /* Fix dataframes - prevent overflow */
+    .stDataFrame {
+    overflow: auto !important;
+    margin: 10px 0 !important;
+    }
+    .stDataFrame table {
+    width: 100% !important;
+    }
+
+    /* Fix sidebar spacing */
+    .css-1d391kg {
+    padding-top: 20px !important;
+    }
+
+    /* Fix mobile responsiveness */
+    @media (max-width: 768px) {
+    .stColumns {
+        gap: 5px !important;
+        flex-wrap: wrap !important;
+    }
+    .stMetric {
+        padding: 8px 3px !important;
+        min-height: 60px !important;
+    }
+    .stMetric label {
+        font-size: 11px !important;
+    }
+    .stMetric .stMetricValue {
+        font-size: 18px !important;
+    }
+    .stTabs [role="tabpanel"] {
+        padding-top: 15px !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 16px !important;
+    }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1162,8 +1282,7 @@ def main():
         total_forecasted_demand = 0
         forecast_std_dev = 0
 
-    # Garbage collection to free memory
-    gc.collect()
+    
     if total_forecasted_demand <= 0:
         st.warning("⚠️ Forecast resulted in zero/negative demand. Using intelligent fallback.")
         # Use historical KPIs as fallback
