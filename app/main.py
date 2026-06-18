@@ -1808,19 +1808,29 @@ def main():
 
             risk_cols = st.columns(2)
             with risk_cols[0]:
-                st.info("##### Likely Scenario (50th Percentile)")
-                st.metric(
-                    label="Likely Monthly Demand",
-                    value=f"~{p50_total_demand:,.0f} kg"
-                )
-                st.write("There is a 50% chance demand will be at or below this level.")
+                with st.container():
+                    st.markdown("""
+                    <div style='background-color:#d1ecf1; padding:15px; border-radius:8px; min-height:160px;'>
+                    <strong>📊 Likely Scenario (50th Percentile)</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.metric(
+                        label="Likely Monthly Demand",
+                        value=f"~{p50_total_demand:,.0f} kg"
+                    )
+                    st.caption("There is a 50% chance demand will be at or below this level.")
             with risk_cols[1]:
-                st.warning("##### High-Demand Scenario (90th Percentile)")
-                st.metric(
-                    label="Worst-Case Monthly Demand",
-                    value=f"~{p90_total_demand:,.0f} kg"
-                )
-                st.write("There is a 10% chance demand will exceed this level. Use this for setting safety stock and risk buffers.")
+                with st.container():
+                    st.markdown("""
+                    <div style='background-color:#fff3cd; padding:15px; border-radius:8px; min-height:160px;'>
+                    <strong>⚠️ High-Demand Scenario (90th Percentile)</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.metric(
+                        label="Worst-Case Monthly Demand",
+                        value=f"~{p90_total_demand:,.0f} kg"
+                    )
+                    st.caption("There is a 10% chance demand will exceed this level. Use this for setting safety stock and risk buffers.")
 
             # --- Individual Model Breakdown ---
             with st.expander("🔬 View Individual Model Performance", expanded=not mobile_ui.should_collapse_advanced()):
@@ -2069,8 +2079,9 @@ def main():
             st.markdown("---")
             st.markdown("#### 📊 Monthly Physical Quantities (kg)")
             fig_monthly_volume = px.bar(
-                monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
-                title="Monthly Dry Ice Quantities (kg)", labels={'value': 'Quantity (kg)', 'variable': 'Quantity Type'}
+            monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
+            title="Monthly Dry Ice Quantities (kg)", labels={'value': 'Quantity (kg)', 'variable': 'Quantity Type'},
+            height=400
             )
             fig_monthly_volume = mobile_ui.optimize_chart_for_mobile(fig_monthly_volume)
             st.plotly_chart(fig_monthly_volume, use_container_width=True,
