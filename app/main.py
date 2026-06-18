@@ -1029,6 +1029,8 @@ def main():
     init_db()
     fix_order_date()
     seed_historical_data()
+    # ADD THIS ONE LINE - clears cached data so it loads fresh
+    get_historical_orders_from_db.clear()
     
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
@@ -1839,7 +1841,7 @@ def main():
 
             # --- SPACING ---
             st.markdown("<br>", unsafe_allow_html=True)
-            
+
             # --- Individual Model Breakdown ---
             with st.expander("🔬 View Individual Model Performance", expanded=not mobile_ui.should_collapse_advanced()):
                 st.markdown("The final forecast is a weighted average of these underlying models.")
