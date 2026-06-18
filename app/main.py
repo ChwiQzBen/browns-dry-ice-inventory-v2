@@ -2058,9 +2058,11 @@ def main():
 
             fig_monthly_cost = px.area(
                 monthly_data, x='Month', y=cost_cols,
-                title="Monthly Cost Fluctuations (KSh)", labels={'value': 'Cost (KSh)', 'variable': 'Cost Type'},
-                color_discrete_map=color_map
-            )
+                title="Monthly Cost Fluctuations (KSh)", 
+                labels={'value': 'Cost (KSh)', 'variable': 'Cost Type'},
+                color_discrete_map=color_map,
+                height=mobile_ui.get_chart_height()  # Use consistent height
+                )
 
             for col, color in zip(cost_cols, colors):
                 avg_value = monthly_data[col].mean()
