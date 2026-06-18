@@ -1141,9 +1141,6 @@ def main():
     padding: 10px;
     margin: 10px 0;
     }
-    [data-testid="stMetricValue"] {
-    font-size: 20px;
-    }
 
     /* ===== FIX ALL OVERLAPS ===== */
     /* Fix tab content spacing */
@@ -1228,41 +1225,68 @@ def main():
     padding: 10px 0 !important;
     }
 
+    /* ===== FIX DATAFRAME SHAKING ===== */
+    /* Prevent table shake on rerender */
+    .stDataFrame {
+    min-height: 100px !important;
+    overflow: hidden !important;
+    margin: 10px 0 !important;
+    }
+
+    /* Remove transitions that cause shake */
+    .stDataFrame > div {
+    transition: none !important;
+    animation: none !important;
+    }
+
+    /* Lock iframe min-height to prevent reflow */
+    [data-testid="stDataFrame"] > div {
+    transition: none !important;
+    animation: none !important;
+    }
+
+    [data-testid="stDataFrame"] iframe {
+    min-height: 200px !important;
+    }
+
+    /* Freeze column widths */
+    .stDataFrame table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    }
+
     /* Fix dataframes - prevent overflow */
     .stDataFrame {
     overflow: auto !important;
-    margin: 10px 0 !important;
     }
     .stDataFrame table {
     width: 100% !important;
     }
 
-    /* Fix sidebar spacing */
-    .css-1d391kg {
-    padding-top: 20px !important;
-    }
-
-    /* Fix mobile responsiveness */
+    /* ===== MOBILE RESPONSIVENESS ===== */
     @media (max-width: 768px) {
     .stColumns {
-        gap: 5px !important;
-        flex-wrap: wrap !important;
+    gap: 5px !important;
+    flex-wrap: wrap !important;
     }
     .stMetric {
-        padding: 8px 3px !important;
-        min-height: 60px !important;
+    padding: 8px 3px !important;
+    min-height: 60px !important;
     }
     .stMetric label {
-        font-size: 11px !important;
+    font-size: 11px !important;
     }
     .stMetric .stMetricValue {
-        font-size: 18px !important;
+    font-size: 18px !important;
     }
     .stTabs [role="tabpanel"] {
-        padding-top: 15px !important;
+    padding-top: 15px !important;
     }
     [data-testid="stMetricValue"] {
-        font-size: 16px !important;
+    font-size: 16px !important;
+    }
+    [data-testid="stDataFrame"] iframe {
+    min-height: 150px !important;
     }
     }
     </style>
@@ -1931,7 +1955,15 @@ def main():
                 ]
             }
             cost_components = pd.DataFrame(cost_components_data)
-            st.dataframe(cost_components.style.format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'}).applymap(lambda x: 'font-weight: bold', subset=['Component']).bar(subset=['Annual Cost (KSh)'], color='#5fba7d'), use_container_width=True, height=220)
+            st.dataframe(
+                    cost_components.style
+                    .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
+                    .applymap(lambda x: 'font-weight: bold', subset=['Component'])
+                    .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
+                    use_container_width=True,
+                    height=220,
+                     hide_index=True
+                    )
 
             st.markdown("---")
             st.markdown("#### 📊 Cost Structure Visualization")
@@ -2418,16 +2450,20 @@ def main():
             colors = {'High': 'background-color: #f8d7da', 'Medium': 'background-color: #fff3cd', 'Low': 'background-color: #d4edda'}
             return colors.get(val, '')
 
+        # Pre-format the date columns BEFORE passing to styler
+        maintenance_data['Last Service'] = maintenance_data['Last Service'].dt.strftime('%Y-%m-%d')
+        maintenance_data['Next Service'] = maintenance_data['Next Service'].dt.strftime('%Y-%m-%d')
+        maintenance_data['Days Overdue'] = maintenance_data['Days Overdue'].apply(
+        lambda x: f"{x} days" if x > 0 else "On schedule"
+        )
+
         st.dataframe(
-            maintenance_data.style
-            .applymap(style_status, subset=['Status'])
-            .applymap(style_priority, subset=['Priority'])
-            .format({
-                'Last Service': lambda x: x.strftime('%Y-%m-%d'),
-                'Next Service': lambda x: x.strftime('%Y-%m-%d'),
-                'Days Overdue': lambda x: f"{x} days" if x > 0 else "On schedule"
-            }),
-            use_container_width=True
+        maintenance_data.style
+        .applymap(style_status, subset=['Status'])
+        .applymap(style_priority, subset=['Priority']),
+        use_container_width=True,
+        height=250,
+        hide_index=True
         )
 
         #overdue_items = maintenance_data[maintenance_data['Days Overdue'] > 0]
