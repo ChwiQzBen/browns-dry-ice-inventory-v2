@@ -1764,6 +1764,8 @@ def main():
                 fig_ensemble = mobile_ui.optimize_chart_for_mobile(fig_ensemble)
                 st.plotly_chart(fig_ensemble, use_container_width=True,
                     config=mobile_ui.get_mobile_chart_config())
+            # --- SPACING ---
+            st.markdown("<br>", unsafe_allow_html=True)  # Add vertical space
 
             # --- Core Forecast Metrics ---
             adjusted_total_demand = total_forecasted_demand * sublimation_factor
@@ -1797,6 +1799,9 @@ def main():
                     value=f"{100-backtest_accuracy*100:.1f}%",
                     help="Model accuracy (1-MAPE) based on backtesting on historical data."
                 )
+
+            # --- SPACING ---
+            st.markdown("<br>", unsafe_allow_html=True)
 
             # --- Probabilistic Forecast for Risk Management ---
             st.markdown("---")
@@ -1832,6 +1837,9 @@ def main():
                     )
                     st.caption("There is a 10% chance demand will exceed this level. Use this for setting safety stock and risk buffers.")
 
+            # --- SPACING ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            
             # --- Individual Model Breakdown ---
             with st.expander("🔬 View Individual Model Performance", expanded=not mobile_ui.should_collapse_advanced()):
                 st.markdown("The final forecast is a weighted average of these underlying models.")
