@@ -1910,7 +1910,7 @@ def main():
                     f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
                 ]
             }
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, height=180)
+            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, height=185, hide_index=True)
 
             st.markdown("#### 📈 5-Year Cumulative Savings Projection")
             years = list(range(1, 6))
@@ -2193,7 +2193,7 @@ def main():
             ]
         })
 
-        st.dataframe(metrics_to_track, use_container_width=True, height=250)
+        st.dataframe(metrics_to_track, use_container_width=True, height=250, hide_index=True)
 
         # Implementation timeline
         st.markdown("#### 📅 Implementation Timeline")
@@ -2216,7 +2216,7 @@ def main():
             ]
         })
 
-        st.dataframe(timeline_data, use_container_width=True, height=220)
+        st.dataframe(timeline_data, use_container_width=True, height=220, hide_index=True)
 
         st.markdown("#### 🌍 Long-term Improvements")
         st.markdown("""
@@ -2294,11 +2294,11 @@ def main():
 
         # Styled dataframe with highlighting
         st.dataframe(
-            roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
-                .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'})
-                .highlight_max(axis=0, color='#d4edda'),
-            use_container_width=True,
-            height=200
+        roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
+        .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
+        use_container_width=True,
+        height=200,
+        hide_index=True
         )
 
         # Expandable implementation details
@@ -2493,15 +2493,15 @@ def main():
             config=mobile_ui.get_mobile_chart_config())
 
         # ROI calculator
-        st.markdown("---")
         st.markdown("#### 📈 Maintenance ROI")
-        roi_cols = st.columns(3)
+        with st.container():
+            roi_cols = st.columns(3)
         with roi_cols[0]:
-            preventive_cost = st.number_input("Annual Preventive Cost (KSh)", value=40000, step=5000)
+            preventive_cost = st.number_input("Annual Preventive Cost (KSh)", value=40000, step=5000, key="preventive_cost")
         with roi_cols[1]:
-            avoided_cost = st.number_input("Avoided Reactive Cost (KSh)", value=75000, step=5000)
+            avoided_cost = st.number_input("Avoided Reactive Cost (KSh)", value=75000, step=5000, key="avoided_cost")
         with roi_cols[2]:
-            downtime_cost = st.number_input("Avoided Downtime Cost (KSh)", value=150000, step=10000)
+            downtime_cost = st.number_input("Avoided Downtime Cost (KSh)", value=150000, step=10000, key="downtime_cost")
 
         total_savings = avoided_cost + downtime_cost
         roi = ((total_savings - preventive_cost) / preventive_cost) * 100 if preventive_cost > 0 else 0
