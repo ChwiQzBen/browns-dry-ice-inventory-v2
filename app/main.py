@@ -1756,51 +1756,78 @@ def main():
                         f"💰 Prices available for "
                         f"{price_count} out of {len(stock_df)} items"
                     )
-            # --- ADD ABC ANALYSIS HERE ---
+
+            # --- ABC ANALYSIS (Fixed) ---
             if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
                 st.divider()
                 st.markdown("### 📊 ABC Analysis (Pareto Analysis)")
                 
-                # Calculate annual value
-                stock_df['ANNUAL_VALUE'] = stock_df['QUANTITY'] * stock_df['UNIT PRICE']
+                # Create a copy for ABC analysis
+                abc_df = stock_df.copy()
                 
-                # Sort by value and calculate cumulative percentage
-                abc_df = stock_df.sort_values('ANNUAL_VALUE', ascending=False).copy()
-                total_value = abc_df['ANNUAL_VALUE'].sum()
-                abc_df['CUM_PERCENT'] = abc_df['ANNUAL_VALUE'].cumsum() / total_value
+                # Convert to numeric, coercing errors to NaN
+                abc_df['QUANTITY'] = pd.to_numeric(abc_df['QUANTITY'], errors='coerce')
+                abc_df['UNIT PRICE'] = pd.to_numeric(abc_df['UNIT PRICE'], errors='coerce')
                 
-                # Classify items
-                def get_abc_class(row):
-                    if row['CUM_PERCENT'] <= 0.70:
-                        return '🔴 A (70% value)'
-                    elif row['CUM_PERCENT'] <= 0.90:
-                        return '🟡 B (20% value)'
+                # Drop rows with missing values
+                abc_df = abc_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                
+                if not abc_df.empty and len(abc_df) > 0:
+                    # Calculate annual value
+                    abc_df['ANNUAL_VALUE'] = abc_df['QUANTITY'] * abc_df['UNIT PRICE']
+                    
+                    # Sort by value and calculate cumulative percentage
+                    abc_df = abc_df.sort_values('ANNUAL_VALUE', ascending=False)
+                    total_value = abc_df['ANNUAL_VALUE'].sum()
+                    
+                    if total_value > 0:
+                        abc_df['CUM_PERCENT'] = abc_df['ANNUAL_VALUE'].cumsum() / total_value
+                        
+                        # Classify items
+                        def get_abc_class(row):
+                            if row['CUM_PERCENT'] <= 0.70:
+                                return '🔴 A (70% value)'
+                            elif row['CUM_PERCENT'] <= 0.90:
+                                return '🟡 B (20% value)'
+                            else:
+                                return '🟢 C (10% value)'
+                        
+                        abc_df['ABC_CLASS'] = abc_df.apply(get_abc_class, axis=1)
+                        
+                        # Show ABC breakdown
+                        abc_counts = abc_df['ABC_CLASS'].value_counts()
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("🔴 A Items (70% Value)", abc_counts.get('🔴 A (70% value)', 0))
+                        with col2:
+                            st.metric("🟡 B Items (20% Value)", abc_counts.get('🟡 B (20% value)', 0))
+                        with col3:
+                            st.metric("🟢 C Items (10% Value)", abc_counts.get('🟢 C (10% value)', 0))
+                        with col4:
+                            st.metric("💰 Total Inventory Value", f"KSh {total_value:,.2f}")
+                        
+                        # Show ABC summary table
+                        abc_summary = abc_df.groupby('ABC_CLASS').agg({
+                            'ITEM_NAME': 'count',
+                            'ANNUAL_VALUE': 'sum'
+                        }).reset_index()
+                        abc_summary.columns = ['Class', 'Item Count', 'Total Value']
+                        st.dataframe(abc_summary, use_container_width=True, hide_index=True)
+                        
+                        # Show top A items
+                        with st.expander("🔍 View Top A Items (70% Value)"):
+                            top_a = abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'].head(20)
+                            st.dataframe(
+                                top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']],
+                                use_container_width=True,
+                                hide_index=True
+                            )
                     else:
-                        return '🟢 C (10% value)'
-                
-                abc_df['ABC_CLASS'] = abc_df.apply(get_abc_class, axis=1)
-                
-                # Show ABC breakdown
-                abc_counts = abc_df['ABC_CLASS'].value_counts()
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("🔴 A Items (70% Value)", abc_counts.get('🔴 A (70% value)', 0))
-                with col2:
-                    st.metric("🟡 B Items (20% Value)", abc_counts.get('🟡 B (20% value)', 0))
-                with col3:
-                    st.metric("🟢 C Items (10% Value)", abc_counts.get('🟢 C (10% value)', 0))
-                with col4:
-                    st.metric("💰 Total Inventory Value", f"KSh {total_value:,.2f}")
-                
-                # Show ABC summary table
-                abc_summary = abc_df.groupby('ABC_CLASS').agg({
-                    'ITEM_NAME': 'count',
-                    'ANNUAL_VALUE': 'sum'
-                }).reset_index()
-                abc_summary.columns = ['Class', 'Item Count', 'Total Value']
-                st.dataframe(abc_summary, use_container_width=True, hide_index=True)
-                
+                        st.info("Total inventory value is zero. Cannot perform ABC analysis.")
+                else:
+                    st.info("No valid items with both quantity and price data found for ABC analysis.")
+
             # Search + Filter
             col1, col2 = st.columns(2)
 
