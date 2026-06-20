@@ -1650,7 +1650,8 @@ def main():
             f"<div class='{alert_class}'>{alert['timestamp'].strftime('%H:%M')} - {alert['message']}</div>",
             unsafe_allow_html=True
         )
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_inventory, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📦 Inventory",
         "📊 Order Analysis",
         "🔮 Demand Forecast",
         "📦 Inventory Management",
@@ -1659,6 +1660,93 @@ def main():
         "🛠️ Maintenance",
         "📜 Transaction History"
     ])
+    # --- INVENTORY TAB (Google Sheets Data) ---
+    with tab_inventory:
+        st.markdown("## 📦 Company Inventory (Google Sheets)")
+        
+        # Refresh button
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            st.caption(f"Data source: Google Sheets | Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        
+        st.divider()
+        
+        # Load data with caching
+        @st.cache_data(ttl=300)
+        def load_inventory_data():
+            gsheet = GoogleSheetReader()
+            if gsheet.authenticate():
+                stock = gsheet.get_stock_listing()
+                current = gsheet.get_current_stock()
+                low = gsheet.get_low_stock_items()
+                return stock, current, low
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        
+        with st.spinner("Loading inventory data..."):
+            stock_df, current_df, low_df = load_inventory_data()
+        
+        if not stock_df.empty:
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📦 Total Items", len(stock_df))
+            with col2:
+                categories = stock_df['Category'].nunique() if 'Category' in stock_df.columns else 0
+                st.metric("📂 Categories", categories)
+            with col3:
+                st.metric("📊 Current Stock", len(current_df) if not current_df.empty else 0)
+            with col4:
+                low_count = len(low_df) if not low_df.empty else 0
+                st.metric("⚠️ Low Stock", low_count, delta=f"-{low_count}" if low_count > 0 else None)
+            
+            # Search and filter
+            col1, col2 = st.columns(2)
+            with col1:
+                search = st.text_input("🔍 Search Items", placeholder="Type item name...")
+            with col2:
+                if 'Category' in stock_df.columns:
+                    categories = ['All'] + sorted(stock_df['Category'].dropna().unique().tolist())
+                    category_filter = st.selectbox("📂 Category", categories)
+                else:
+                    category_filter = 'All'
+            
+            # Apply filters
+            filtered_df = stock_df.copy()
+            if search:
+                mask = False
+                for col in filtered_df.select_dtypes(include=['object']).columns:
+                    mask = mask | filtered_df[col].astype(str).str.contains(search, case=False, na=False)
+                filtered_df = filtered_df[mask]
+            
+            if category_filter != 'All' and 'Category' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['Category'] == category_filter]
+            
+            # Show data
+            st.markdown(f"### 📋 Stock Listing ({len(filtered_df)} items)")
+            st.dataframe(filtered_df, use_container_width=True, height=400)
+            
+            # Low stock warning
+            if not low_df.empty:
+                st.divider()
+                st.warning(f"⚠️ {len(low_df)} items are low in stock and need reordering!")
+                with st.expander("📋 View Low Stock Items"):
+                    st.dataframe(low_df, use_container_width=True, height=300)
+            
+            # Export
+            if not filtered_df.empty:
+                csv = filtered_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv'
+                )
+        else:
+            st.info("📊 No inventory data found. Please check your Google Sheets connection.")
 
     with tab1:
         if not df.empty:
