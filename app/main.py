@@ -1663,216 +1663,216 @@ def main():
     with tab_inventory:
         st.markdown("## 📦 Company Inventory (Google Sheets)")
 
-    # --- HIDE SEARCH ONLY IN THIS TAB ---
-    st.markdown("""
-    <style>
-    .stDataFrame [data-testid="stDataFrameSearch"] {
-        display: none !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        # --- HIDE SEARCH ONLY IN THIS TAB ---
+        st.markdown("""
+        <style>
+        .stDataFrame [data-testid="stDataFrameSearch"] {
+            display: none !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
-    # Refresh button
-    col1, col2 = st.columns([1, 4])
-
-    with col1:
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-    with col2:
-        st.caption(
-            f"Data source: Google Sheets | Updated: "
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        )
-
-    st.divider()
-
-    @st.cache_data(ttl=300)
-    def load_inventory_data():
-        try:
-            gsheet = GoogleSheetReader()
-
-            if gsheet.authenticate():
-                stock = gsheet.get_stock_with_pricing()
-                current = gsheet.get_current_stock()
-                low = gsheet.get_low_stock_items()
-
-                # Count categories
-                category_count = (
-                    stock['ITEM_CATEGORY'].nunique()
-                    if 'ITEM_CATEGORY' in stock.columns
-                    else 0
-                )
-
-                return stock, current, low, category_count
-
-        except Exception as e:
-            st.error(f"Inventory loading error: {e}")
-
-        # Fallback if authentication fails
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(),
-            pd.DataFrame(),
-            0
-        )
-
-    with st.spinner("Loading inventory data..."):
-        stock_df, current_df, low_df, category_count = load_inventory_data()
-
-    # Everything below stays INSIDE tab_inventory
-    if not stock_df.empty:
-
-        col1, col2, col3, col4 = st.columns(4)
+        # Refresh button
+        col1, col2 = st.columns([1, 4])
 
         with col1:
-            st.metric("📦 Total Items", len(stock_df))
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
 
         with col2:
-            st.metric("📂 Categories", category_count)
-
-        with col3:
-            st.metric(
-                "📊 Current Stock",
-                len(current_df) if not current_df.empty else 0
+            st.caption(
+                f"Data source: Google Sheets | Updated: "
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
             )
 
-        with col4:
-            low_count = len(low_df) if not low_df.empty else 0
-            st.metric(
-                "⚠️ Low Stock",
-                low_count,
-                delta=f"-{low_count}" if low_count > 0 else None
-            )
+        st.divider()
 
-        # Price stats
-        if 'UNIT PRICE' in stock_df.columns:
-            price_count = stock_df['UNIT PRICE'].notna().sum()
+        @st.cache_data(ttl=300)
+        def load_inventory_data():
+            try:
+                gsheet = GoogleSheetReader()
 
-            if price_count > 0:
-                st.caption(
-                    f"💰 Prices available for "
-                    f"{price_count} out of {len(stock_df)} items"
-                )
+                if gsheet.authenticate():
+                    stock = gsheet.get_stock_with_pricing()
+                    current = gsheet.get_current_stock()
+                    low = gsheet.get_low_stock_items()
 
-        # Search + Filter
-        col1, col2 = st.columns(2)
-
-        with col1:
-            search = st.text_input(
-                "🔍 Search Items",
-                placeholder="Type item name..."
-            )
-
-        with col2:
-            if 'ITEM_CATEGORY' in stock_df.columns:
-                categories = (
-                    ['All'] +
-                    sorted(
-                        stock_df['ITEM_CATEGORY']
-                        .dropna()
-                        .unique()
-                        .tolist()
+                    # Count categories
+                    category_count = (
+                        stock['ITEM_CATEGORY'].nunique()
+                        if 'ITEM_CATEGORY' in stock.columns
+                        else 0
                     )
+
+                    return stock, current, low, category_count
+
+            except Exception as e:
+                st.error(f"Inventory loading error: {e}")
+
+            # Fallback if authentication fails
+            return (
+                pd.DataFrame(),
+                pd.DataFrame(),
+                pd.DataFrame(),
+                0
+            )
+
+        with st.spinner("Loading inventory data..."):
+            stock_df, current_df, low_df, category_count = load_inventory_data()
+
+        # Everything below stays INSIDE tab_inventory
+        if not stock_df.empty:
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("📦 Total Items", len(stock_df))
+
+            with col2:
+                st.metric("📂 Categories", category_count)
+
+            with col3:
+                st.metric(
+                    "📊 Current Stock",
+                    len(current_df) if not current_df.empty else 0
                 )
 
-                category_filter = st.selectbox(
-                    "📂 Category",
-                    categories
+            with col4:
+                low_count = len(low_df) if not low_df.empty else 0
+                st.metric(
+                    "⚠️ Low Stock",
+                    low_count,
+                    delta=f"-{low_count}" if low_count > 0 else None
                 )
-            else:
-                category_filter = "All"
 
-        # Apply filters
-        filtered_df = stock_df.copy()
+            # Price stats
+            if 'UNIT PRICE' in stock_df.columns:
+                price_count = stock_df['UNIT PRICE'].notna().sum()
 
-        if search:
-            mask = False
+                if price_count > 0:
+                    st.caption(
+                        f"💰 Prices available for "
+                        f"{price_count} out of {len(stock_df)} items"
+                    )
 
-            for col in ['ITEM_NAME', 'ITEM_SERIAL']:
-                if col in filtered_df.columns:
-                    mask = (
-                        mask |
-                        filtered_df[col]
-                        .astype(str)
-                        .str.contains(
-                            search,
-                            case=False,
-                            na=False
+            # Search + Filter
+            col1, col2 = st.columns(2)
+
+            with col1:
+                search = st.text_input(
+                    "🔍 Search Items",
+                    placeholder="Type item name..."
+                )
+
+            with col2:
+                if 'ITEM_CATEGORY' in stock_df.columns:
+                    categories = (
+                        ['All'] +
+                        sorted(
+                            stock_df['ITEM_CATEGORY']
+                            .dropna()
+                            .unique()
+                            .tolist()
                         )
                     )
 
-            filtered_df = filtered_df[mask]
+                    category_filter = st.selectbox(
+                        "📂 Category",
+                        categories
+                    )
+                else:
+                    category_filter = "All"
 
-        if (
-            category_filter != "All"
-            and 'ITEM_CATEGORY' in filtered_df.columns
-        ):
-            filtered_df = filtered_df[
-                filtered_df['ITEM_CATEGORY']
-                == category_filter
+            # Apply filters
+            filtered_df = stock_df.copy()
+
+            if search:
+                mask = False
+
+                for col in ['ITEM_NAME', 'ITEM_SERIAL']:
+                    if col in filtered_df.columns:
+                        mask = (
+                            mask |
+                            filtered_df[col]
+                            .astype(str)
+                            .str.contains(
+                                search,
+                                case=False,
+                                na=False
+                            )
+                        )
+
+                filtered_df = filtered_df[mask]
+
+            if (
+                category_filter != "All"
+                and 'ITEM_CATEGORY' in filtered_df.columns
+            ):
+                filtered_df = filtered_df[
+                    filtered_df['ITEM_CATEGORY']
+                    == category_filter
+                ]
+
+            # Display table
+            st.markdown(
+                f"### 📋 Stock Listing ({len(filtered_df)} items)"
+            )
+
+            display_cols = [
+                'ITEM_SERIAL',
+                'ITEM_CATEGORY',
+                'ITEM_NAME',
+                'UNIT_OF_MEASURE',
+                'QUANTITY',
+                'UNIT PRICE',
+                'REORDER LEVEL'
             ]
 
-        # Display table
-        st.markdown(
-            f"### 📋 Stock Listing ({len(filtered_df)} items)"
-        )
+            display_cols = [
+                col for col in display_cols
+                if col in filtered_df.columns
+            ]
 
-        display_cols = [
-            'ITEM_SERIAL',
-            'ITEM_CATEGORY',
-            'ITEM_NAME',
-            'UNIT_OF_MEASURE',
-            'QUANTITY',
-            'UNIT PRICE',
-            'REORDER LEVEL'
-        ]
-
-        display_cols = [
-            col for col in display_cols
-            if col in filtered_df.columns
-        ]
-
-        st.dataframe(
-            filtered_df[display_cols],
-            use_container_width=True,
-            height=400,
-            hide_index=True
-        )
-
-        # Low stock section
-        if not low_df.empty:
-            st.divider()
-
-            st.warning(
-                f"⚠️ {len(low_df)} items are low in stock and need reordering!"
+            st.dataframe(
+                filtered_df[display_cols],
+                use_container_width=True,
+                height=400,
+                hide_index=True
             )
 
-            with st.expander("📋 View Low Stock Items"):
-                st.dataframe(
-                    low_df,
-                    use_container_width=True,
-                    height=300
+            # Low stock section
+            if not low_df.empty:
+                st.divider()
+
+                st.warning(
+                    f"⚠️ {len(low_df)} items are low in stock and need reordering!"
                 )
 
-        # CSV export
-        if not filtered_df.empty:
-            csv = (
-                filtered_df
-                .to_csv(index=False)
-                .encode('utf-8')
-            )
+                with st.expander("📋 View Low Stock Items"):
+                    st.dataframe(
+                        low_df,
+                        use_container_width=True,
+                        height=300
+                    )
 
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
+            # CSV export
+            if not filtered_df.empty:
+                csv = (
+                    filtered_df
+                    .to_csv(index=False)
+                    .encode('utf-8')
+                )
 
-    else:
-        st.info(
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+
+        else:
+            st.info(
             "📊 No inventory data found. "
             "Please check your Google Sheets connection."
         )
