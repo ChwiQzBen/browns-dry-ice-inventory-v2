@@ -1663,6 +1663,15 @@ def main():
     with tab_inventory:
         st.markdown("## 📦 Company Inventory (Google Sheets)")
     
+    # --- HIDE SEARCH ONLY IN THIS TAB ---
+    st.markdown("""
+    <style>
+        .stDataFrame [data-testid="stDataFrameSearch"] {
+            display: none !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Refresh button
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -1678,7 +1687,7 @@ def main():
     def load_inventory_data():
         gsheet = GoogleSheetReader()
         if gsheet.authenticate():
-            stock = gsheet.get_stock_with_pricing()
+            stock = gsheet.get_stock_with_pricing()  # Use pricing-merged data
             current = gsheet.get_current_stock()
             low = gsheet.get_low_stock_items()
             
@@ -1702,6 +1711,12 @@ def main():
         with col4:
             low_count = len(low_df) if not low_df.empty else 0
             st.metric("⚠️ Low Stock", low_count, delta=f"-{low_count}" if low_count > 0 else None)
+        
+        # Price statistics
+        if 'UNIT PRICE' in stock_df.columns:
+            price_count = stock_df['UNIT PRICE'].notna().sum()
+            if price_count > 0:
+                st.caption(f"💰 Prices available for {price_count} out of {len(stock_df)} items")
         
         # Search and filter using ITEM_CATEGORY
         col1, col2 = st.columns(2)
@@ -1729,10 +1744,10 @@ def main():
         # Show data
         st.markdown(f"### 📋 Stock Listing ({len(filtered_df)} items)")
         
-        # Select which columns to display (remove empty column)
+        # Select which columns to display
         display_cols = ['ITEM_SERIAL', 'ITEM_CATEGORY', 'ITEM_NAME', 'UNIT_OF_MEASURE', 'QUANTITY', 'UNIT PRICE', 'REORDER LEVEL']
         display_cols = [col for col in display_cols if col in filtered_df.columns]
-        st.dataframe(filtered_df[display_cols], use_container_width=True, height=400)
+        st.dataframe(filtered_df[display_cols], use_container_width=True, height=400, hide_index=True)
         
         # Low stock warning
         if not low_df.empty:
