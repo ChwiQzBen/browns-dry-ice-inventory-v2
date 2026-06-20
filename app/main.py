@@ -1827,7 +1827,63 @@ def main():
                         st.info("Total inventory value is zero. Cannot perform ABC analysis.")
                 else:
                     st.info("No valid items with both quantity and price data found for ABC analysis.")
-
+            # --- CATEGORY-LEVEL INVENTORY SUMMARY ---
+            if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
+                st.divider()
+                st.markdown("### 📊 Category-Level Inventory Summary")
+                
+                # Convert to numeric
+                cat_df = stock_df.copy()
+                cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
+                cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
+                
+                # Drop rows with missing values
+                cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                
+                if not cat_df.empty:
+                    # Group by category
+                    category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
+                        'ITEM_NAME': 'count',
+                        'QUANTITY': 'sum',
+                        'UNIT PRICE': 'mean'
+                    }).reset_index()
+                    
+                    category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price']
+                    
+                    # Calculate category value
+                    cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                    category_value = cat_df.groupby('ITEM_CATEGORY')['ANNUAL_VALUE'].sum().reset_index()
+                    
+                    # Merge with category summary
+                    category_summary = category_summary.merge(category_value, on='ITEM_CATEGORY')
+                    category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
+                    
+                    # Format currency columns
+                    category_summary['Avg Unit Price'] = category_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
+                    category_summary['Total Value'] = category_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
+                    
+                    # Show summary table
+                    st.dataframe(category_summary, use_container_width=True, hide_index=True)
+                    
+                    # Chart: Category breakdown
+                    fig_category = px.bar(
+                        category_summary,
+                        x='Category',
+                        y='Total Value',
+                        title='Inventory Value by Category',
+                        color='Category',
+                        height=400,
+                        labels={'Total Value': 'Total Value (KSh)'}
+                    )
+                    fig_category.update_layout(showlegend=False)
+                    st.plotly_chart(fig_category, use_container_width=True)
+                    
+                    # Show total value
+                    total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
+                    st.metric("💰 Total Inventory Value Across All Categories", f"KSh {total_inventory_value:,.2f}")
+                else:
+                    st.info("No valid data available for category summary.")
+                    
             # Search + Filter
             col1, col2 = st.columns(2)
 
