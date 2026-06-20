@@ -1,4 +1,4 @@
-# core/google_sheet_reader.py
+# app/core/google_sheet_reader.py
 import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -82,19 +82,90 @@ class GoogleSheetReader:
         """Read UNIT PRICING"""
         return self.read_worksheet("UNIT PRICING")
     
-    def get_inventory_summary(self):
-        """Get combined inventory summary"""
+    def get_stock_with_pricing(self):
+        """Get stock listing with prices from UNIT PRICING tab"""
         stock_df = self.get_stock_listing()
-        current_stock_df = self.get_current_stock()
         pricing_df = self.get_unit_pricing()
         
-        # Start with stock listing
+        if stock_df.empty:
+            return stock_df
+        
+        # If no pricing data, return stock without prices
+        if pricing_df.empty:
+            stock_df['UNIT PRICE'] = None
+            return stock_df
+        
+        # Clean column names
+        pricing_df.columns = pricing_df.columns.str.strip()
+        
+        # Find the price column
+        price_col = None
+        for col in ['AVERAGE UNIT PRICE', 'UNIT PRICE', 'Price', 'Average Unit Price']:
+            if col in pricing_df.columns:
+                price_col = col
+                break
+        
+        if not price_col:
+            print(f"Warning: No price column found. Columns: {list(pricing_df.columns)}")
+            stock_df['UNIT PRICE'] = None
+            return stock_df
+        
+        # Find item name column in pricing
+        item_col = None
+        for col in ['ITEM_DESCRIPTION', 'ITEM_NAME', 'Description', 'Item']:
+            if col in pricing_df.columns:
+                item_col = col
+                break
+        
+        if not item_col:
+            print(f"Warning: No item column found in pricing. Columns: {list(pricing_df.columns)}")
+            stock_df['UNIT PRICE'] = None
+            return stock_df
+        
+        # Find item name column in stock
+        stock_item_col = None
+        for col in ['ITEM_NAME', 'ITEM_DESCRIPTION', 'Item Name']:
+            if col in stock_df.columns:
+                stock_item_col = col
+                break
+        
+        if not stock_item_col:
+            print(f"Warning: No item column found in stock. Columns: {list(stock_df.columns)}")
+            stock_df['UNIT PRICE'] = None
+            return stock_df
+        
+        # Create price lookup dictionary
+        price_dict = {}
+        for _, row in pricing_df.iterrows():
+            item_name = str(row[item_col]).strip()
+            price = row[price_col]
+            if pd.notna(price) and price > 0:
+                # If multiple prices for same item, keep the first one
+                if item_name not in price_dict:
+                    price_dict[item_name] = price
+        
+        # Add price column to stock
+        stock_df['UNIT PRICE'] = stock_df[stock_item_col].map(price_dict)
+        
+        # Count how many got prices
+        price_count = stock_df['UNIT PRICE'].notna().sum()
+        print(f"✅ Matched {price_count} items with prices")
+        
+        return stock_df
+    
+    def get_inventory_summary(self):
+        """Get combined inventory summary with pricing"""
+        # Use the new method that includes pricing
+        stock_df = self.get_stock_with_pricing()
+        current_stock_df = self.get_current_stock()
+        
+        # Start with stock listing (already has prices)
         summary = stock_df.copy() if not stock_df.empty else pd.DataFrame()
         
         # Add current stock if available
         if not current_stock_df.empty and not summary.empty:
             # Try to find matching columns
-            name_cols = ['Item Name', 'Product', 'Item', 'Name']
+            name_cols = ['ITEM_NAME', 'Item Name', 'Product', 'Item']
             found_col = None
             for col in name_cols:
                 if col in summary.columns and col in current_stock_df.columns:
@@ -105,22 +176,6 @@ class GoogleSheetReader:
                 summary = summary.merge(
                     current_stock_df, 
                     on=found_col, 
-                    how='left'
-                )
-        
-        # Add pricing if available
-        if not pricing_df.empty and not summary.empty:
-            price_cols = ['Item', 'Product', 'Name']
-            found_price = None
-            for col in price_cols:
-                if col in summary.columns and col in pricing_df.columns:
-                    found_price = col
-                    break
-            
-            if found_price:
-                summary = summary.merge(
-                    pricing_df,
-                    on=found_price,
                     how='left'
                 )
         
@@ -135,7 +190,7 @@ class GoogleSheetReader:
         # Find stock column
         stock_col = None
         for col in stock_df.columns:
-            if 'stock' in col.lower():
+            if 'stock' in col.lower() or 'quantity' in col.lower():
                 stock_col = col
                 break
         
@@ -144,7 +199,7 @@ class GoogleSheetReader:
                 # Try to find reorder point column
                 reorder_col = None
                 for col in stock_df.columns:
-                    if 'reorder' in col.lower():
+                    if 'reorder' in col.lower() or 'reorder level' in col.lower():
                         reorder_col = col
                         break
                 
@@ -170,7 +225,7 @@ class GoogleSheetReader:
         # Find category column
         category_col = None
         for col in stock_df.columns:
-            if 'category' in col.lower():
+            if 'category' in col.lower() or 'item_category' in col.lower():
                 category_col = col
                 break
         
