@@ -1695,7 +1695,7 @@ def main():
             with col1:
                 st.metric("📦 Total Items", len(stock_df))
             with col2:
-                categories = stock_df['Category'].nunique() if 'Category' in stock_df.columns else 0
+                categories = stock_df['Category'].nunique() if 'Category' in stock_df.columns else "N/A"
                 st.metric("📂 Categories", categories)
             with col3:
                 st.metric("📊 Current Stock", len(current_df) if not current_df.empty else 0)
