@@ -1827,7 +1827,9 @@ def main():
                         st.info("Total inventory value is zero. Cannot perform ABC analysis.")
                 else:
                     st.info("No valid items with both quantity and price data found for ABC analysis.")
-            # --- CATEGORY-LEVEL INVENTORY SUMMARY ---
+
+
+                # --- CATEGORY-LEVEL INVENTORY SUMMARY ---
             if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
                 st.divider()
                 st.markdown("### 📊 Category-Level Inventory Summary")
@@ -1841,31 +1843,29 @@ def main():
                 cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
                 
                 if not cat_df.empty:
-                    # Group by category
+                    # Calculate annual value first
+                    cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                    
+                    # Group by category with all aggregations at once
                     category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
                         'ITEM_NAME': 'count',
                         'QUANTITY': 'sum',
-                        'UNIT PRICE': 'mean'
+                        'UNIT PRICE': 'mean',
+                        'ANNUAL_VALUE': 'sum'
                     }).reset_index()
                     
-                    category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price']
-                    
-                    # Calculate category value
-                    cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
-                    category_value = cat_df.groupby('ITEM_CATEGORY')['ANNUAL_VALUE'].sum().reset_index()
-                    
-                    # Merge with category summary
-                    category_summary = category_summary.merge(category_value, on='ITEM_CATEGORY')
+                    # Rename columns
                     category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
                     
-                    # Format currency columns
-                    category_summary['Avg Unit Price'] = category_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
-                    category_summary['Total Value'] = category_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
+                    # Format currency columns (keep as numbers for chart, format for display)
+                    display_summary = category_summary.copy()
+                    display_summary['Avg Unit Price'] = display_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
+                    display_summary['Total Value'] = display_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
                     
                     # Show summary table
-                    st.dataframe(category_summary, use_container_width=True, hide_index=True)
+                    st.dataframe(display_summary, use_container_width=True, hide_index=True)
                     
-                    # Chart: Category breakdown
+                    # Chart: Category breakdown (use numeric values)
                     fig_category = px.bar(
                         category_summary,
                         x='Category',
