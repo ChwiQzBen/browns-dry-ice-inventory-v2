@@ -2100,247 +2100,363 @@ def main():
             else:
                 st.info("No current stock records found.")
 
-    with tab_analytics:
-        st.markdown("## 📈 All Items Analytics")
-        st.markdown("Comprehensive analysis for all inventory items using Google Sheets data")
-        
-        # Load data
-        try:
-            gsheet = GoogleSheetReader()
-            if gsheet.authenticate():
-                # Load all data
-                stock_df = gsheet.get_stock_with_pricing()
-                check_in_df = gsheet.get_check_in()
-                check_out_df = gsheet.get_check_out()
-                current_stock_df = gsheet.get_current_stock()
-                
-                if not stock_df.empty:
-                    # --- SECTION 1: ORDER ANALYSIS FOR ALL ITEMS ---
-                    st.divider()
-                    st.markdown("### 📊 Order Analysis for All Items")
+        with tab_analytics:
+            st.markdown("## 📈 All Items Analytics")
+            st.markdown("Comprehensive analysis for all inventory items using Google Sheets data")
+            
+            # Load data
+            try:
+                gsheet = GoogleSheetReader()
+                if gsheet.authenticate():
+                    # Load all data
+                    stock_df = gsheet.get_stock_with_pricing()
+                    check_in_df = gsheet.get_check_in()
+                    check_out_df = gsheet.get_check_out()
+                    current_stock_df = gsheet.get_current_stock()
                     
-                    # Show summary metrics
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("📦 Total Items", len(stock_df))
-                    with col2:
-                        st.metric("📥 Total Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
-                    with col3:
-                        st.metric("📤 Total Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
-                    with col4:
-                        st.metric("📊 Current Stock Items", len(current_stock_df) if not current_stock_df.empty else 0)
-                    
-                    # Order pattern analysis
-                    if not check_out_df.empty:
-                        # Convert dates
-                        if 'DATE' in check_out_df.columns:
-                            check_out_df['DATE'] = pd.to_datetime(check_out_df['DATE'])
-                            check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
-                            check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
-                            
-                            # Monthly trend
-                            monthly_orders = check_out_df.groupby('MONTH').size().reset_index(name='Order Count')
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.markdown("#### 📈 Monthly Order Trends")
-                                fig_monthly = px.line(
-                                    monthly_orders,
-                                    x='MONTH',
-                                    y='Order Count',
-                                    title='Monthly Check-Out Orders',
-                                    markers=True
-                                )
-                                st.plotly_chart(fig_monthly, use_container_width=True)
-                            
-                            with col2:
-                                st.markdown("#### 📊 Order Distribution")
-                                # Get top 10 items by check-out frequency
-                                if 'ITEM_NAME' in check_out_df.columns:
-                                    top_items = check_out_df['ITEM_NAME'].value_counts().head(10)
-                                    fig_top = px.bar(
-                                        x=top_items.values,
-                                        y=top_items.index,
-                                        title='Top 10 Most Checked-Out Items',
-                                        labels={'x': 'Check-Out Count', 'y': 'Item Name'},
-                                        orientation='h'
-                                    )
-                                    st.plotly_chart(fig_top, use_container_width=True)
-                    
-                    # --- SECTION 2: DEMAND FORECAST FOR ALL ITEMS ---
-                    st.divider()
-                    st.markdown("### 🔮 Demand Forecast for All Items")
-                    
-                    if not check_out_df.empty and 'ITEM_NAME' in check_out_df.columns:
-                        # Let user select an item for forecasting
-                        items_with_history = check_out_df['ITEM_NAME'].unique().tolist()
-                        selected_item = st.selectbox(
-                            "Select Item for Demand Forecast",
-                            sorted(items_with_history),
-                            key="forecast_item"
-                        )
+                    if not stock_df.empty:
+                        # --- SECTION 1: ORDER ANALYSIS FOR ALL ITEMS ---
+                        st.divider()
+                        st.markdown("### 📊 Order Analysis for All Items")
                         
-                        if selected_item:
-                            # Filter data for selected item
-                            item_history = check_out_df[check_out_df['ITEM_NAME'] == selected_item].copy()
+                        # Show summary metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("📦 Total Items", len(stock_df))
+                        with col2:
+                            st.metric("📥 Total Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
+                        with col3:
+                            st.metric("📤 Total Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
+                        with col4:
+                            st.metric("📊 Current Stock Items", len(current_stock_df) if not current_stock_df.empty else 0)
+                        
+                        # --- ORDER PATTERN ANALYSIS ---
+                        if not check_out_df.empty:
+                            # Find the date column (try common names)
+                            date_col = None
+                            for col in ['DATE', 'Date', 'date', 'CHECKOUT_DATE', 'CHECK_OUT_DATE', 'CHECKOUT']:
+                                if col in check_out_df.columns:
+                                    date_col = col
+                                    break
                             
-                            if not item_history.empty and 'DATE' in item_history.columns and 'QUANTITY' in item_history.columns:
-                                # Prepare daily demand data
-                                item_history['DATE'] = pd.to_datetime(item_history['DATE'])
-                                daily_demand = item_history.groupby('DATE')['QUANTITY'].sum().reset_index()
-                                daily_demand.columns = ['Date', 'Order_Quantity_kg']
+                            # Find the item column
+                            item_col = None
+                            for col in ['ITEM_NAME', 'Item Name', 'item_name', 'ITEM', 'Item', 'PRODUCT']:
+                                if col in check_out_df.columns:
+                                    item_col = col
+                                    break
+                            
+                            # Find the quantity column
+                            qty_col = None
+                            for col in ['QUANTITY', 'Quantity', 'quantity', 'QTY', 'Qty', 'QTY_SOLD']:
+                                if col in check_out_df.columns:
+                                    qty_col = col
+                                    break
+                            
+                            if date_col:
+                                # Robust date parsing
+                                try:
+                                    # Convert to string first
+                                    check_out_df['DATE_STR'] = check_out_df[date_col].astype(str).str.strip()
+                                    
+                                    # Parse with multiple formats
+                                    def parse_date_safe(date_str):
+                                        if pd.isna(date_str) or date_str == '' or date_str == 'nan' or date_str == 'None' or date_str == 'NaT':
+                                            return None
+                                        try:
+                                            # Try ISO format first (YYYY-MM-DD)
+                                            return pd.to_datetime(date_str, format='%Y-%m-%d', errors='coerce')
+                                        except:
+                                            try:
+                                                # Try with time
+                                                return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S', errors='coerce')
+                                            except:
+                                                try:
+                                                    # Try mixed format
+                                                    return pd.to_datetime(date_str, format='mixed', errors='coerce')
+                                                except:
+                                                    return None
+                                    
+                                    check_out_df['DATE'] = check_out_df['DATE_STR'].apply(parse_date_safe)
+                                    
+                                    # Drop invalid dates
+                                    check_out_df = check_out_df.dropna(subset=['DATE'])
+                                    
+                                    if not check_out_df.empty:
+                                        check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
+                                        check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
+                                        
+                                        # Monthly trend
+                                        monthly_orders = check_out_df.groupby('MONTH').size().reset_index(name='Order Count')
+                                        
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            st.markdown("#### 📈 Monthly Order Trends")
+                                            if not monthly_orders.empty:
+                                                # Convert period to string for plotting
+                                                monthly_orders['MONTH_STR'] = monthly_orders['MONTH'].astype(str)
+                                                fig_monthly = px.line(
+                                                    monthly_orders,
+                                                    x='MONTH_STR',
+                                                    y='Order Count',
+                                                    title='Monthly Check-Out Orders',
+                                                    markers=True
+                                                )
+                                                st.plotly_chart(fig_monthly, use_container_width=True)
+                                            else:
+                                                st.info("No monthly data available")
+                                        
+                                        with col2:
+                                            st.markdown("#### 📊 Order Distribution")
+                                            if item_col:
+                                                top_items = check_out_df[item_col].value_counts().head(10)
+                                                if not top_items.empty:
+                                                    fig_top = px.bar(
+                                                        x=top_items.values,
+                                                        y=top_items.index,
+                                                        title='Top 10 Most Checked-Out Items',
+                                                        labels={'x': 'Check-Out Count', 'y': 'Item Name'},
+                                                        orientation='h'
+                                                    )
+                                                    st.plotly_chart(fig_top, use_container_width=True)
+                                                else:
+                                                    st.info("No item data available")
+                                except Exception as e:
+                                    st.warning(f"Could not process order analysis: {e}")
+                            else:
+                                st.info("No date column found in check-out data")
+                        else:
+                            st.info("No check-out data available for order analysis")
+                        
+                        # --- SECTION 2: DEMAND FORECAST FOR ALL ITEMS ---
+                        st.divider()
+                        st.markdown("### 🔮 Demand Forecast for All Items")
+                        
+                        if not check_out_df.empty and 'DATE' in check_out_df.columns:
+                            # Find item column
+                            item_col = None
+                            for col in ['ITEM_NAME', 'Item Name', 'item_name', 'ITEM', 'Item', 'PRODUCT']:
+                                if col in check_out_df.columns:
+                                    item_col = col
+                                    break
+                            
+                            # Find quantity column
+                            qty_col = None
+                            for col in ['QUANTITY', 'Quantity', 'quantity', 'QTY', 'Qty']:
+                                if col in check_out_df.columns:
+                                    qty_col = col
+                                    break
+                            
+                            if item_col and qty_col:
+                                # Let user select an item for forecasting
+                                items_with_history = check_out_df[item_col].dropna().unique().tolist()
                                 
-                                # Check if we have enough data
-                                if len(daily_demand) >= 5:
-                                    # Use existing ensemble forecast function
-                                    with st.spinner(f"Generating forecast for {selected_item}..."):
-                                        fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
-                                            daily_demand,
-                                            forecast_days=30
+                                if items_with_history:
+                                    selected_item = st.selectbox(
+                                        "Select Item for Demand Forecast",
+                                        sorted(items_with_history),
+                                        key="forecast_item"
+                                    )
+                                    
+                                    if selected_item:
+                                        # Filter data for selected item
+                                        item_history = check_out_df[check_out_df[item_col] == selected_item].copy()
+                                        
+                                        if not item_history.empty and 'DATE' in item_history.columns and qty_col:
+                                            # Prepare daily demand data
+                                            try:
+                                                # Convert quantity to numeric
+                                                item_history[qty_col] = pd.to_numeric(item_history[qty_col], errors='coerce')
+                                                item_history = item_history.dropna(subset=[qty_col])
+                                                
+                                                if not item_history.empty:
+                                                    # Group by date
+                                                    daily_demand = item_history.groupby('DATE')[qty_col].sum().reset_index()
+                                                    daily_demand.columns = ['Date', 'Order_Quantity_kg']
+                                                    
+                                                    # Convert to numeric
+                                                    daily_demand['Order_Quantity_kg'] = pd.to_numeric(daily_demand['Order_Quantity_kg'], errors='coerce')
+                                                    daily_demand = daily_demand.dropna()
+                                                    
+                                                    # Check if we have enough data
+                                                    if len(daily_demand) >= 5 and daily_demand['Order_Quantity_kg'].sum() > 0:
+                                                        # Use existing ensemble forecast function
+                                                        with st.spinner(f"Generating forecast for {selected_item}..."):
+                                                            fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
+                                                                daily_demand,
+                                                                forecast_days=30
+                                                            )
+                                                            
+                                                            if fig_forecast:
+                                                                st.plotly_chart(fig_forecast, use_container_width=True)
+                                                                
+                                                                # Forecast summary
+                                                                col1, col2, col3 = st.columns(3)
+                                                                with col1:
+                                                                    total_forecast = np.sum(forecast_values) if len(forecast_values) > 0 else 0
+                                                                    st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
+                                                                with col2:
+                                                                    avg_daily = np.mean(forecast_values) if len(forecast_values) > 0 else 0
+                                                                    st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
+                                                                with col3:
+                                                                    st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
+                                                                
+                                                                # Show model breakdown
+                                                                with st.expander("🔬 View Model Performance"):
+                                                                    for model_name, daily_avg in model_forecasts.items():
+                                                                        st.metric(model_name, f"{daily_avg:.1f} units/day")
+                                                            else:
+                                                                st.warning("Could not generate forecast for this item.")
+                                                    else:
+                                                        st.warning(f"Not enough data for {selected_item}. Need at least 5 positive values.")
+                                                else:
+                                                    st.warning("No valid quantity data after cleaning")
+                                            except Exception as e:
+                                                st.warning(f"Error processing data: {e}")
+                                        else:
+                                            st.warning("No quantity data available for this item.")
+                                else:
+                                    st.info("No items with check-out history found.")
+                            else:
+                                st.info("Missing required columns (item or quantity) for forecasting.")
+                        else:
+                            st.info("No check-out data available for forecasting.")
+                        
+                        # --- SECTION 3: COST OPTIMIZATION FOR ALL ITEMS ---
+                        st.divider()
+                        st.markdown("### 💰 Cost Optimization for All Items")
+                        
+                        if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                            # Convert to numeric
+                            cost_df = stock_df.copy()
+                            cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
+                            cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
+                            cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                            
+                            if not cost_df.empty:
+                                # Calculate costs
+                                cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
+                                cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
+                                
+                                # Cost optimization parameters
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    order_cost = st.number_input(
+                                        "Ordering Cost (KSh)", 
+                                        value=float(constants.TRANSPORT_COST), 
+                                        step=100.0,
+                                        key="cost_analysis_order_cost"
+                                    )
+                                with col2:
+                                    holding_rate = st.number_input(
+                                        "Holding Rate (%)", 
+                                        value=float(constants.HOLDING_RATE * 100), 
+                                        step=0.5,
+                                        key="cost_analysis_holding_rate"
+                                    ) / 100
+                                
+                                if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
+                                    # Calculate EOQ and costs for each item
+                                    cost_results = []
+                                    for _, row in cost_df.iterrows():
+                                        try:
+                                            if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0 and row['ANNUAL_DEMAND'] > 0:
+                                                eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
+                                                
+                                                # Avoid division by zero
+                                                if row['QUANTITY'] > 0 and eoq > 0:
+                                                    current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
+                                                    optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
+                                                    
+                                                    cost_results.append({
+                                                        'Item': row.get('ITEM_NAME', 'Unknown'),
+                                                        'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                                                        'Current Stock': row['QUANTITY'],
+                                                        'Unit Price': row['UNIT PRICE'],
+                                                        'Annual Demand': row['ANNUAL_DEMAND'],
+                                                        'EOQ': eoq,
+                                                        'Current Cost': current_total_cost,
+                                                        'Optimal Cost': optimal_total_cost,
+                                                        'Potential Savings': current_total_cost - optimal_total_cost if current_total_cost > optimal_total_cost else 0
+                                                    })
+                                        except:
+                                            pass
+                                    
+                                    if cost_results:
+                                        cost_df_results = pd.DataFrame(cost_results)
+                                        
+                                        # Summary metrics
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.metric("📦 Items Analyzed", len(cost_df_results))
+                                        with col2:
+                                            total_savings = cost_df_results['Potential Savings'].sum()
+                                            st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
+                                        with col3:
+                                            avg_savings = cost_df_results['Potential Savings'].mean()
+                                            st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
+                                        with col4:
+                                            items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
+                                            st.metric("✅ Items with Savings", items_with_savings)
+                                        
+                                        # Show full results
+                                        st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
+                                        
+                                        # Download results
+                                        csv = cost_df_results.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="📥 Download Cost Analysis Results",
+                                            data=csv,
+                                            file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
+                                            mime='text/csv'
                                         )
                                         
-                                        if fig_forecast:
-                                            st.plotly_chart(fig_forecast, use_container_width=True)
-                                            
-                                            # Forecast summary
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                total_forecast = np.sum(forecast_values)
-                                                st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
-                                            with col2:
-                                                avg_daily = np.mean(forecast_values)
-                                                st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
-                                            with col3:
-                                                st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
-                                            
-                                            # Show model breakdown
-                                            with st.expander("🔬 View Model Performance"):
-                                                for model_name, daily_avg in model_forecasts.items():
-                                                    st.metric(model_name, f"{daily_avg:.1f} units/day")
-                                else:
-                                    st.warning(f"Not enough historical data for {selected_item}. Need at least 5 data points.")
-                            else:
-                                st.warning("No quantity data available for this item.")
-                    else:
-                        st.info("No check-out data available for forecasting.")
-                    
-                    # --- SECTION 3: COST OPTIMIZATION FOR ALL ITEMS ---
-                    st.divider()
-                    st.markdown("### 💰 Cost Optimization for All Items")
-                    
-                    if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                        # Convert to numeric
-                        cost_df = stock_df.copy()
-                        cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
-                        cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
-                        cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                        
-                        if not cost_df.empty:
-                            # Calculate costs
-                            cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
-                            cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
-                            
-                            # Cost optimization parameters
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                order_cost = st.number_input(
-                                    "Ordering Cost (KSh)", 
-                                    value=float(constants.TRANSPORT_COST), 
-                                    step=100.0,
-                                    key="cost_analysis_order_cost"
-                                )
-                            with col2:
-                                holding_rate = st.number_input(
-                                    "Holding Rate (%)", 
-                                    value=float(constants.HOLDING_RATE * 100), 
-                                    step=0.5,
-                                    key="cost_analysis_holding_rate"
-                                ) / 100
-                            
-                            if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
-                                # Calculate EOQ and costs for each item
-                                cost_results = []
-                                for _, row in cost_df.iterrows():
-                                    if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0:
-                                        eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
-                                        current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
-                                        optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
+                                        # Top savings items
+                                        st.divider()
+                                        st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
+                                        top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
+                                        if not top_savings.empty:
+                                            st.dataframe(
+                                                top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
+                                                use_container_width=True,
+                                                hide_index=True
+                                            )
                                         
-                                        cost_results.append({
-                                            'Item': row['ITEM_NAME'],
-                                            'Category': row['ITEM_CATEGORY'],
-                                            'Current Stock': row['QUANTITY'],
-                                            'Unit Price': row['UNIT PRICE'],
-                                            'Annual Demand': row['ANNUAL_DEMAND'],
-                                            'EOQ': eoq,
-                                            'Current Cost': current_total_cost,
-                                            'Optimal Cost': optimal_total_cost,
-                                            'Potential Savings': current_total_cost - optimal_total_cost
-                                        })
-                                
-                                if cost_results:
-                                    cost_df_results = pd.DataFrame(cost_results)
-                                    
-                                    # Summary metrics
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    with col1:
-                                        st.metric("📦 Items Analyzed", len(cost_df_results))
-                                    with col2:
-                                        total_savings = cost_df_results['Potential Savings'].sum()
-                                        st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
-                                    with col3:
-                                        avg_savings = cost_df_results['Potential Savings'].mean()
-                                        st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
-                                    with col4:
-                                        items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
-                                        st.metric("✅ Items with Savings", items_with_savings)
-                                    
-                                    # Show full results
-                                    st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
-                                    
-                                    # Download results
-                                    csv = cost_df_results.to_csv(index=False).encode('utf-8')
-                                    st.download_button(
-                                        label="📥 Download Cost Analysis Results",
-                                        data=csv,
-                                        file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
-                                        mime='text/csv'
-                                    )
-                                    
-                                    # Top savings items
-                                    st.divider()
-                                    st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
-                                    top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
-                                    st.dataframe(
-                                        top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
-                                        use_container_width=True,
-                                        hide_index=True
-                                    )
-                                    
-                                    # Category breakdown
-                                    st.divider()
-                                    st.markdown("#### 📊 Cost Savings by Category")
-                                    category_cost_summary = cost_df_results.groupby('Category').agg({
-                                        'Item': 'count',
-                                        'Potential Savings': 'sum'
-                                    }).reset_index()
-                                    category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
-                                    st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
-                                    
-                                    # Chart: Savings by category
-                                    fig_savings = px.bar(
-                                        category_cost_summary,
-                                        x='Category',
-                                        y='Total Savings',
-                                        title='Potential Savings by Category',
-                                        color='Category',
-                                        height=400,
-                                        labels={'Total Savings': 'Savings (KSh)'}
-                                    )
-                                    fig_savings.update_layout(showlegend=False)
-                                    st.plotly_chart(fig_savings, use_container_width=True)
-        except Exception as e:
-            st.error(f"Error loading analytics data: {e}")
+                                        # Category breakdown
+                                        st.divider()
+                                        st.markdown("#### 📊 Cost Savings by Category")
+                                        category_cost_summary = cost_df_results.groupby('Category').agg({
+                                            'Item': 'count',
+                                            'Potential Savings': 'sum'
+                                        }).reset_index()
+                                        category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
+                                        st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
+                                        
+                                        # Chart: Savings by category
+                                        fig_savings = px.bar(
+                                            category_cost_summary,
+                                            x='Category',
+                                            y='Total Savings',
+                                            title='Potential Savings by Category',
+                                            color='Category',
+                                            height=400,
+                                            labels={'Total Savings': 'Savings (KSh)'}
+                                        )
+                                        fig_savings.update_layout(showlegend=False)
+                                        st.plotly_chart(fig_savings, use_container_width=True)
+                                    else:
+                                        st.warning("No valid cost results generated. Please check your data.")
+                            else:
+                                st.warning("No valid data with both quantity and price found.")
+                        else:
+                            st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
+                    else:
+                        st.warning("No stock data found.")
+                else:
+                    st.warning("Could not authenticate with Google Sheets.")
+            except Exception as e:
+                st.error(f"Error loading analytics data: {e}")
+                st.caption("Please check your Google Sheets connection and data format.")
 
     with tab1:
         if not df.empty:
