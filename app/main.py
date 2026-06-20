@@ -2186,13 +2186,13 @@ def main():
                         item_col_in = first_col
                 
                 # Debug output in UI
-                with st.expander("🔍 Debug: Check-In Data Info"):
-                    st.write(f"**Columns found:** {list(check_in_df.columns)}")
-                    st.write(f"**Date column used:** {date_col_in}")
-                    st.write(f"**Item column used:** {item_col_in}")
-                    st.write(f"**Total rows:** {len(check_in_df)}")
-                    st.write("**Sample data (first 3 rows):**")
-                    st.dataframe(check_in_df.head(3))
+                #with st.expander("🔍 Debug: Check-In Data Info"):
+                #    st.write(f"**Columns found:** {list(check_in_df.columns)}")
+                #    st.write(f"**Date column used:** {date_col_in}")
+                #    st.write(f"**Item column used:** {item_col_in}")
+                #    st.write(f"**Total rows:** {len(check_in_df)}")
+                #    st.write("**Sample data (first 3 rows):**")
+                #    st.dataframe(check_in_df.head(3))
                 
                 if date_col_in:
                     try:
