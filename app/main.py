@@ -2233,7 +2233,7 @@ def main():
                                     top_checkins = top_checkins[top_checkins.index != '']
                                     top_checkins = top_checkins[top_checkins.index != 'nan']
                                     
-                                    st.write(f"**Debug: Found {len(top_checkins)} unique items in check-in data**")
+                                #    st.write(f"**Debug: Found {len(top_checkins)} unique items in check-in data**")
                                     
                                     if not top_checkins.empty:
                                         fig_top_in = px.bar(
