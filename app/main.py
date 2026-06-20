@@ -1650,9 +1650,9 @@ def main():
             f"<div class='{alert_class}'>{alert['timestamp'].strftime('%H:%M')} - {alert['message']}</div>",
             unsafe_allow_html=True
         )
-    tab_inventory, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_inventory, tab_movements,tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
-        "📊 Stock Movements"
+        "📊 Stock Movements",
         "📊 Order Analysis",
         "🔮 Demand Forecast",
         "📦 Inventory Management",
