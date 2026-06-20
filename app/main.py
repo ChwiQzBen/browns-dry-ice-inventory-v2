@@ -1652,6 +1652,7 @@ def main():
         )
     tab_inventory, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
+        "📊 Stock Movements"
         "📊 Order Analysis",
         "🔮 Demand Forecast",
         "📦 Inventory Management",
@@ -1876,7 +1877,98 @@ def main():
             "📊 No inventory data found. "
             "Please check your Google Sheets connection."
         )
-
+    with tab_movements:
+        st.markdown("## 📊 Stock Movements (Google Sheets)")
+    
+        # Refresh button
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("🔄 Refresh Movements", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            st.caption(f"Data source: Google Sheets | Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        
+        st.divider()
+        
+        @st.cache_data(ttl=300)
+        def load_movement_data():
+            gsheet = GoogleSheetReader()
+            if gsheet.authenticate():
+                check_in = gsheet.get_check_in()
+                check_out = gsheet.get_check_out()
+                current_stock = gsheet.get_current_stock()
+                return check_in, check_out, current_stock
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        
+        with st.spinner("Loading stock movement data..."):
+            check_in_df, check_out_df, current_stock_df = load_movement_data()
+        
+        # Show summary metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
+        with col2:
+            st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
+        with col3:
+            st.metric("📊 Current Stock Records", len(current_stock_df) if not current_stock_df.empty else 0)
+        
+        st.divider()
+        
+        # Create tabs for each movement type
+        movement_tab1, movement_tab2, movement_tab3 = st.tabs([
+            "📥 Check-Ins",
+            "📤 Check-Outs",
+            "📊 Current Stock"
+        ])
+        
+        with movement_tab1:
+            st.markdown("### 📥 Check-In Records")
+            if not check_in_df.empty:
+                st.dataframe(check_in_df, use_container_width=True, height=400)
+                
+                # Export
+                csv = check_in_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Check-Ins CSV",
+                    data=csv,
+                    file_name=f"check_ins_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv'
+                )
+            else:
+                st.info("No check-in records found.")
+        
+        with movement_tab2:
+            st.markdown("### 📤 Check-Out Records")
+            if not check_out_df.empty:
+                st.dataframe(check_out_df, use_container_width=True, height=400)
+                
+                # Export
+                csv = check_out_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Check-Outs CSV",
+                    data=csv,
+                    file_name=f"check_outs_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv'
+                )
+            else:
+                st.info("No check-out records found.")
+        
+        with movement_tab3:
+            st.markdown("### 📊 Current Stock Levels")
+            if not current_stock_df.empty:
+                st.dataframe(current_stock_df, use_container_width=True, height=400)
+                
+                # Export
+                csv = current_stock_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Current Stock CSV",
+                    data=csv,
+                    file_name=f"current_stock_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv'
+                )
+            else:
+                st.info("No current stock records found.")
     with tab1:
         if not df.empty:
             st.markdown("""
