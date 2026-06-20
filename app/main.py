@@ -2323,6 +2323,111 @@ def main():
             fig_savings = mobile_ui.optimize_chart_for_mobile(fig_savings)
             st.plotly_chart(fig_savings, use_container_width=True,
                 config=mobile_ui.get_mobile_chart_config())
+                        # --- ITEM-LEVEL OPTIMIZATION FOR ALL INVENTORY ---
+            st.divider()
+            st.markdown("### 📦 Item-Level Optimization for All Inventory")
+            
+            with st.expander("🔧 Calculate EOQ for Selected Items", expanded=False):
+                # Get stock data with pricing
+                try:
+                    gsheet = GoogleSheetReader()
+                    if gsheet.authenticate():
+                        stock_df = gsheet.get_stock_with_pricing()
+                        
+                        if not stock_df.empty and 'ITEM_NAME' in stock_df.columns and 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                            # Convert to numeric
+                            stock_df['QUANTITY'] = pd.to_numeric(stock_df['QUANTITY'], errors='coerce')
+                            stock_df['UNIT PRICE'] = pd.to_numeric(stock_df['UNIT PRICE'], errors='coerce')
+                            
+                            # Drop rows with missing values
+                            stock_df = stock_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                            
+                            if not stock_df.empty:
+                                # Let user select a category or item
+                                cat_options = ['All Categories'] + sorted(stock_df['ITEM_CATEGORY'].dropna().unique().tolist())
+                                selected_cat = st.selectbox("Select Category", cat_options, key="eoq_category")
+                                
+                                # Filter items
+                                if selected_cat != 'All Categories':
+                                    items_df = stock_df[stock_df['ITEM_CATEGORY'] == selected_cat]
+                                else:
+                                    items_df = stock_df
+                                
+                                # Show items with EOQ calculation
+                                st.markdown("#### EOQ for Selected Items")
+                                
+                                # Let user set ordering cost and holding rate
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    order_cost = st.number_input(
+                                        "Ordering Cost (KSh)", 
+                                        value=float(constants.TRANSPORT_COST), 
+                                        step=100.0, 
+                                        key="eoq_order_cost"
+                                    )
+                                with col2:
+                                    holding_rate = st.number_input(
+                                        "Holding Rate (%)", 
+                                        value=float(constants.HOLDING_RATE * 100), 
+                                        step=0.5, 
+                                        key="eoq_holding_rate"
+                                    ) / 100
+                                
+                                # Calculate EOQ for items
+                                if st.button("Calculate EOQ for Items", key="calc_eoq"):
+                                    eoq_results = []
+                                    for _, row in items_df.iterrows():
+                                        if pd.notna(row['UNIT PRICE']) and pd.notna(row['QUANTITY']) and row['QUANTITY'] > 0:
+                                            # Estimate annual demand (assuming current stock is monthly demand)
+                                            annual_demand = row['QUANTITY'] * 12
+                                            unit_price = row['UNIT PRICE']
+                                            
+                                            if unit_price > 0 and holding_rate > 0:
+                                                try:
+                                                    eoq = math.sqrt((2 * annual_demand * order_cost) / (holding_rate * unit_price))
+                                                    eoq_results.append({
+                                                        'Item': row['ITEM_NAME'],
+                                                        'Category': row['ITEM_CATEGORY'],
+                                                        'Annual Demand': annual_demand,
+                                                        'Unit Price': unit_price,
+                                                        'EOQ': eoq,
+                                                        'Orders/Year': annual_demand / eoq if eoq > 0 else 0
+                                                    })
+                                                except:
+                                                    pass
+                                    
+                                    if eoq_results:
+                                        eoq_df = pd.DataFrame(eoq_results)
+                                        st.dataframe(eoq_df, use_container_width=True, hide_index=True)
+                                        
+                                        # Download EOQ results
+                                        csv = eoq_df.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="📥 Download EOQ Results",
+                                            data=csv,
+                                            file_name=f"eoq_results_{datetime.now().strftime('%Y%m%d')}.csv",
+                                            mime='text/csv'
+                                        )
+                                        
+                                        # Show summary stats
+                                        st.markdown("#### EOQ Summary")
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Total Items", len(eoq_df))
+                                        with col2:
+                                            avg_eoq = eoq_df['EOQ'].mean()
+                                            st.metric("Avg EOQ", f"{avg_eoq:.0f}")
+                                        with col3:
+                                            avg_orders = eoq_df['Orders/Year'].mean()
+                                            st.metric("Avg Orders/Year", f"{avg_orders:.1f}")
+                                    else:
+                                        st.warning("No items with valid price and quantity data found.")
+                            else:
+                                st.warning("No valid inventory data found. Please check Google Sheets connection.")
+                        else:
+                            st.warning("Inventory data missing required columns (ITEM_NAME, UNIT PRICE, QUANTITY).")
+                except Exception as e:
+                    st.error(f"Error loading inventory data for EOQ calculation: {e}")
         else:
             st.warning("📦 Cannot calculate inventory policy without historical data for this period.")
             st.info("Please record some receipts to build up an order history for inventory optimization.")
