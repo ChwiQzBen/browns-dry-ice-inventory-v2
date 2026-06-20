@@ -1678,7 +1678,7 @@ def main():
     def load_inventory_data():
         gsheet = GoogleSheetReader()
         if gsheet.authenticate():
-            stock = gsheet.get_stock_listing()
+            stock = gsheet.get_stock_with_pricing()
             current = gsheet.get_current_stock()
             low = gsheet.get_low_stock_items()
             
