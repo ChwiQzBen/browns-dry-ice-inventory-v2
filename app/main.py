@@ -1885,7 +1885,7 @@ def main():
     mobile_ui.optimize_for_mobile()
     mobile_ui.show_mobile_welcome()
 
-        # Header
+    # Header
     start_date_str = display_start_date.strftime('%B %d, %Y')
     end_date_str = display_end_date.strftime('%B %d, %Y')
 
@@ -1893,7 +1893,7 @@ def main():
     with col2:
         st.markdown(f"""
         <div class="glass-header">
-            <img src="assets/browns_logo.jpg" style="width: 200px; margin-bottom: 10px;">
+            <img src="../assets/browns_logo.jpg" style="width: 200px; margin-bottom: 10px;">
             <h3>DRY ICE INVENTORY OPTIMIZER</h3>
             <div class="period-pill">📅 {start_date_str} - {end_date_str}</div>
         </div>
