@@ -1029,6 +1029,218 @@ def main():
     # Initialize database
     init_db()
     fix_order_date()
+    # ============================================================
+# 🎨 NEW UI HELPER FUNCTIONS (Glass Design System)
+# ============================================================
+
+def apply_glass_metric(label, value, delta=None, help_text=None):
+    """
+    Apply glass design to metrics - inspired by Zoho's Liquid Glass design
+    Usage: apply_glass_metric("Total Orders", "1,234", "+12%", "Monthly total")
+    """
+    # Handle delta formatting
+    delta_html = ""
+    if delta:
+        delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
+        delta_html = f'<div style="font-size:13px;color:{delta_color};">{delta}</div>'
+    
+    # Handle help text
+    help_html = f'<div style="font-size:11px;color:#999;margin-top:4px;">{help_text}</div>' if help_text else ""
+    
+    st.markdown(f"""
+    <div class="glass-metric" style="
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    ">
+        <div style="font-size:13px;color:#666;font-weight:500;margin-bottom:4px;">{label}</div>
+        <div style="font-size:28px;font-weight:600;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:4px 0;">{value}</div>
+        {delta_html}
+        {help_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_glass_container(content, height=None, padding="20px"):
+    """
+    Create a glass container for content
+    Usage: create_glass_container("Your content here", height=200)
+    """
+    height_style = f"height:{height}px;" if height else ""
+    padding_style = f"padding:{padding};" if padding else "padding:20px;"
+    
+    st.markdown(f"""
+    <div class="glass-card" style="
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 16px;
+        {padding_style}
+        margin: 10px 0;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+        transition: all 0.3s ease;
+        {height_style}
+        overflow: auto;
+    ">
+        {content}
+    </div>
+    """, unsafe_allow_html=True)
+
+def status_badge(status, message):
+    """
+    Create status badge with glass effect
+    Usage: status_badge('success', '✅ Stock levels are optimal')
+    """
+    status_colors = {
+        'success': {'border': '#28a745', 'bg': 'rgba(40, 167, 69, 0.08)'},
+        'warning': {'border': '#ffc107', 'bg': 'rgba(255, 193, 7, 0.08)'},
+        'critical': {'border': '#dc3545', 'bg': 'rgba(220, 53, 69, 0.08)'},
+        'info': {'border': '#17a2b8', 'bg': 'rgba(23, 162, 184, 0.08)'}
+    }
+    
+    color = status_colors.get(status, status_colors['info'])
+    
+    st.markdown(f"""
+    <div class="status-card" style="
+        background: {color['bg']};
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 6px 0;
+        border-left: 4px solid {color['border']};
+        transition: all 0.3s ease;
+    ">
+        {message}
+    </div>
+    """, unsafe_allow_html=True)
+
+def quick_action_fab():
+    """
+    Floating action button for quick actions (like Zoho's + menu)
+    Usage: Add this at the bottom of your main() function
+    """
+    st.markdown("""
+    <style>
+    .fab-container {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .fab-button {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        font-size: 30px;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .fab-button:hover {
+        transform: scale(1.1) rotate(90deg);
+        box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
+    }
+    
+    .fab-label {
+        background: rgba(0,0,0,0.7);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        backdrop-filter: blur(4px);
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    </style>
+    
+    <div class="fab-container">
+        <button class="fab-button" onclick="
+            // Toggle sidebar visibility
+            const sidebar = document.querySelector('[data-testid=stSidebar]');
+            if (sidebar) {
+                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+            }
+        ">
+            <span style="font-size:35px;">+</span>
+        </button>
+        <div class="fab-label" style="display:none;" id="fabLabel">Quick Actions</div>
+    </div>
+    
+    <script>
+        // Show label on hover
+        document.querySelector('.fab-button').addEventListener('mouseenter', function() {
+            document.getElementById('fabLabel').style.display = 'block';
+        });
+        document.querySelector('.fab-button').addEventListener('mouseleave', function() {
+            document.getElementById('fabLabel').style.display = 'none';
+        });
+    </script>
+    """, unsafe_allow_html=True)
+
+def responsive_metric_grid(metrics, columns=4):
+    """
+    Display metrics in a responsive grid with glass design
+    Usage: 
+    metrics = [
+        ('Total Orders', '1,234', '+12%'),
+        ('Revenue', 'KSh 45,678', '+8%'),
+    ]
+    responsive_metric_grid(metrics, columns=4)
+    """
+    cols = st.columns(columns)
+    for idx, (label, value, delta) in enumerate(metrics):
+        with cols[idx % columns]:
+            apply_glass_metric(label, value, delta)
+
+def glass_table(dataframe, title=None, height=300):
+    """
+    Display a dataframe with glass design styling
+    Usage: glass_table(df, title="Transaction History", height=400)
+    """
+    if title:
+        st.markdown(f"""
+        <div style="font-size:18px;font-weight:600;margin:20px 0 10px 0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+            {title}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.dataframe(
+        dataframe,
+        use_container_width=True,
+        height=height,
+        hide_index=True
+    )
+
+    # ============================================================
+    # END OF UI HELPER FUNCTIONS
+    # ============================================================
     seed_historical_data()
     # ADD THIS ONE LINE - clears cached data so it loads fresh
     get_historical_orders_from_db.clear()
@@ -1098,200 +1310,474 @@ def main():
         st.session_state.transactions = get_transactions_from_db(st.session_state.selected_period)
         st.session_state.last_loaded_period = st.session_state.selected_period # Update the tracker
     
+    # ENHANCED CSS WITH LIQUID GLASS DESIGN
     st.markdown("""
     <style>
-    .main-header {
-    font-size: 2.5rem;
-    font-weight: bold;
-    color: #1f77b4;
-    text-align: center;
-    margin-bottom: 2rem;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .metric-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 1rem;
-    border-radius: 10px;
-    color: white;
-    text-align: center;
-    margin: 0.5rem 0;
-    }
-    .success-box {
-    background-color: #d4edda;
-    border: 1px solid #c3e6cb;
-    color: #155724;
-    padding: 1rem;
-    border-radius: 5px;
-    margin: 1rem 0;
-    }
-    .info-box {
-    background-color: #d1ecf1;
-    border: 1px solid #bee5eb;
-    color: #0c5460;
-    padding: 1rem;
-    border-radius: 5px;
-    margin: 1rem 0;
-    }
-    .alert-critical {
-    background-color: #f8d7da;
-    border-left: 5px solid #dc3545;
-    padding: 10px;
-    margin: 10px 0;
-    }
-    .alert-warning {
-    background-color: #fff3cd;
-    border-left: 5px solid #ffc107;
-    padding: 10px;
-    margin: 10px 0;
-    }
-
-    /* ===== FIX ALL OVERLAPS ===== */
-    /* Fix tab content spacing */
-    .stTabs [role="tabpanel"] {
-    padding-top: 30px !important;
-    padding-bottom: 20px !important;
-    }
-
-    /* Fix all column spacing */
-    .stColumns {
-    gap: 15px !important;
-    margin-top: 10px !important;
-    margin-bottom: 10px !important;
-    }
-
-    /* Fix metric containers - prevent overlap */
-    .stMetric {
-    padding: 10px 5px !important;
-    margin: 5px 0 !important;
-    border: 1px solid #e8e8e8 !important;
-    border-radius: 8px !important;
-    background: #fafafa !important;
-    min-height: 80px !important;
-    }
-
-    /* Fix metric labels - prevent text wrapping/cutting */
-    .stMetric label {
-    font-size: 13px !important;
-    line-height: 1.4 !important;
-    margin-bottom: 6px !important;
-    font-weight: 500 !important;
-    color: #444 !important;
-    white-space: normal !important;
-    word-wrap: break-word !important;
-    }
-
-    /* Fix metric values */
-    .stMetric .stMetricValue {
-    font-size: 22px !important;
-    line-height: 1.3 !important;
-    font-weight: 600 !important;
-    color: #1f77b4 !important;
-    margin-top: 2px !important;
-    }
-
-    /* Fix metric delta */
-    .stMetric .stMetricDelta {
-    font-size: 13px !important;
-    margin-top: 2px !important;
-    }
-
-    /* Fix markdown spacing */
-    .stMarkdown {
-    margin-bottom: 15px !important;
-    }
-
-    /* Fix heading spacing */
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
-    margin-top: 20px !important;
-    margin-bottom: 15px !important;
-    }
-
-    /* Fix plotly chart spacing */
-    .stPlotlyChart {
-    margin-top: 15px !important;
-    margin-bottom: 25px !important;
-    }
-
-    /* Fix container padding */
-    .stContainer {
-    padding: 5px 0 !important;
-    }
-
-    /* Fix horizontal rule spacing */
-    hr {
-    margin: 30px 0 !important;
-    }
-
-    /* Fix expander spacing */
-    .streamlit-expanderHeader {
-    font-weight: 500 !important;
-    padding: 10px 0 !important;
-    }
-
-    /* ===== FIX DATAFRAME SHAKING ===== */
-    /* Prevent table shake on rerender */
-    .stDataFrame {
-    min-height: 100px !important;
-    overflow: hidden !important;
-    margin: 10px 0 !important;
-    }
-
-    /* Remove transitions that cause shake */
-    .stDataFrame > div {
-    transition: none !important;
-    animation: none !important;
-    }
-
-    /* Lock iframe min-height to prevent reflow */
-    [data-testid="stDataFrame"] > div {
-    transition: none !important;
-    animation: none !important;
-    }
-
-    [data-testid="stDataFrame"] iframe {
-    min-height: 200px !important;
-    }
-
-    /* Freeze column widths */
-    .stDataFrame table {
-    table-layout: fixed !important;
-    width: 100% !important;
-    }
-
-    /* Fix dataframes - prevent overflow */
-    .stDataFrame {
-    overflow: auto !important;
-    }
-    .stDataFrame table {
-    width: 100% !important;
-    }
-
-    /* ===== MOBILE RESPONSIVENESS ===== */
-    @media (max-width: 768px) {
-    .stColumns {
-    gap: 5px !important;
-    flex-wrap: wrap !important;
-    }
-    .stMetric {
-    padding: 8px 3px !important;
-    min-height: 60px !important;
-    }
-    .stMetric label {
-    font-size: 11px !important;
-    }
-    .stMetric .stMetricValue {
-    font-size: 18px !important;
-    }
-    .stTabs [role="tabpanel"] {
-    padding-top: 15px !important;
-    }
-    [data-testid="stMetricValue"] {
-    font-size: 16px !important;
-    }
-    [data-testid="stDataFrame"] iframe {
-    min-height: 150px !important;
-    }
-    }
+        /* ===== LIQUID GLASS DESIGN SYSTEM (Inspired by Zoho) ===== */
+        
+        /* Main glass effect for cards */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            transition: all 0.3s ease;
+        }
+        
+        .glass-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.25);
+            background: rgba(255, 255, 255, 0.25);
+        }
+        
+        /* Glass metric cards */
+        .glass-metric {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .glass-metric:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Floating Quick Action Button (like Zoho's + menu) */
+        .quick-action-fab {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+            cursor: pointer;
+            z-index: 999;
+            transition: all 0.3s ease;
+            border: none;
+        }
+        
+        .quick-action-fab:hover {
+            transform: scale(1.1) rotate(90deg);
+            box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
+        }
+        
+        /* Status cards with glass effect */
+        .status-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 6px 0;
+            border-left: 4px solid;
+            transition: all 0.3s ease;
+        }
+        
+        .status-card:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateX(4px);
+        }
+        
+        .status-critical {
+            border-left-color: #dc3545;
+            background: rgba(220, 53, 69, 0.08);
+        }
+        
+        .status-warning {
+            border-left-color: #ffc107;
+            background: rgba(255, 193, 7, 0.08);
+        }
+        
+        .status-success {
+            border-left-color: #28a745;
+            background: rgba(40, 167, 69, 0.08);
+        }
+        
+        .status-info {
+            border-left-color: #17a2b8;
+            background: rgba(23, 162, 184, 0.08);
+        }
+        
+        /* Modern sidebar with glass effect */
+        .css-1d391kg {
+            background: rgba(255, 255, 255, 0.05) !important;
+            backdrop-filter: blur(10px) !important;
+            -webkit-backdrop-filter: blur(10px) !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+        
+        /* Enhanced metric styling */
+        .stMetric {
+            background: rgba(255, 255, 255, 0.05) !important;
+            backdrop-filter: blur(4px) !important;
+            -webkit-backdrop-filter: blur(4px) !important;
+            border-radius: 12px !important;
+            padding: 12px 16px !important;
+            margin: 8px 0 !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stMetric:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.05);
+        }
+        
+        .stMetric label {
+            font-size: 13px !important;
+            line-height: 1.4 !important;
+            margin-bottom: 6px !important;
+            font-weight: 500 !important;
+            color: #444 !important;
+            white-space: normal !important;
+            word-wrap: break-word !important;
+        }
+        
+        .stMetric .stMetricValue {
+            font-size: 24px !important;
+            line-height: 1.3 !important;
+            font-weight: 600 !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-top: 2px !important;
+        }
+        
+        .stMetric .stMetricDelta {
+            font-size: 13px !important;
+            margin-top: 2px !important;
+        }
+        
+        /* Enhanced button styling */
+        .stButton button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 8px 20px !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2) !important;
+        }
+        
+        .stButton button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.3) !important;
+        }
+        
+        .stButton button:active {
+            transform: scale(0.98) !important;
+        }
+        
+        /* Enhanced tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(4px);
+            border-radius: 12px;
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            background: transparent !important;
+            border-radius: 8px !important;
+            padding: 8px 16px !important;
+            transition: all 0.3s ease !important;
+            color: #666 !important;
+        }
+        
+        .stTabs [data-baseweb="tab"]:hover {
+            background: rgba(102, 126, 234, 0.08) !important;
+            color: #667eea !important;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+        }
+        
+        /* Enhanced expander */
+        .streamlit-expanderHeader {
+            background: rgba(255, 255, 255, 0.05) !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        .streamlit-expanderHeader:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+            transform: translateX(4px);
+        }
+        
+        /* Enhanced sidebar */
+        .css-1d391kg .stSelectbox {
+            background: rgba(255, 255, 255, 0.03) !important;
+            border-radius: 8px !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        /* Smooth scrolling */
+        .main {
+            scroll-behavior: smooth;
+        }
+        
+        /* Loading animation */
+        @keyframes shimmer {
+            0% { background-position: -200% center; }
+            100% { background-position: 200% center; }
+        }
+        
+        .shimmer-loading {
+            background: linear-gradient(90deg, 
+                rgba(255,255,255,0.05) 25%, 
+                rgba(255,255,255,0.1) 50%, 
+                rgba(255,255,255,0.05) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        /* Notification toast */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 1000;
+            animation: slideInRight 0.5s ease;
+        }
+        
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* Enhanced data table */
+        .stDataFrame {
+            background: rgba(255, 255, 255, 0.03) !important;
+            border-radius: 12px !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+            overflow: hidden !important;
+        }
+        
+        .stDataFrame table {
+            border-collapse: separate !important;
+            border-spacing: 0 !important;
+        }
+        
+        .stDataFrame thead tr th {
+            background: rgba(102, 126, 234, 0.08) !important;
+            font-weight: 600 !important;
+            padding: 10px 12px !important;
+            border-bottom: 2px solid rgba(102, 126, 234, 0.2) !important;
+        }
+        
+        .stDataFrame tbody tr:hover {
+            background: rgba(102, 126, 234, 0.05) !important;
+            transition: background 0.3s ease;
+        }
+        
+        /* ===== YOUR ORIGINAL CSS KEPT BELOW ===== */
+        
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #1f77b4;
+            text-align: center;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1rem;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            margin: 0.5rem 0;
+        }
+        
+        .success-box {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
+        }
+        
+        .info-box {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
+        }
+        
+        .alert-critical {
+            background-color: #f8d7da;
+            border-left: 5px solid #dc3545;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .alert-warning {
+            background-color: #fff3cd;
+            border-left: 5px solid #ffc107;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        /* Fix tab content spacing */
+        .stTabs [role="tabpanel"] {
+            padding-top: 30px !important;
+            padding-bottom: 20px !important;
+        }
+        
+        /* Fix all column spacing */
+        .stColumns {
+            gap: 15px !important;
+            margin-top: 10px !important;
+            margin-bottom: 10px !important;
+        }
+        
+        /* Fix markdown spacing */
+        .stMarkdown {
+            margin-bottom: 15px !important;
+        }
+        
+        /* Fix heading spacing */
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
+            margin-top: 20px !important;
+            margin-bottom: 15px !important;
+        }
+        
+        /* Fix plotly chart spacing */
+        .stPlotlyChart {
+            margin-top: 15px !important;
+            margin-bottom: 25px !important;
+        }
+        
+        /* Fix container padding */
+        .stContainer {
+            padding: 5px 0 !important;
+        }
+        
+        /* Fix horizontal rule spacing */
+        hr {
+            margin: 30px 0 !important;
+        }
+        
+        /* Fix expander spacing */
+        .streamlit-expanderHeader {
+            font-weight: 500 !important;
+            padding: 10px 0 !important;
+        }
+        
+        /* Fix dataframes - prevent overflow */
+        .stDataFrame {
+            overflow: auto !important;
+            min-height: 100px !important;
+            transition: none !important;
+            animation: none !important;
+        }
+        
+        .stDataFrame table {
+            table-layout: fixed !important;
+            width: 100% !important;
+        }
+        
+        .stDataFrame iframe {
+            min-height: 200px !important;
+            transition: none !important;
+            animation: none !important;
+        }
+        
+        [data-testid="stDataFrame"] > div {
+            transition: none !important;
+            animation: none !important;
+        }
+        
+        /* ===== MOBILE RESPONSIVENESS ===== */
+        @media (max-width: 768px) {
+            .glass-card {
+                padding: 12px !important;
+                margin: 6px 0 !important;
+            }
+            
+            .stColumns {
+                gap: 5px !important;
+                flex-wrap: wrap !important;
+            }
+            
+            .stMetric {
+                padding: 8px 3px !important;
+                min-height: 60px !important;
+            }
+            
+            .stMetric label {
+                font-size: 11px !important;
+            }
+            
+            .stMetric .stMetricValue {
+                font-size: 18px !important;
+            }
+            
+            .stTabs [role="tabpanel"] {
+                padding-top: 15px !important;
+            }
+            
+            [data-testid="stMetricValue"] {
+                font-size: 16px !important;
+            }
+            
+            [data-testid="stDataFrame"] iframe {
+                min-height: 150px !important;
+            }
+            
+            .quick-action-fab {
+                width: 50px;
+                height: 50px;
+                font-size: 24px;
+                bottom: 20px;
+                right: 20px;
+            }
+            
+            .stButton button {
+                padding: 6px 12px !important;
+                font-size: 13px !important;
+            }
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1402,13 +1888,47 @@ def main():
     start_date_str = display_start_date.strftime('%B %d, %Y')
     end_date_str = display_end_date.strftime('%B %d, %Y')
 
-    # Center everything using columns
+    # Use columns for better layout
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("assets/browns_logo.jpg", width=280)
-        st.markdown("""
-        <div style="text-align: center;">
-        <h3 style="color: #6B9AB8; margin: 15px 0 5px 0; font-size: 1.5rem;">DRY ICE INVENTORY OPTIMIZER</h3>
+        # Glass card container
+        st.markdown(f"""
+        <div style="
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 25px 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.06);
+        ">
+            <img src="assets/browns_logo.jpg" style="width: 200px; margin-bottom: 10px;">
+            
+            <h3 style="
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                margin: 10px 0 5px 0;
+                font-size: 1.5rem;
+                font-weight: 700;
+            ">
+                DRY ICE INVENTORY OPTIMIZER
+            </h3>
+            
+            <div style="
+                font-size: 1rem;
+                color: #888;
+                margin-top: 8px;
+                padding: 6px 16px;
+                background: rgba(255,255,255,0.03);
+                border-radius: 20px;
+                display: inline-block;
+                border: 1px solid rgba(255,255,255,0.05);
+            ">
+                📅 {start_date_str} - {end_date_str}
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1617,24 +2137,189 @@ def main():
     monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
     percent_savings = (monthly_savings / monthly_transport_cost) * 100 if monthly_transport_cost > 0 else 0
 
-    metrics_list = [
-        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None),
-        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None),
-        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None),
-        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None),
-        ("Safety Stock", f"{safety_stock:,.1f} kg", None),
-        ("Economic EOQ", f"{eoq:,.1f} kg", None),
-        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None),
-        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%"),
-    ]
-    mobile_ui.get_responsive_metric_display(metrics_list)
+    # ============================================================
+    # 🎨 ENHANCED KPI DASHBOARD WITH GLASS DESIGN
+    # ============================================================
 
-    # Display Alerts
-    mobile_ui.show_stock_alerts(
-        current_stock=inventory_tracker.current_stock,
-        reorder_point=reorder_point,
-        safety_stock=safety_stock
-    )
+    st.markdown("""
+    <div style="
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 20px;
+        margin: 20px 0;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    ">
+        <div style="
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        ">
+            📈 Key Performance Indicators
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Create metrics in a responsive grid with glass design
+    metrics_list = [
+        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None, "Total number of orders"),
+        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None, "Total dry ice volume"),
+        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None, "Total annual cost"),
+        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None, "Savings from optimization"),
+        ("Safety Stock", f"{safety_stock:,.1f} kg", None, "Buffer stock for emergencies"),
+        ("Economic EOQ", f"{eoq:,.1f} kg", None, "Optimal order quantity"),
+        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None, "Container fill rate"),
+        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%", "Monthly transport savings"),
+    ]
+
+    # Display metrics in a 4-column grid with glass design
+    cols = st.columns(4)
+    for idx, (label, value, delta, help_text) in enumerate(metrics_list):
+        with cols[idx % 4]:
+            # Glass metric card
+            delta_html = ""
+            if delta:
+                delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
+                delta_html = f'<div style="font-size:12px;color:{delta_color};margin-top:4px;">{delta}</div>'
+            
+            st.markdown(f"""
+            <div style="
+                background: rgba(255, 255, 255, 0.06);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 12px;
+                padding: 14px 12px;
+                text-align: center;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+                min-height: 90px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                margin: 4px 0;
+                cursor: default;
+            ">
+                <div style="
+                    font-size: 11px;
+                    color: #888;
+                    font-weight: 500;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 4px;
+                ">{label}</div>
+                <div style="
+                    font-size: 22px;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    margin: 2px 0;
+                ">{value}</div>
+                {delta_html}
+                <div style="
+                    font-size: 9px;
+                    color: #aaa;
+                    margin-top: 4px;
+                    opacity: 0.7;
+                ">{help_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # 🎨 ENHANCED STOCK ALERTS WITH GLASS DESIGN
+    # ============================================================
+
+    st.markdown("""
+    <div style="margin-top: 20px;">
+    """, unsafe_allow_html=True)
+
+    # Display stock alerts with glass design
+    stock_status = inventory_tracker.get_stock_status()
+
+    # Create glass alert cards
+    if stock_status['status'] in ['Low Stock', 'Critical']:
+        alert_color = "#dc3545" if stock_status['status'] == 'Critical' else "#ffc107"
+        alert_icon = "🔴" if stock_status['status'] == 'Critical' else "🟡"
+        
+        st.markdown(f"""
+        <div style="
+            background: rgba(220, 53, 69, 0.06);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(220, 53, 69, 0.15);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        ">
+            <div style="font-size: 28px;">{alert_icon}</div>
+            <div style="flex: 1;">
+                <div style="font-weight: 600; color: #333;">{stock_status['status'].upper()}</div>
+                <div style="font-size: 14px; color: #666;">
+                    Current stock: {inventory_tracker.current_stock:.0f} kg | 
+                    Reorder point: {reorder_point:.0f} kg | 
+                    Safety stock: {safety_stock:.0f} kg
+                </div>
+            </div>
+            <div style="
+                background: rgba(255,255,255,0.05);
+                border-radius: 20px;
+                padding: 6px 16px;
+                font-size: 13px;
+                border: 1px solid rgba(255,255,255,0.05);
+            ">
+                📦 {eoq:.0f} kg recommended
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style="
+            background: rgba(40, 167, 69, 0.06);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(40, 167, 69, 0.15);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        ">
+            <div style="font-size: 28px;">✅</div>
+            <div style="flex: 1;">
+                <div style="font-weight: 600; color: #333;">STOCK LEVEL HEALTHY</div>
+                <div style="font-size: 14px; color: #666;">
+                    Current stock: {inventory_tracker.current_stock:.0f} kg | 
+                    Reorder point: {reorder_point:.0f} kg
+                </div>
+            </div>
+            <div style="
+                background: rgba(255,255,255,0.05);
+                border-radius: 20px;
+                padding: 6px 16px;
+                font-size: 13px;
+                border: 1px solid rgba(255,255,255,0.05);
+            ">
+                📊 {((inventory_tracker.current_stock / (eoq + safety_stock)) * 100):.0f}% capacity
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ============================================================
+    # 🎨 ACTIVE ALERTS WITH GLASS DESIGN
+    # ============================================================
+
     alerts = alerts_system.check_conditions(
         current_demand=usage,
         avg_demand=kpis.get('avg_order_size', 0),
@@ -1642,14 +2327,76 @@ def main():
         current_cost=analyzer.constants['transport_cost'],
         avg_cost=analyzer.constants['transport_cost']
     )
-    if alerts:
-        st.markdown("### ⚠️ Active Alerts")
-    for alert in alerts_system.get_active_alerts():
-        alert_class = "alert-critical" if "CRITICAL" in alert['message'] else "alert-warning"
-        st.markdown(
-            f"<div class='{alert_class}'>{alert['timestamp'].strftime('%H:%M')} - {alert['message']}</div>",
-            unsafe_allow_html=True
-        )
+
+    if alerts or alerts_system.get_active_alerts():
+        st.markdown("""
+        <div style="
+            background: rgba(255, 193, 7, 0.04);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 193, 7, 0.10);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 15px 0;
+        ">
+            <div style="
+                font-size: 1.1rem;
+                font-weight: 600;
+                margin-bottom: 10px;
+                color: #856404;
+            ">
+                ⚠️ Active Alerts
+            </div>
+        """, unsafe_allow_html=True)
+        
+        for alert in alerts_system.get_active_alerts():
+            is_critical = "CRITICAL" in alert['message']
+            alert_color = "#dc3545" if is_critical else "#ffc107"
+            bg_color = "rgba(220, 53, 69, 0.04)" if is_critical else "rgba(255, 193, 7, 0.04)"
+            border_color = f"rgba({220 if is_critical else 255}, {53 if is_critical else 193}, {69 if is_critical else 7}, 0.15)"
+            
+            st.markdown(f"""
+            <div style="
+                background: {bg_color};
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                border-left: 4px solid {alert_color};
+                border-radius: 8px;
+                padding: 12px 16px;
+                margin: 8px 0;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            ">
+                <div style="font-size: 20px;">{'🔴' if is_critical else '🟡'}</div>
+                <div style="flex: 1;">
+                    <div style="font-size: 13px; color: #666;">
+                        {alert['timestamp'].strftime('%H:%M')}
+                    </div>
+                    <div style="font-size: 14px; color: #333;">
+                        {alert['message']}
+                    </div>
+                </div>
+                <div style="
+                    background: rgba(255,255,255,0.05);
+                    border-radius: 12px;
+                    padding: 2px 10px;
+                    font-size: 11px;
+                    border: 1px solid rgba(255,255,255,0.05);
+                    color: #888;
+                ">
+                    {'CRITICAL' if is_critical else 'WARNING'}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # END OF ENHANCED KPI DASHBOARD
+    # ============================================================
     tab_inventory, tab_movements,tab_analytics,tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
         "📊 Stock Movements",
