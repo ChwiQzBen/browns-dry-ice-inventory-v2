@@ -683,7 +683,218 @@ def add_transaction_to_history(transaction_type, quantity, description, date, pe
 
     st.session_state.transactions.append(transaction)
 
+    # ============================================================
+# 🎨 NEW UI HELPER FUNCTIONS (Glass Design System)
+# ============================================================
 
+def apply_glass_metric(label, value, delta=None, help_text=None):
+    """
+    Apply glass design to metrics - inspired by Zoho's Liquid Glass design
+    Usage: apply_glass_metric("Total Orders", "1,234", "+12%", "Monthly total")
+    """
+    # Handle delta formatting
+    delta_html = ""
+    if delta:
+        delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
+        delta_html = f'<div style="font-size:13px;color:{delta_color};">{delta}</div>'
+    
+    # Handle help text
+    help_html = f'<div style="font-size:11px;color:#999;margin-top:4px;">{help_text}</div>' if help_text else ""
+    
+    st.markdown(f"""
+    <div class="glass-metric" style="
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    ">
+        <div style="font-size:13px;color:#666;font-weight:500;margin-bottom:4px;">{label}</div>
+        <div style="font-size:28px;font-weight:600;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:4px 0;">{value}</div>
+        {delta_html}
+        {help_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_glass_container(content, height=None, padding="20px"):
+    """
+    Create a glass container for content
+    Usage: create_glass_container("Your content here", height=200)
+    """
+    height_style = f"height:{height}px;" if height else ""
+    padding_style = f"padding:{padding};" if padding else "padding:20px;"
+    
+    st.markdown(f"""
+    <div class="glass-card" style="
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 16px;
+        {padding_style}
+        margin: 10px 0;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+        transition: all 0.3s ease;
+        {height_style}
+        overflow: auto;
+    ">
+        {content}
+    </div>
+    """, unsafe_allow_html=True)
+
+def status_badge(status, message):
+    """
+    Create status badge with glass effect
+    Usage: status_badge('success', '✅ Stock levels are optimal')
+    """
+    status_colors = {
+        'success': {'border': '#28a745', 'bg': 'rgba(40, 167, 69, 0.08)'},
+        'warning': {'border': '#ffc107', 'bg': 'rgba(255, 193, 7, 0.08)'},
+        'critical': {'border': '#dc3545', 'bg': 'rgba(220, 53, 69, 0.08)'},
+        'info': {'border': '#17a2b8', 'bg': 'rgba(23, 162, 184, 0.08)'}
+    }
+    
+    color = status_colors.get(status, status_colors['info'])
+    
+    st.markdown(f"""
+    <div class="status-card" style="
+        background: {color['bg']};
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 6px 0;
+        border-left: 4px solid {color['border']};
+        transition: all 0.3s ease;
+    ">
+        {message}
+    </div>
+    """, unsafe_allow_html=True)
+
+def quick_action_fab():
+    """
+    Floating action button for quick actions (like Zoho's + menu)
+    Usage: Add this at the bottom of your main() function
+    """
+    st.markdown("""
+    <style>
+    .fab-container {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .fab-button {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        font-size: 30px;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .fab-button:hover {
+        transform: scale(1.1) rotate(90deg);
+        box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
+    }
+    
+    .fab-label {
+        background: rgba(0,0,0,0.7);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        backdrop-filter: blur(4px);
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    </style>
+    
+    <div class="fab-container">
+        <button class="fab-button" onclick="
+            // Toggle sidebar visibility
+            const sidebar = document.querySelector('[data-testid=stSidebar]');
+            if (sidebar) {
+                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+            }
+        ">
+            <span style="font-size:35px;">+</span>
+        </button>
+        <div class="fab-label" style="display:none;" id="fabLabel">Quick Actions</div>
+    </div>
+    
+    <script>
+        // Show label on hover
+        document.querySelector('.fab-button').addEventListener('mouseenter', function() {
+            document.getElementById('fabLabel').style.display = 'block';
+        });
+        document.querySelector('.fab-button').addEventListener('mouseleave', function() {
+            document.getElementById('fabLabel').style.display = 'none';
+        });
+    </script>
+    """, unsafe_allow_html=True)
+
+def responsive_metric_grid(metrics, columns=4):
+    """
+    Display metrics in a responsive grid with glass design
+    Usage: 
+    metrics = [
+        ('Total Orders', '1,234', '+12%'),
+        ('Revenue', 'KSh 45,678', '+8%'),
+    ]
+    responsive_metric_grid(metrics, columns=4)
+    """
+    cols = st.columns(columns)
+    for idx, (label, value, delta) in enumerate(metrics):
+        with cols[idx % columns]:
+            apply_glass_metric(label, value, delta)
+
+def glass_table(dataframe, title=None, height=300):
+    """
+    Display a dataframe with glass design styling
+    Usage: glass_table(df, title="Transaction History", height=400)
+    """
+    if title:
+        st.markdown(f"""
+        <div style="font-size:18px;font-weight:600;margin:20px 0 10px 0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+            {title}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.dataframe(
+        dataframe,
+        use_container_width=True,
+        height=height,
+        hide_index=True
+    )
+
+    # ============================================================
+    # END OF UI HELPER FUNCTIONS
+    # ============================================================
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_ensemble_forecast(df, forecast_days=30):
     """
@@ -1030,218 +1241,7 @@ def main():
     # Initialize database
     init_db()
     fix_order_date()
-    # ============================================================
-# 🎨 NEW UI HELPER FUNCTIONS (Glass Design System)
-# ============================================================
 
-def apply_glass_metric(label, value, delta=None, help_text=None):
-    """
-    Apply glass design to metrics - inspired by Zoho's Liquid Glass design
-    Usage: apply_glass_metric("Total Orders", "1,234", "+12%", "Monthly total")
-    """
-    # Handle delta formatting
-    delta_html = ""
-    if delta:
-        delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
-        delta_html = f'<div style="font-size:13px;color:{delta_color};">{delta}</div>'
-    
-    # Handle help text
-    help_html = f'<div style="font-size:11px;color:#999;margin-top:4px;">{help_text}</div>' if help_text else ""
-    
-    st.markdown(f"""
-    <div class="glass-metric" style="
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-        min-height: 80px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    ">
-        <div style="font-size:13px;color:#666;font-weight:500;margin-bottom:4px;">{label}</div>
-        <div style="font-size:28px;font-weight:600;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:4px 0;">{value}</div>
-        {delta_html}
-        {help_html}
-    </div>
-    """, unsafe_allow_html=True)
-
-def create_glass_container(content, height=None, padding="20px"):
-    """
-    Create a glass container for content
-    Usage: create_glass_container("Your content here", height=200)
-    """
-    height_style = f"height:{height}px;" if height else ""
-    padding_style = f"padding:{padding};" if padding else "padding:20px;"
-    
-    st.markdown(f"""
-    <div class="glass-card" style="
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 16px;
-        {padding_style}
-        margin: 10px 0;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
-        transition: all 0.3s ease;
-        {height_style}
-        overflow: auto;
-    ">
-        {content}
-    </div>
-    """, unsafe_allow_html=True)
-
-def status_badge(status, message):
-    """
-    Create status badge with glass effect
-    Usage: status_badge('success', '✅ Stock levels are optimal')
-    """
-    status_colors = {
-        'success': {'border': '#28a745', 'bg': 'rgba(40, 167, 69, 0.08)'},
-        'warning': {'border': '#ffc107', 'bg': 'rgba(255, 193, 7, 0.08)'},
-        'critical': {'border': '#dc3545', 'bg': 'rgba(220, 53, 69, 0.08)'},
-        'info': {'border': '#17a2b8', 'bg': 'rgba(23, 162, 184, 0.08)'}
-    }
-    
-    color = status_colors.get(status, status_colors['info'])
-    
-    st.markdown(f"""
-    <div class="status-card" style="
-        background: {color['bg']};
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
-        border-radius: 12px;
-        padding: 12px 16px;
-        margin: 6px 0;
-        border-left: 4px solid {color['border']};
-        transition: all 0.3s ease;
-    ">
-        {message}
-    </div>
-    """, unsafe_allow_html=True)
-
-def quick_action_fab():
-    """
-    Floating action button for quick actions (like Zoho's + menu)
-    Usage: Add this at the bottom of your main() function
-    """
-    st.markdown("""
-    <style>
-    .fab-container {
-        position: fixed;
-        bottom: 30px;
-        right: 30px;
-        z-index: 999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 10px;
-    }
-    
-    .fab-button {
-        width: 60px;
-        height: 60px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        font-size: 30px;
-        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
-        cursor: pointer;
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    
-    .fab-button:hover {
-        transform: scale(1.1) rotate(90deg);
-        box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
-    }
-    
-    .fab-label {
-        background: rgba(0,0,0,0.7);
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        backdrop-filter: blur(4px);
-        animation: fadeIn 0.3s ease;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    </style>
-    
-    <div class="fab-container">
-        <button class="fab-button" onclick="
-            // Toggle sidebar visibility
-            const sidebar = document.querySelector('[data-testid=stSidebar]');
-            if (sidebar) {
-                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-            }
-        ">
-            <span style="font-size:35px;">+</span>
-        </button>
-        <div class="fab-label" style="display:none;" id="fabLabel">Quick Actions</div>
-    </div>
-    
-    <script>
-        // Show label on hover
-        document.querySelector('.fab-button').addEventListener('mouseenter', function() {
-            document.getElementById('fabLabel').style.display = 'block';
-        });
-        document.querySelector('.fab-button').addEventListener('mouseleave', function() {
-            document.getElementById('fabLabel').style.display = 'none';
-        });
-    </script>
-    """, unsafe_allow_html=True)
-
-def responsive_metric_grid(metrics, columns=4):
-    """
-    Display metrics in a responsive grid with glass design
-    Usage: 
-    metrics = [
-        ('Total Orders', '1,234', '+12%'),
-        ('Revenue', 'KSh 45,678', '+8%'),
-    ]
-    responsive_metric_grid(metrics, columns=4)
-    """
-    cols = st.columns(columns)
-    for idx, (label, value, delta) in enumerate(metrics):
-        with cols[idx % columns]:
-            apply_glass_metric(label, value, delta)
-
-def glass_table(dataframe, title=None, height=300):
-    """
-    Display a dataframe with glass design styling
-    Usage: glass_table(df, title="Transaction History", height=400)
-    """
-    if title:
-        st.markdown(f"""
-        <div style="font-size:18px;font-weight:600;margin:20px 0 10px 0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
-            {title}
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.dataframe(
-        dataframe,
-        use_container_width=True,
-        height=height,
-        hide_index=True
-    )
-
-    # ============================================================
-    # END OF UI HELPER FUNCTIONS
-    # ============================================================
     seed_historical_data()
     # ADD THIS ONE LINE - clears cached data so it loads fresh
     get_historical_orders_from_db.clear()
