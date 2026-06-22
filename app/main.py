@@ -2111,8 +2111,6 @@ def main():
     st.sidebar.markdown("© 2025 - Gathura Chege")    
 
     # Updated KPI Dashboard (8 columns)
-    st.markdown("### 📈 Key Performance Indicators")
-
     # --- ROW 1 ---
     #cols1 = st.columns(4)
     #with cols1[0]:
