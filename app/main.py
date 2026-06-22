@@ -2354,7 +2354,6 @@ def main():
             is_critical = "CRITICAL" in alert['message']
             alert_color = "#dc3545" if is_critical else "#ffc107"
             bg_color = "rgba(220, 53, 69, 0.04)" if is_critical else "rgba(255, 193, 7, 0.04)"
-            border_color = f"rgba({220 if is_critical else 255}, {53 if is_critical else 193}, {69 if is_critical else 7}, 0.15)"
             
             st.markdown(f"""
             <div style="
