@@ -2105,19 +2105,19 @@ def main():
 
     # Create metrics in a responsive grid with glass design
     metrics_list = [
-        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None, "Total number of orders"),
-        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None, "Total dry ice volume"),
-        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None, "Total annual cost"),
-        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None, "Savings from optimization"),
-        ("Safety Stock", f"{safety_stock:,.1f} kg", None, "Buffer stock for emergencies"),
-        ("Economic EOQ", f"{eoq:,.1f} kg", None, "Optimal order quantity"),
-        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None, "Container fill rate"),
-        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%", "Monthly transport savings"),
+        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None),
+        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None),
+        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None),
+        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None),
+        ("Safety Stock", f"{safety_stock:,.1f} kg", None),
+        ("Economic EOQ", f"{eoq:,.1f} kg", None),
+        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None),
+        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%"),
     ]
 
     # Display metrics in a 4-column grid with glass design
     cols = st.columns(4)
-    for idx, (label, value, delta, help_text) in enumerate(metrics_list):
+    for idx, (label, value, delta) in enumerate(metrics_list):
         with cols[idx % 4]:
             # Glass metric card
             delta_html = ""
@@ -2125,7 +2125,6 @@ def main():
                 delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
                 delta_html = f'<div style="font-size:12px;color:{delta_color};margin-top:4px;">{delta}</div>'
             
-            # Render the metric card with HTML
             st.markdown(f"""
             <div style="
                 background: rgba(255, 255, 255, 0.06);
@@ -2137,7 +2136,7 @@ def main():
                 text-align: center;
                 transition: all 0.3s ease;
                 box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
-                min-height: 90px;
+                min-height: 80px;
                 display: flex;
                 flex-direction: column;
                 justify-content: center;
@@ -2162,12 +2161,6 @@ def main():
                     margin: 2px 0;
                 ">{value}</div>
                 {delta_html}
-                <div style="
-                    font-size: 9px;
-                    color: #aaa;
-                    margin-top: 4px;
-                    opacity: 0.7;
-                ">{help_text}</div>
             </div>
             """, unsafe_allow_html=True)
 
