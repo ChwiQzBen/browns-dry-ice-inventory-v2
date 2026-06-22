@@ -1933,10 +1933,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # Analysis period below (centered)
-    st.markdown(f'<div style="text-align:center;font-size:1.1rem;margin-bottom:2rem;">Analysis Period: {start_date_str} to {end_date_str}</div>',
-            unsafe_allow_html=True)
-
     st.sidebar.header("📦 Real-time Inventory")
 
     current_stock_input = st.sidebar.number_input(
