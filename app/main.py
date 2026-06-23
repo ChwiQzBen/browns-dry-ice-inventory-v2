@@ -1840,7 +1840,284 @@ def inventory_heatmap_filters(heatmap_data):
         )
     
     return search, status_filter, category_filter 
-      
+
+# ============================================================
+# 🎨 SMART REPLENISHMENT RECOMMENDATIONS (Katana Style)
+# ============================================================
+@st.cache_data(ttl=300)
+def get_replenishment_recommendations(inventory_items, daily_usage_rate=None):
+    """
+    Generate replenishment recommendations based on current stock levels
+    
+    Args:
+        inventory_items: Dictionary with item names as keys and details as values
+        daily_usage_rate: Optional daily usage rate (if not provided, will be estimated)
+    
+    Returns:
+        DataFrame with replenishment recommendations
+    """
+    if not inventory_items:
+        return pd.DataFrame()
+    
+    recommendations = []
+    
+    for item_name, details in inventory_items.items():
+        current_stock = details.get('stock', 0)
+        reorder_point = details.get('reorder', 0)
+        eoq = details.get('eoq', details.get('max', current_stock * 2))
+        max_stock = details.get('max', current_stock * 2)
+        
+        # Estimate daily usage if not provided
+        if daily_usage_rate:
+            daily_usage = daily_usage_rate
+        else:
+            # Estimate based on reorder point and assumed lead time
+            # If reorder point is 0, use 10% of current stock as daily usage
+            if reorder_point > 0:
+                daily_usage = reorder_point / 7  # Assume 7 days lead time
+            else:
+                daily_usage = max(1, current_stock * 0.05)  # 5% of current stock per day
+        
+        # Check if reorder is needed
+        needs_reorder = current_stock < reorder_point
+        
+        if needs_reorder:
+            # Calculate days until stockout (estimated)
+            stock_deficit = reorder_point - current_stock
+            days_to_reorder = max(1, int(stock_deficit / daily_usage)) if daily_usage > 0 else 1
+            
+            # Calculate suggested quantity (EOQ or minimum)
+            suggested_qty = max(eoq, reorder_point * 1.2)  # Order enough to cover reorder point + buffer
+            
+            # Determine urgency
+            if days_to_reorder <= 3:
+                urgency = 'High'
+                urgency_color = '#dc3545'  # Red
+                action = '⚠️ Order Immediately'
+            elif days_to_reorder <= 7:
+                urgency = 'Medium'
+                urgency_color = '#ffc107'  # Yellow
+                action = '📋 Schedule Order'
+            else:
+                urgency = 'Low'
+                urgency_color = '#28a745'  # Green
+                action = '📝 Plan Order'
+            
+            # Determine priority score (higher = more urgent)
+            priority_score = 100 - (days_to_reorder * 10)  # Lower days = higher priority
+            priority_score = max(0, min(100, priority_score))
+            
+            recommendations.append({
+                'Item': item_name,
+                'Current Stock': f"{current_stock:,.0f} {details.get('unit', 'kg')}",
+                'Reorder Point': f"{reorder_point:,.0f} {details.get('unit', 'kg')}",
+                'Suggested Order': f"{suggested_qty:,.0f} {details.get('unit', 'kg')}",
+                'Days Until Stockout': days_to_reorder,
+                'Urgency': urgency,
+                'Action': action,
+                'Priority Score': priority_score,
+                'Category': details.get('category', 'Uncategorized')
+            })
+    
+    # Sort by priority (most urgent first)
+    recommendations.sort(key=lambda x: x['Priority Score'], reverse=True)
+    
+    return pd.DataFrame(recommendations)
+
+def show_replenishment_suggestions(recommendations_df, title="🛒 Replenishment Suggestions"):
+    """
+    Display replenishment recommendations in a styled table
+    
+    Args:
+        recommendations_df: DataFrame from get_replenishment_recommendations()
+        title: Title for the section
+    """
+    if recommendations_df.empty:
+        st.info("✅ All items are well-stocked. No replenishment needed at this time.")
+        return
+    
+    # Display header with count
+    urgent_count = len(recommendations_df[recommendations_df['Urgency'] == 'High'])
+    medium_count = len(recommendations_df[recommendations_df['Urgency'] == 'Medium'])
+    
+    st.markdown(f"""
+    <div style="
+        background: rgba(255,255,255,0.05);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 15px 20px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255,255,255,0.08);
+    ">
+        <div style="
+            font-size: 1.2rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        ">
+            {title}
+        </div>
+        <div style="color: #888; font-size: 13px; margin-top: 4px;">
+            {len(recommendations_df)} items need attention · 
+            <span style="color: #dc3545;">🔴 {urgent_count} Urgent</span> · 
+            <span style="color: #ffc107;">🟡 {medium_count} Medium</span> · 
+            <span style="color: #28a745;">🟢 {len(recommendations_df) - urgent_count - medium_count} Low</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Display as styled dataframe with urgency highlighting
+    display_df = recommendations_df.copy()
+    
+    # Color coding function for urgency
+    def color_urgency(val):
+        if val == 'High':
+            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+        elif val == 'Medium':
+            return 'background-color: #fff3cd; color: #856404; font-weight: bold;'
+        else:
+            return 'background-color: #d4edda; color: #155724;'
+    
+    # Color coding for action
+    def color_action(val):
+        if 'Immediately' in val:
+            return 'background-color: #f8d7da;'
+        elif 'Schedule' in val:
+            return 'background-color: #fff3cd;'
+        else:
+            return 'background-color: #d4edda;'
+    
+    # Apply styling
+    styled_df = display_df.style.applymap(
+        color_urgency, subset=['Urgency']
+    ).applymap(
+        color_action, subset=['Action']
+    )
+    
+    # Hide index and display
+    st.dataframe(
+        styled_df,
+        use_container_width=True,
+        height=400,
+        hide_index=True,
+        column_config={
+            'Item': st.column_config.TextColumn('Item', width='medium'),
+            'Current Stock': st.column_config.TextColumn('Current Stock', width='small'),
+            'Reorder Point': st.column_config.TextColumn('Reorder Point', width='small'),
+            'Suggested Order': st.column_config.TextColumn('Suggested Order', width='medium'),
+            'Days Until Stockout': st.column_config.NumberColumn('Days Until Stockout', width='small'),
+            'Urgency': st.column_config.TextColumn('Urgency', width='small'),
+            'Action': st.column_config.TextColumn('Action', width='medium'),
+            'Priority Score': st.column_config.NumberColumn('Priority', width='small'),
+            'Category': st.column_config.TextColumn('Category', width='small')
+        }
+    )
+    
+    # Quick action buttons for urgent items
+    if urgent_count > 0:
+        st.markdown("---")
+        st.markdown("#### ⚡ Quick Actions for Urgent Items")
+        
+        urgent_items = recommendations_df[recommendations_df['Urgency'] == 'High']
+        
+        cols = st.columns(min(3, len(urgent_items)))
+        for idx, (_, item) in enumerate(urgent_items.head(3).iterrows()):
+            with cols[idx % 3]:
+                st.markdown(f"""
+                <div style="
+                    border: 1px solid #dc3545;
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin: 4px 0;
+                    background: rgba(220, 53, 69, 0.05);
+                ">
+                    <div style="font-weight: 600; font-size: 13px; color: #721c24;">
+                        {item['Item']}
+                    </div>
+                    <div style="font-size: 12px; color: #666;">
+                        Suggested: {item['Suggested Order']}
+                    </div>
+                    <div style="font-size: 12px; color: #666;">
+                        Days until stockout: {item['Days Until Stockout']}
+                    </div>
+                    <div style="margin-top: 6px;">
+                        <span style="
+                            background: #dc3545;
+                            color: white;
+                            padding: 2px 10px;
+                            border-radius: 12px;
+                            font-size: 10px;
+                            font-weight: 600;
+                        ">
+                            {item['Action']}
+                        </span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+def get_replenishment_summary(recommendations_df):
+    """
+    Get summary statistics for replenishment recommendations
+    
+    Args:
+        recommendations_df: DataFrame from get_replenishment_recommendations()
+    
+    Returns:
+        Dictionary with summary statistics
+    """
+    if recommendations_df.empty:
+        return {
+            'total_items': 0,
+            'urgent_count': 0,
+            'medium_count': 0,
+            'low_count': 0,
+            'average_days': 0,
+            'total_suggested_qty': 0
+        }
+    
+    return {
+        'total_items': len(recommendations_df),
+        'urgent_count': len(recommendations_df[recommendations_df['Urgency'] == 'High']),
+        'medium_count': len(recommendations_df[recommendations_df['Urgency'] == 'Medium']),
+        'low_count': len(recommendations_df[recommendations_df['Urgency'] == 'Low']),
+        'average_days': recommendations_df['Days Until Stockout'].mean(),
+        'total_suggested_qty': sum(float(str(qty).replace(' kg', '').replace(' units', '').replace(' pairs', '').replace(' ltrs', '').replace(',', '')) for qty in recommendations_df['Suggested Order'].values)
+    }
+def show_replenishment_summary_cards(summary):
+    """
+    Display replenishment summary as metric cards
+    """
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "📋 Items Needing Action",
+            summary['total_items']
+        )
+    with col2:
+        st.metric(
+            "🔴 Urgent",
+            summary['urgent_count'],
+            delta=f"-{summary['urgent_count']}" if summary['urgent_count'] > 0 else None
+        )
+    with col3:
+        st.metric(
+            "🟡 Medium",
+            summary['medium_count']
+        )
+    with col4:
+        st.metric(
+            "🟢 Low",
+            summary['low_count']
+        )
+    with col5:
+        st.metric(
+            "📦 Suggested Order Volume",
+            f"{summary['total_suggested_qty']:,.0f} kg"
+        )
+
 # ===========================================================
 # 🎨 QUICK CREATE MENU (Zoho Style)
 def quick_create_menu(inventory_tracker):
@@ -4446,7 +4723,60 @@ def main():
                 else:
                     st.info("No items match your heat map filters")
             else:
-                st.info("No inventory items to display in heat map")       
+                st.info("No inventory items to display in heat map")
+        
+        # ============================================================
+        # 🎨 REPLENISHMENT RECOMMENDATIONS EXPANDER (ADD THIS)
+        # ============================================================
+        st.markdown("---")
+        
+        with st.expander("🛒 View Replenishment Recommendations", expanded=False):
+            st.markdown("""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 15px;
+                margin-bottom: 15px;
+                border: 1px solid rgba(255,255,255,0.08);
+            ">
+                <div style="color: #888; font-size: 13px;">
+                    Smart replenishment suggestions based on current stock levels.
+                    <span style="color: #dc3545;">🔴 Urgent (≤3 days)</span> | 
+                    <span style="color: #ffc107;">🟡 Medium (4-7 days)</span> | 
+                    <span style="color: #28a745;">🟢 Low (>7 days)</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Use the filtered_items from the visual inventory
+            if filtered_items:
+                # Generate recommendations
+                recommendations_df = get_replenishment_recommendations(filtered_items)
+                
+                # Show summary and recommendations
+                if not recommendations_df.empty:
+                    summary = get_replenishment_summary(recommendations_df)
+                    show_replenishment_summary_cards(summary)
+                    st.markdown("---")
+                    show_replenishment_suggestions(recommendations_df)
+                    
+                    # Export button
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        csv = recommendations_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Recommendations",
+                            data=csv,
+                            file_name=f"replenishment_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime='text/csv'
+                        )
+                    with col2:
+                        st.caption("Download recommendations as CSV for offline review or sharing")
+                else:
+                    st.success("✅ All items are well-stocked. No replenishment needed at this time.")
+            else:
+                st.info("No inventory items to analyze for replenishment")      
 
     with tab1:
         if not df.empty:
