@@ -1866,13 +1866,13 @@ def get_replenishment_recommendations(inventory_items, daily_usage_rate=None):
         reorder_point = details.get('reorder', 0)
         eoq = details.get('eoq', details.get('max', current_stock * 2))
         max_stock = details.get('max', current_stock * 2)
+        unit = details.get('unit', 'kg')
         
         # Estimate daily usage if not provided
         if daily_usage_rate:
             daily_usage = daily_usage_rate
         else:
             # Estimate based on reorder point and assumed lead time
-            # If reorder point is 0, use 10% of current stock as daily usage
             if reorder_point > 0:
                 daily_usage = reorder_point / 7  # Assume 7 days lead time
             else:
@@ -1907,11 +1907,15 @@ def get_replenishment_recommendations(inventory_items, daily_usage_rate=None):
             priority_score = 100 - (days_to_reorder * 10)  # Lower days = higher priority
             priority_score = max(0, min(100, priority_score))
             
+            # Store the numeric value for Suggested Order (without unit)
+            suggested_order_value = f"{suggested_qty:,.0f} {unit}"
+            
             recommendations.append({
                 'Item': item_name,
-                'Current Stock': f"{current_stock:,.0f} {details.get('unit', 'kg')}",
-                'Reorder Point': f"{reorder_point:,.0f} {details.get('unit', 'kg')}",
-                'Suggested Order': f"{suggested_qty:,.0f} {details.get('unit', 'kg')}",
+                'Current Stock': f"{current_stock:,.0f} {unit}",
+                'Reorder Point': f"{reorder_point:,.0f} {unit}",
+                'Suggested Order': f"{suggested_qty:,.0f} {unit}",  # This is for display
+                'Suggested Order Value': suggested_qty,  # This is the numeric value for calculations
                 'Days Until Stockout': days_to_reorder,
                 'Urgency': urgency,
                 'Action': action,
@@ -2077,14 +2081,36 @@ def get_replenishment_summary(recommendations_df):
             'total_suggested_qty': 0
         }
     
+    # Helper function to extract numeric value from strings like "100 kg", "50 units", "100 pcs"
+    def extract_numeric(value):
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            # Remove common unit suffixes and commas
+            import re
+            # Extract first number found in the string
+            numbers = re.findall(r'[\d,]+\.?\d*', value.replace(',', ''))
+            if numbers:
+                try:
+                    return float(numbers[0])
+                except ValueError:
+                    return 0
+        return 0
+    
+    # Calculate total suggested quantity
+    total_qty = 0
+    for qty in recommendations_df['Suggested Order'].values:
+        total_qty += extract_numeric(qty)
+    
     return {
         'total_items': len(recommendations_df),
         'urgent_count': len(recommendations_df[recommendations_df['Urgency'] == 'High']),
         'medium_count': len(recommendations_df[recommendations_df['Urgency'] == 'Medium']),
         'low_count': len(recommendations_df[recommendations_df['Urgency'] == 'Low']),
         'average_days': recommendations_df['Days Until Stockout'].mean(),
-        'total_suggested_qty': sum(float(str(qty).replace(' kg', '').replace(' units', '').replace(' pairs', '').replace(' ltrs', '').replace(',', '')) for qty in recommendations_df['Suggested Order'].values)
+        'total_suggested_qty': total_qty
     }
+
 def show_replenishment_summary_cards(summary):
     """
     Display replenishment summary as metric cards
