@@ -2143,87 +2143,127 @@ def show_replenishment_summary_cards(summary):
             "📦 Suggested Order Volume",
             f"{summary['total_suggested_qty']:,.0f} kg"
         )
+        
 # ============================================================
-# 🎨 KATANA'S REAL-TIME STATUS DASHBOARD
+# 🎨REAL-TIME STATUS DASHBOARD
 # ============================================================
-
 def get_incoming_orders(inventory_items=None):
     """
-    Calculate expected incoming orders (items on order)
+    Calculate expected incoming orders (items on order) based on all inventory
     
     Args:
-        inventory_items: Dictionary with inventory items
+        inventory_items: Dictionary with all inventory items
     
     Returns:
-        Total expected incoming quantity
+        Dictionary with total expected incoming by category and overall total
     """
-    # If we have inventory items, calculate based on reorder points
-    if inventory_items:
-        expected_total = 0
-        for item_name, details in inventory_items.items():
-            stock = details.get('stock', 0)
-            reorder = details.get('reorder', 0)
-            
-            # If stock is below reorder point, assume an order is expected
-            if stock < reorder:
-                # Estimate expected quantity as the difference or EOQ
-                expected_qty = max(reorder * 1.5, details.get('max', stock * 2)) - stock
-                expected_total += expected_qty
-        
-        return expected_total
+    if not inventory_items:
+        return {'total': 0, 'by_category': {}}
     
-    # Fallback: return a default value
-    return 0
+    expected_total = 0
+    by_category = {}
+    
+    for item_name, details in inventory_items.items():
+        stock = details.get('stock', 0)
+        reorder = details.get('reorder', 0)
+        category = details.get('category', 'Uncategorized')
+        unit = details.get('unit', 'kg')
+        
+        # If stock is below reorder point, assume an order is expected
+        if stock < reorder:
+            # Estimate expected quantity as the difference or EOQ
+            expected_qty = max(reorder * 1.5, details.get('max', stock * 2)) - stock
+            expected_total += expected_qty
+            
+            if category not in by_category:
+                by_category[category] = 0
+            by_category[category] += expected_qty
+    
+    return {'total': expected_total, 'by_category': by_category}
 
 def get_committed_orders(inventory_items=None):
     """
-    Calculate committed orders (orders to fulfill)
+    Calculate committed orders (orders to fulfill) based on all inventory
     
     Args:
-        inventory_items: Dictionary with inventory items
+        inventory_items: Dictionary with all inventory items
     
     Returns:
-        Total committed quantity
+        Dictionary with total committed by category and overall total
     """
-    # If we have inventory items, calculate committed based on demand
-    if inventory_items:
-        committed_total = 0
-        for item_name, details in inventory_items.items():
-            stock = details.get('stock', 0)
-            reorder = details.get('reorder', 0)
-            
-            # Committed is typically what's needed to fulfill upcoming orders
-            # Estimate based on reorder point and current stock
-            if stock < reorder:
-                committed_total += (reorder - stock) * 0.3  # 30% of deficit
-        
-        return committed_total
+    if not inventory_items:
+        return {'total': 0, 'by_category': {}}
     
-    # Fallback: return a default value
-    return 0
+    committed_total = 0
+    by_category = {}
+    
+    for item_name, details in inventory_items.items():
+        stock = details.get('stock', 0)
+        reorder = details.get('reorder', 0)
+        category = details.get('category', 'Uncategorized')
+        unit = details.get('unit', 'kg')
+        
+        # Committed is typically what's needed to fulfill upcoming orders
+        # Estimate based on reorder point and current stock
+        if stock < reorder:
+            committed_qty = (reorder - stock) * 0.3  # 30% of deficit
+            committed_total += committed_qty
+            
+            if category not in by_category:
+                by_category[category] = 0
+            by_category[category] += committed_qty
+    
+    return {'total': committed_total, 'by_category': by_category}
 
-def inventory_status_dashboard(inventory_tracker, inventory_items=None):
+def inventory_status_dashboard(inventory_items, inventory_tracker=None):
     """
-    Real-time inventory status dashboard (Katana style)
+    Real-time inventory status dashboard (Katana style) for ALL inventory
     
     Args:
-        inventory_tracker: InventoryTracker instance
-        inventory_items: Dictionary with inventory items for calculations
+        inventory_items: Dictionary with all inventory items
+        inventory_tracker: Optional InventoryTracker instance (for Dry Ice specific)
     """
-    # Get current stock
-    current_stock = inventory_tracker.current_stock if inventory_tracker else 0
+    if not inventory_items:
+        st.info("No inventory data available for status dashboard")
+        return
+    
+    # Calculate total stock across all items
+    total_stock = sum(details.get('stock', 0) for details in inventory_items.values())
+    total_items = len(inventory_items)
     
     # Get expected incoming orders
-    expected = get_incoming_orders(inventory_items)
+    expected_data = get_incoming_orders(inventory_items)
+    expected_total = expected_data['total']
     
     # Get committed orders
-    committed = get_committed_orders(inventory_items)
+    committed_data = get_committed_orders(inventory_items)
+    committed_total = committed_data['total']
+    
+    # Count items by status
+    low_stock_items = 0
+    critical_items = 0
+    overstocked_items = 0
+    healthy_items = 0
+    
+    for item_name, details in inventory_items.items():
+        stock = details.get('stock', 0)
+        reorder = details.get('reorder', 0)
+        max_stock = details.get('max', stock * 2)
+        
+        if stock <= 0:
+            critical_items += 1
+        elif stock < reorder:
+            low_stock_items += 1
+        elif stock > max_stock * 1.5:
+            overstocked_items += 1
+        else:
+            healthy_items += 1
     
     # Display status cards in a row
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # In Stock - Green
+        # Total Stock - Green
         st.markdown(f"""
         <div style="
             background: rgba(232, 245, 233, 0.9);
@@ -2236,13 +2276,13 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
             transition: all 0.3s ease;
         ">
             <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">
-                📦 IN STOCK
+                📦 TOTAL STOCK
             </div>
             <div style="font-size: 28px; font-weight: 700; color: #2e7d32; margin: 4px 0;">
-                {current_stock:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+                {total_stock:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">units</span>
             </div>
             <div style="font-size: 12px; color: #888; margin-top: 2px;">
-                Current available inventory
+                Across {total_items} items
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -2264,10 +2304,10 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
                 📋 EXPECTED
             </div>
             <div style="font-size: 28px; font-weight: 700; color: #1565c0; margin: 4px 0;">
-                {expected:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+                {expected_total:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">units</span>
             </div>
             <div style="font-size: 12px; color: #888; margin-top: 2px;">
-                Incoming orders (on order)
+                Incoming orders needed
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -2289,10 +2329,10 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
                 🎯 COMMITTED
             </div>
             <div style="font-size: 28px; font-weight: 700; color: #e65100; margin: 4px 0;">
-                {committed:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+                {committed_total:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">units</span>
             </div>
             <div style="font-size: 12px; color: #888; margin-top: 2px;">
-                Orders to fulfill (demand)
+                Demand to fulfill
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -2300,16 +2340,15 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
     # Add a quick status bar showing the overall health
     st.markdown("---")
     
-    # Calculate health percentage
-    if current_stock > 0:
-        health_pct = min(100, (current_stock / (expected + committed + 1)) * 100)
-    else:
-        health_pct = 0
+    # Calculate health metrics
+    total_items_analyzed = total_items
+    healthy_percentage = (healthy_items / total_items_analyzed * 100) if total_items_analyzed > 0 else 0
+    warning_items = low_stock_items + critical_items
     
-    health_color = '#4caf50' if health_pct > 70 else '#ff9800' if health_pct > 40 else '#f44336'
-    health_status = '✅ Healthy' if health_pct > 70 else '⚠️ Moderate' if health_pct > 40 else '🔴 Critical'
+    health_color = '#4caf50' if healthy_percentage > 70 else '#ff9800' if healthy_percentage > 40 else '#f44336'
+    health_status = '✅ Healthy' if healthy_percentage > 70 else '⚠️ Moderate' if healthy_percentage > 40 else '🔴 Critical'
     
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown(f"""
@@ -2332,7 +2371,7 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
                 overflow: hidden;
             ">
                 <div style="
-                    width: {health_pct:.0f}%;
+                    width: {healthy_percentage:.0f}%;
                     height: 4px;
                     background: {health_color};
                     border-radius: 2px;
@@ -2343,18 +2382,39 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
         """, unsafe_allow_html=True)
     
     with col2:
-        st.metric("📊 Coverage Ratio", f"{health_pct:.0f}%")
+        st.metric("📊 Healthy Items", f"{healthy_items}/{total_items}")
     
     with col3:
-        # Net position (stock + expected - committed)
-        net_position = current_stock + expected - committed
-        st.metric("📈 Net Position", f"{net_position:,.0f} kg")
+        st.metric("⚠️ Low Stock", low_stock_items, delta=f"-{low_stock_items}" if low_stock_items > 0 else None)
     
     with col4:
-        # Days of stock cover
-        daily_usage = max(1, committed / 7) if committed > 0 else current_stock / 30
-        days_cover = current_stock / daily_usage if daily_usage > 0 else 0
-        st.metric("📅 Days Cover", f"{days_cover:.0f} days")
+        st.metric("🔴 Critical", critical_items, delta=f"-{critical_items}" if critical_items > 0 else None)
+    
+    with col5:
+        st.metric("📦 Overstocked", overstocked_items)
+    
+    # Category breakdown (if multiple categories exist)
+    categories = set(details.get('category', 'Uncategorized') for details in inventory_items.values())
+    if len(categories) > 1:
+        st.markdown("---")
+        st.markdown("#### 📊 Category Breakdown")
+        
+        # Create category metrics
+        cat_cols = st.columns(min(4, len(categories)))
+        for idx, category in enumerate(sorted(categories)):
+            if idx < 4:
+                with cat_cols[idx]:
+                    cat_items = [item for item, details in inventory_items.items() 
+                                if details.get('category', 'Uncategorized') == category]
+                    cat_stock = sum(details.get('stock', 0) for item, details in inventory_items.items() 
+                                   if details.get('category', 'Uncategorized') == category)
+                    cat_count = len(cat_items)
+                    
+                    st.metric(
+                        f"📂 {category}",
+                        f"{cat_stock:,.0f} units",
+                        f"{cat_count} items"
+                    )
 
 # 🎨 AI-POWERED RECOMMENDATIONS
 # ============================================================
@@ -5190,19 +5250,19 @@ def main():
                 border: 1px solid rgba(255,255,255,0.08);
             ">
                 <div style="color: #888; font-size: 13px;">
-                    Real-time inventory status overview.
-                    <span style="color: #4caf50;">🟢 In Stock</span> | 
-                    <span style="color: #2196f3;">🔵 Expected</span> | 
-                    <span style="color: #ff9800;">🟠 Committed</span>
+                    Real-time inventory status overview for ALL items.
+                    <span style="color: #4caf50;">🟢 Healthy</span> | 
+                    <span style="color: #ff9800;">🟠 Low Stock</span> | 
+                    <span style="color: #dc3545;">🔴 Critical</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Display the status dashboard
-            if inventory_tracker:
-                inventory_status_dashboard(inventory_tracker, filtered_items)
+            # Display the status dashboard for ALL inventory
+            if inventory_items:
+                inventory_status_dashboard(inventory_items, inventory_tracker)
             else:
-                st.info("Inventory tracker not available")    
+                st.info("No inventory data available for status dashboard")  
         
         # ============================================================
         # SECTION 3: GRID VIEW (Expander - Closed by Default)
