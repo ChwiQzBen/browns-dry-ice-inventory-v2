@@ -2356,9 +2356,223 @@ def inventory_status_dashboard(inventory_tracker, inventory_items=None):
         days_cover = current_stock / daily_usage if daily_usage > 0 else 0
         st.metric("📅 Days Cover", f"{days_cover:.0f} days")
 
+# 🎨 AI-POWERED RECOMMENDATIONS
+# ============================================================
+
+def ai_powered_recommendations(inventory_tracker, df, kpis, eoq, reorder_point, 
+                                safety_stock, annual_transport_savings, 
+                                total_forecasted_demand, avg_daily_demand):
+    """
+    AI-style smart recommendations based on forecast and inventory data
+    
+    Args:
+        inventory_tracker: InventoryTracker instance
+        df: Historical orders DataFrame
+        kpis: Dictionary with KPI values
+        eoq: Economic Order Quantity
+        reorder_point: Reorder point
+        safety_stock: Safety stock level
+        annual_transport_savings: Annual transport savings
+        total_forecasted_demand: Total forecasted demand
+        avg_daily_demand: Average daily demand
+    """
+    st.markdown("""
+    <div style="
+        background: rgba(255,255,255,0.05);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255,255,255,0.08);
+    ">
+        <div style="color: #888; font-size: 13px;">
+            🤖 AI-powered insights based on your forecast and inventory data.
+            <span style="color: #dc3545;">🔴 Urgent</span> | 
+            <span style="color: #ffc107;">🟡 Recommendation</span> | 
+            <span style="color: #28a745;">🟢 Insight</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    recommendations = []
+    
+    # 1. Optimal order timing based on stock levels
+    if inventory_tracker and avg_daily_demand > 0:
+        days_until_reorder = (inventory_tracker.current_stock - reorder_point) / avg_daily_demand
+        
+        if days_until_reorder < 3:
+            recommendations.append({
+                'icon': '🔴',
+                'title': '⚠️ Urgent Reorder Needed',
+                'desc': f'Stock will reach reorder point in {max(1, int(days_until_reorder))} days',
+                'action': '📋 Place Order Now',
+                'details': f'Current stock: {inventory_tracker.current_stock:.0f} kg | Reorder point: {reorder_point:.0f} kg',
+                'priority': 'high',
+                'color': '#dc3545'
+            })
+        elif days_until_reorder < 7:
+            recommendations.append({
+                'icon': '🟡',
+                'title': '📋 Reorder Soon',
+                'desc': f'Stock will reach reorder point in {max(1, int(days_until_reorder))} days',
+                'action': '📅 Schedule Order',
+                'details': f'Current stock: {inventory_tracker.current_stock:.0f} kg | Reorder point: {reorder_point:.0f} kg',
+                'priority': 'medium',
+                'color': '#ffc107'
+            })
+        else:
+            recommendations.append({
+                'icon': '🟢',
+                'title': '✅ Stock Levels Healthy',
+                'desc': f'Sufficient stock for {int(days_until_reorder)} days',
+                'action': '📊 Monitor',
+                'details': f'Current stock: {inventory_tracker.current_stock:.0f} kg | Reorder point: {reorder_point:.0f} kg',
+                'priority': 'low',
+                'color': '#28a745'
+            })
+    
+    # 2. Cost saving opportunities
+    if annual_transport_savings > 0:
+        recommendations.append({
+            'icon': '💰',
+            'title': '💰 Cost Saving Opportunity',
+            'desc': f'Potential savings of KSh {annual_transport_savings:,.0f} annually with optimized ordering',
+            'action': '📊 View EOQ Details',
+            'details': f'EOQ: {eoq:.0f} kg | Current order size: {kpis.get("avg_order_size", 0):.0f} kg',
+            'priority': 'medium',
+            'color': '#2196f3'
+        })
+    
+    # 3. Safety stock alert
+    if inventory_tracker and safety_stock > 0:
+        safety_buffer = inventory_tracker.current_stock - safety_stock
+        if safety_buffer < safety_stock * 0.3:
+            recommendations.append({
+                'icon': '⚠️',
+                'title': '⚠️ Safety Stock Buffer Low',
+                'desc': f'Safety buffer is below 30% of recommended level',
+                'action': '🛡️ Review Safety Stock',
+                'details': f'Safety stock: {safety_stock:.0f} kg | Current buffer: {safety_buffer:.0f} kg',
+                'priority': 'medium',
+                'color': '#ff9800'
+            })
+    
+    # 4. Demand pattern insights
+    if df is not None and not df.empty:
+        try:
+            df_temp = df.copy()
+            df_temp['Date'] = pd.to_datetime(df_temp['Date'])
+            df_temp['Weekday'] = df_temp['Date'].dt.day_name()
+            
+            # Find peak demand day
+            weekday_demand = df_temp.groupby('Weekday')['Order_Quantity_kg'].sum()
+            if not weekday_demand.empty:
+                peak_day = weekday_demand.idxmax()
+                peak_value = weekday_demand.max()
+                
+                recommendations.append({
+                    'icon': '📈',
+                    'title': f'📈 Peak Demand on {peak_day}',
+                    'desc': f'Average demand on {peak_day}: {peak_value/len(df_temp[df_temp["Weekday"]==peak_day]):.0f} kg',
+                    'action': '📅 Plan Extra Stock',
+                    'details': f'Plan {peak_value/len(df_temp[df_temp["Weekday"]==peak_day])*1.2:.0f} kg for {peak_day}',
+                    'priority': 'low',
+                    'color': '#9c27b0'
+                })
+        except Exception as e:
+            pass
+    
+    # 5. Forecast-based insight
+    if total_forecasted_demand > 0:
+        monthly_forecast = total_forecasted_demand / 30
+        recommendations.append({
+            'icon': '🔮',
+            'title': '🔮 Demand Forecast Insight',
+            'desc': f'Expected daily demand: {monthly_forecast:.0f} kg over the next 30 days',
+            'action': '📊 View Forecast',
+            'details': f'Total forecast: {total_forecasted_demand:.0f} kg | Monthly average: {monthly_forecast*30:.0f} kg',
+            'priority': 'low',
+            'color': '#00bcd4'
+        })
+    
+    # Display recommendations in a grid
+    if recommendations:
+        # Sort by priority
+        priority_order = {'high': 0, 'medium': 1, 'low': 2}
+        recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
+        
+        # Display as cards
+        cols = st.columns(min(2, len(recommendations)))
+        
+        for idx, rec in enumerate(recommendations):
+            with cols[idx % 2]:
+                st.markdown(f"""
+                <div style="
+                    border-left: 4px solid {rec['color']};
+                    padding: 14px 16px;
+                    margin: 6px 0;
+                    background: rgba(255,255,255,0.06);
+                    backdrop-filter: blur(4px);
+                    border-radius: 12px;
+                    border: 1px solid rgba(255,255,255,0.08);
+                    transition: all 0.3s ease;
+                    min-height: 120px;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                "
+                onmouseover="this.style.transform='translateX(4px)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)';"
+                onmouseout="this.style.transform='translateX(0)'; this.style.boxShadow='none';"
+                >
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <span style="font-size: 20px;">{rec['icon']}</span>
+                            <span style="font-weight: 600; font-size: 14px; color: #333; margin-left: 8px;">{rec['title']}</span>
+                        </div>
+                        <span style="
+                            font-size: 10px;
+                            background: {rec['color']};
+                            color: white;
+                            padding: 2px 10px;
+                            border-radius: 12px;
+                            font-weight: 600;
+                            text-transform: uppercase;
+                        ">
+                            {rec['priority']}
+                        </span>
+                    </div>
+                    <div style="font-size: 13px; color: #666; margin-top: 6px; flex: 1;">
+                        {rec['desc']}
+                    </div>
+                    <div style="font-size: 12px; color: #999; margin-top: 6px;">
+                        {rec['details']}
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <span style="
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                            padding: 4px 14px;
+                            border-radius: 20px;
+                            font-size: 12px;
+                            font-weight: 500;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            display: inline-block;
+                        "
+                        onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 2px 10px rgba(102,126,234,0.3)';"
+                        onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none';"
+                        onclick="this.style.transform='scale(0.95)'; setTimeout(() => this.style.transform='scale(1)', 200);"
+                        >
+                            {rec['action']}
+                        </span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.info("✅ No AI recommendations at this time. All metrics look good!")
 
 # ===========================================================
-# 🎨 QUICK CREATE MENU (Zoho Style)
+# 🎨 QUICK CREATE MENU 
 def quick_create_menu(inventory_tracker):
     """
     Zoho-style Quick Create Menu with floating action button
@@ -4848,7 +5062,27 @@ def main():
             filtered_items[item] = details
 
         # ============================================================
-        # SECTION 1: STATUS DASHBOARD (Katana Style) - NEW
+        # SECTION 1: AI-POWERED RECOMMENDATIONS (TOP)
+        # ============================================================
+        with st.expander("🤖 View AI-Powered Recommendations", expanded=False):
+            # Display AI recommendations
+            if inventory_tracker and df is not None:
+                ai_powered_recommendations(
+                    inventory_tracker=inventory_tracker,
+                    df=df,
+                    kpis=kpis,
+                    eoq=eoq,
+                    reorder_point=reorder_point,
+                    safety_stock=safety_stock,
+                    annual_transport_savings=annual_transport_savings,
+                    total_forecasted_demand=total_forecasted_demand,
+                    avg_daily_demand=np.mean(ensemble_forecast_values) if 'ensemble_forecast_values' in locals() else 0
+                )
+            else:
+                st.info("No data available for AI recommendations")
+
+        # ============================================================
+        # SECTION 2: STATUS DASHBOARD (Katana Style) - NEW
         # ============================================================
         with st.expander("📊 View Real-Time Status Dashboard", expanded=False):
             st.markdown("""
@@ -4876,7 +5110,7 @@ def main():
                 st.info("Inventory tracker not available")    
         
         # ============================================================
-        # SECTION 2: GRID VIEW (Expander - Closed by Default)
+        # SECTION 3: GRID VIEW (Expander - Closed by Default)
         # ============================================================
         with st.expander("🖼️ View Inventory Grid", expanded=False):
             # Show stats
@@ -4891,7 +5125,7 @@ def main():
                 st.info("No items match your filters")
         
         # ============================================================
-        # SECTION 3: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
+        # SECTION 4: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
         with st.expander("🔥 View Inventory Heat Map", expanded=False):
             st.markdown("""
@@ -4996,7 +5230,7 @@ def main():
                 st.info("No inventory items to display in heat map")
         
         # ============================================================
-        # SECTION 4: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
+        # SECTION 5: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
         with st.expander("🛒 View Replenishment Recommendations", expanded=False):
             st.markdown("""
