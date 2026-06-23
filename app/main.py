@@ -2143,6 +2143,219 @@ def show_replenishment_summary_cards(summary):
             "📦 Suggested Order Volume",
             f"{summary['total_suggested_qty']:,.0f} kg"
         )
+# ============================================================
+# 🎨 KATANA'S REAL-TIME STATUS DASHBOARD
+# ============================================================
+
+def get_incoming_orders(inventory_items=None):
+    """
+    Calculate expected incoming orders (items on order)
+    
+    Args:
+        inventory_items: Dictionary with inventory items
+    
+    Returns:
+        Total expected incoming quantity
+    """
+    # If we have inventory items, calculate based on reorder points
+    if inventory_items:
+        expected_total = 0
+        for item_name, details in inventory_items.items():
+            stock = details.get('stock', 0)
+            reorder = details.get('reorder', 0)
+            
+            # If stock is below reorder point, assume an order is expected
+            if stock < reorder:
+                # Estimate expected quantity as the difference or EOQ
+                expected_qty = max(reorder * 1.5, details.get('max', stock * 2)) - stock
+                expected_total += expected_qty
+        
+        return expected_total
+    
+    # Fallback: return a default value
+    return 0
+
+def get_committed_orders(inventory_items=None):
+    """
+    Calculate committed orders (orders to fulfill)
+    
+    Args:
+        inventory_items: Dictionary with inventory items
+    
+    Returns:
+        Total committed quantity
+    """
+    # If we have inventory items, calculate committed based on demand
+    if inventory_items:
+        committed_total = 0
+        for item_name, details in inventory_items.items():
+            stock = details.get('stock', 0)
+            reorder = details.get('reorder', 0)
+            
+            # Committed is typically what's needed to fulfill upcoming orders
+            # Estimate based on reorder point and current stock
+            if stock < reorder:
+                committed_total += (reorder - stock) * 0.3  # 30% of deficit
+        
+        return committed_total
+    
+    # Fallback: return a default value
+    return 0
+
+def inventory_status_dashboard(inventory_tracker, inventory_items=None):
+    """
+    Real-time inventory status dashboard (Katana style)
+    
+    Args:
+        inventory_tracker: InventoryTracker instance
+        inventory_items: Dictionary with inventory items for calculations
+    """
+    # Get current stock
+    current_stock = inventory_tracker.current_stock if inventory_tracker else 0
+    
+    # Get expected incoming orders
+    expected = get_incoming_orders(inventory_items)
+    
+    # Get committed orders
+    committed = get_committed_orders(inventory_items)
+    
+    # Display status cards in a row
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # In Stock - Green
+        st.markdown(f"""
+        <div style="
+            background: rgba(232, 245, 233, 0.9);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 16px 20px;
+            border-radius: 12px;
+            border-left: 5px solid #4caf50;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        ">
+            <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">
+                📦 IN STOCK
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: #2e7d32; margin: 4px 0;">
+                {current_stock:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+            </div>
+            <div style="font-size: 12px; color: #888; margin-top: 2px;">
+                Current available inventory
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        # Expected - Blue
+        st.markdown(f"""
+        <div style="
+            background: rgba(227, 242, 253, 0.9);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 16px 20px;
+            border-radius: 12px;
+            border-left: 5px solid #2196f3;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        ">
+            <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">
+                📋 EXPECTED
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: #1565c0; margin: 4px 0;">
+                {expected:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+            </div>
+            <div style="font-size: 12px; color: #888; margin-top: 2px;">
+                Incoming orders (on order)
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        # Committed - Orange
+        st.markdown(f"""
+        <div style="
+            background: rgba(255, 243, 224, 0.9);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 16px 20px;
+            border-radius: 12px;
+            border-left: 5px solid #ff9800;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        ">
+            <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">
+                🎯 COMMITTED
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: #e65100; margin: 4px 0;">
+                {committed:,.0f} <span style="font-size: 14px; font-weight: 400; color: #666;">kg</span>
+            </div>
+            <div style="font-size: 12px; color: #888; margin-top: 2px;">
+                Orders to fulfill (demand)
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Add a quick status bar showing the overall health
+    st.markdown("---")
+    
+    # Calculate health percentage
+    if current_stock > 0:
+        health_pct = min(100, (current_stock / (expected + committed + 1)) * 100)
+    else:
+        health_pct = 0
+    
+    health_color = '#4caf50' if health_pct > 70 else '#ff9800' if health_pct > 40 else '#f44336'
+    health_status = '✅ Healthy' if health_pct > 70 else '⚠️ Moderate' if health_pct > 40 else '🔴 Critical'
+    
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    
+    with col1:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(8px);
+            border-radius: 8px;
+            padding: 10px 15px;
+            border: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="font-size: 13px; color: #888;">Inventory Health</div>
+            <div style="font-size: 18px; font-weight: 600; color: {health_color};">
+                {health_status}
+            </div>
+            <div style="
+                margin-top: 4px;
+                height: 4px;
+                background: #eee;
+                border-radius: 2px;
+                overflow: hidden;
+            ">
+                <div style="
+                    width: {health_pct:.0f}%;
+                    height: 4px;
+                    background: {health_color};
+                    border-radius: 2px;
+                    transition: width 0.6s ease;
+                "></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.metric("📊 Coverage Ratio", f"{health_pct:.0f}%")
+    
+    with col3:
+        # Net position (stock + expected - committed)
+        net_position = current_stock + expected - committed
+        st.metric("📈 Net Position", f"{net_position:,.0f} kg")
+    
+    with col4:
+        # Days of stock cover
+        daily_usage = max(1, committed / 7) if committed > 0 else current_stock / 30
+        days_cover = current_stock / daily_usage if daily_usage > 0 else 0
+        st.metric("📅 Days Cover", f"{days_cover:.0f} days")
+
 
 # ===========================================================
 # 🎨 QUICK CREATE MENU (Zoho Style)
@@ -4633,9 +4846,37 @@ def main():
                 continue
             
             filtered_items[item] = details
+
+        # ============================================================
+        # SECTION 1: STATUS DASHBOARD (Katana Style) - NEW
+        # ============================================================
+        with st.expander("📊 View Real-Time Status Dashboard", expanded=False):
+            st.markdown("""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 15px;
+                margin-bottom: 15px;
+                border: 1px solid rgba(255,255,255,0.08);
+            ">
+                <div style="color: #888; font-size: 13px;">
+                    Real-time inventory status overview.
+                    <span style="color: #4caf50;">🟢 In Stock</span> | 
+                    <span style="color: #2196f3;">🔵 Expected</span> | 
+                    <span style="color: #ff9800;">🟠 Committed</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Display the status dashboard
+            if inventory_tracker:
+                inventory_status_dashboard(inventory_tracker, filtered_items)
+            else:
+                st.info("Inventory tracker not available")    
         
         # ============================================================
-        # SECTION 1: GRID VIEW (Expander - Closed by Default)
+        # SECTION 2: GRID VIEW (Expander - Closed by Default)
         # ============================================================
         with st.expander("🖼️ View Inventory Grid", expanded=False):
             # Show stats
@@ -4650,7 +4891,7 @@ def main():
                 st.info("No items match your filters")
         
         # ============================================================
-        # SECTION 2: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
+        # SECTION 3: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
         with st.expander("🔥 View Inventory Heat Map", expanded=False):
             st.markdown("""
@@ -4755,7 +4996,7 @@ def main():
                 st.info("No inventory items to display in heat map")
         
         # ============================================================
-        # SECTION 3: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
+        # SECTION 4: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
         with st.expander("🛒 View Replenishment Recommendations", expanded=False):
             st.markdown("""
