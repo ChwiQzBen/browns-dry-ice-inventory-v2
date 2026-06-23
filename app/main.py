@@ -4634,26 +4634,24 @@ def main():
             
             filtered_items[item] = details
         
-    # ============================================================
-    # SECTION 1: GRID VIEW (Expander - Closed by Default)
-    # ============================================================
-    with st.expander("🖼️ View Inventory Grid", expanded=False):  # Changed to False
-        # Show stats
-        inventory_stats_summary(filtered_items)
-        
-        st.markdown("---")
-        
-        # Show the grid
-        if filtered_items:
-            visual_inventory_grid(filtered_items, columns=3)
-        else:
-            st.info("No items match your filters")
+        # ============================================================
+        # SECTION 1: GRID VIEW (Expander - Closed by Default)
+        # ============================================================
+        with st.expander("🖼️ View Inventory Grid", expanded=False):
+            # Show stats
+            inventory_stats_summary(filtered_items)
+            
+            st.markdown("---")
+            
+            # Show the grid
+            if filtered_items:
+                visual_inventory_grid(filtered_items, columns=3)
+            else:
+                st.info("No items match your filters")
         
         # ============================================================
-        # 🎨 HEAT MAP EXPANDER
+        # SECTION 2: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
-        st.markdown("---")
-        
         with st.expander("🔥 View Inventory Heat Map", expanded=False):
             st.markdown("""
             <div style="
@@ -4757,10 +4755,8 @@ def main():
                 st.info("No inventory items to display in heat map")
         
         # ============================================================
-        # 🎨 REPLENISHMENT RECOMMENDATIONS EXPANDER (ADD THIS)
+        # SECTION 3: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
         # ============================================================
-        st.markdown("---")
-        
         with st.expander("🛒 View Replenishment Recommendations", expanded=False):
             st.markdown("""
             <div style="
@@ -4807,7 +4803,7 @@ def main():
                 else:
                     st.success("✅ All items are well-stocked. No replenishment needed at this time.")
             else:
-                st.info("No inventory items to analyze for replenishment")      
+                st.info("No inventory items to analyze for replenishment")     
 
     with tab1:
         if not df.empty:
