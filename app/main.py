@@ -1153,7 +1153,7 @@ def add_transaction_to_history(transaction_type, quantity, description, date, pe
 
     st.session_state.transactions.append(transaction)
 
-    # ============================================================
+# ============================================================
 # 🎨 NEW UI HELPER FUNCTIONS (Glass Design System)
 # ============================================================
 
@@ -1249,6 +1249,346 @@ def status_badge(status, message):
     </div>
     """, unsafe_allow_html=True)
 
+# ============================================================
+# 🎨 VISUAL INVENTORY GRID (inFlow Style)
+def visual_inventory_grid(items, columns=3):
+    """
+    Display inventory items in a visual grid like inFlow's pictorial view
+    
+    Args:
+        items: Dictionary with item names as keys and details as values
+               Format: {
+                   'Item Name': {
+                       'icon': '❄️',
+                       'stock': 450,
+                       'reorder': 200,
+                       'max': 600,
+                       'category': 'Dry Ice',
+                       'location': 'Warehouse A'
+                   }
+               }
+        columns: Number of columns in the grid (default: 3)
+    """
+    if not items:
+        st.info("No inventory items to display")
+        return
+    
+    # Create columns for the grid
+    cols = st.columns(columns)
+    
+    for idx, (item, details) in enumerate(items.items()):
+        with cols[idx % columns]:
+            # Determine status colors
+            is_low_stock = details.get('stock', 0) < details.get('reorder', 0)
+            stock_color = '#dc3545' if is_low_stock else '#28a745'
+            bg_color = '#fff5f5' if is_low_stock else '#f8f9fa'
+            
+            # Calculate stock percentage for progress bar
+            stock_pct = min(100, (details.get('stock', 0) / details.get('max', 1)) * 100)
+            
+            # Category badge color
+            category_colors = {
+                'Dry Ice': '#4fc3f7',
+                'Chemicals': '#ff8a65',
+                'Packaging': '#81c784',
+                'Equipment': '#ffd54f',
+                'Default': '#90a4ae'
+            }
+            cat_color = category_colors.get(details.get('category', 'Default'), '#90a4ae')
+            
+            st.markdown(f"""
+            <div style="
+                border: 1px solid {'#ffcdd2' if is_low_stock else '#e0e0e0'};
+                border-radius: 16px;
+                padding: 18px 15px;
+                text-align: center;
+                background: {bg_color};
+                transition: all 0.3s ease;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                cursor: pointer;
+                margin-bottom: 12px;
+                position: relative;
+                overflow: hidden;
+            "
+            onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.12)';"
+            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';"
+            onclick="this.style.transform='scale(0.98)'; setTimeout(() => this.style.transform='scale(1)', 150);"
+            >
+                <!-- Category Badge -->
+                <div style="
+                    position: absolute;
+                    top: 8px;
+                    right: 8px;
+                    background: {cat_color};
+                    color: white;
+                    font-size: 9px;
+                    padding: 2px 10px;
+                    border-radius: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                ">
+                    {details.get('category', 'General')}
+                </div>
+                
+                <!-- Icon -->
+                <div style="font-size: 36px; margin-bottom: 6px;">
+                    {details.get('icon', '📦')}
+                </div>
+                
+                <!-- Item Name -->
+                <div style="
+                    font-weight: 600;
+                    font-size: 14px;
+                    color: #333;
+                    margin: 6px 0;
+                    line-height: 1.3;
+                    min-height: 36px;
+                ">
+                    {item}
+                </div>
+                
+                <!-- Stock Level -->
+                <div style="
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: {stock_color};
+                    margin: 4px 0;
+                ">
+                    {details.get('stock', 0):,.0f} <span style="font-size: 12px; color: #999;">{details.get('unit', 'kg')}</span>
+                </div>
+                
+                <!-- Reorder Level -->
+                <div style="
+                    font-size: 12px;
+                    color: #888;
+                    margin-bottom: 10px;
+                ">
+                    Reorder: {details.get('reorder', 0):,.0f} {details.get('unit', 'kg')}
+                </div>
+                
+                <!-- Progress Bar -->
+                <div style="
+                    margin: 8px 0 4px 0;
+                    height: 6px;
+                    background: #e9ecef;
+                    border-radius: 4px;
+                    overflow: hidden;
+                ">
+                    <div style="
+                        width: {stock_pct:.1f}%;
+                        height: 6px;
+                        background: {stock_color};
+                        border-radius: 4px;
+                        transition: width 0.6s ease;
+                    "></div>
+                </div>
+                
+                <!-- Location -->
+                <div style="
+                    font-size: 11px;
+                    color: #aaa;
+                    margin-top: 6px;
+                ">
+                    📍 {details.get('location', 'N/A')}
+                </div>
+                
+                <!-- Status Badge -->
+                <div style="
+                    display: inline-block;
+                    margin-top: 6px;
+                    padding: 2px 12px;
+                    border-radius: 12px;
+                    font-size: 10px;
+                    font-weight: 600;
+                    background: {'#ffe6e6' if is_low_stock else '#e6f4ea'};
+                    color: {'#dc3545' if is_low_stock else '#1e7e34'};
+                ">
+                    {'⚠️ LOW STOCK' if is_low_stock else '✅ In Stock'}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)  
+def get_sample_inventory_data():
+    """
+    Get sample inventory data for testing the visual grid
+    """
+    return {
+        "Dry Ice Block (10kg)": {
+            "icon": "🧊",
+            "stock": 450,
+            "reorder": 200,
+            "max": 600,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A",
+            "price": 146.55
+        },
+        "Dry Ice Pellets (5kg)": {
+            "icon": "❄️",
+            "stock": 320,
+            "reorder": 150,
+            "max": 500,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A"
+        },
+        "Dry Ice Slices (2kg)": {
+            "icon": "💎",
+            "stock": 180,
+            "reorder": 100,
+            "max": 300,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse B"
+        },
+        "Insulated Containers": {
+            "icon": "📦",
+            "stock": 45,
+            "reorder": 20,
+            "max": 60,
+            "unit": "units",
+            "category": "Packaging",
+            "location": "Warehouse B"
+        },
+        "CO2 Gas Cylinders": {
+            "icon": "🛢️",
+            "stock": 12,
+            "reorder": 5,
+            "max": 20,
+            "unit": "units",
+            "category": "Equipment",
+            "location": "Storage Unit #1"
+        },
+        "Dry Ice Bags (25kg)": {
+            "icon": "🎒",
+            "stock": 85,
+            "reorder": 40,
+            "max": 150,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A"
+        },
+        "Safety Gloves": {
+            "icon": "🧤",
+            "stock": 28,
+            "reorder": 15,
+            "max": 50,
+            "unit": "pairs",
+            "category": "Safety",
+            "location": "Storage Unit #2"
+        }
+    }            
+              
+def inventory_stats_summary(items):
+    """
+    Display quick summary statistics for inventory
+    """
+    total_items = len(items)
+    total_stock = sum(details.get('stock', 0) for details in items.values())
+    low_stock_items = sum(1 for details in items.values() if details.get('stock', 0) < details.get('reorder', 0))
+    categories = set(details.get('category', 'Uncategorized') for details in items.values())
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="font-size: 24px;">📦</div>
+            <div style="font-size: 20px; font-weight: 700;">{total_items}</div>
+            <div style="font-size: 12px; color: #888;">Total Items</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="font-size: 24px;">📊</div>
+            <div style="font-size: 20px; font-weight: 700;">{total_stock:,.0f}</div>
+            <div style="font-size: 12px; color: #888;">Total Stock (kg)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        color = '#dc3545' if low_stock_items > 0 else '#28a745'
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="font-size: 24px;">⚠️</div>
+            <div style="font-size: 20px; font-weight: 700; color: {color};">{low_stock_items}</div>
+            <div style="font-size: 12px; color: #888;">Low Stock Items</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="font-size: 24px;">📂</div>
+            <div style="font-size: 20px; font-weight: 700;">{len(categories)}</div>
+            <div style="font-size: 12px; color: #888;">Categories</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def inventory_filters(items):
+    """
+    Add filter controls for the inventory grid
+    """
+    # Get unique categories
+    categories = ['All'] + sorted(set(
+        details.get('category', 'Uncategorized') 
+        for details in items.values()
+    ))
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        search = st.text_input(
+            "🔍 Search Items",
+            placeholder="Type item name...",
+            key="inventory_search"
+        )
+    
+    with col2:
+        category_filter = st.selectbox(
+            "📂 Category",
+            categories,
+            key="inventory_category_filter"
+        )
+    
+    with col3:
+        show_low_stock = st.checkbox(
+            "⚠️ Low Stock Only",
+            key="inventory_low_stock_filter"
+        )
+    
+    return search, category_filter, show_low_stock
+        
 # ===========================================================
 # 🎨 QUICK CREATE MENU (Zoho Style)
 def quick_create_menu(inventory_tracker):
@@ -2691,10 +3031,11 @@ def main():
     # ============================================================
     # END OF ENHANCED KPI DASHBOARD
     # ============================================================
-    tab_inventory, tab_movements,tab_analytics,tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_inventory, tab_movements,tab_analytics,tab_inventory_visual,tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
         "📊 Stock Movements",
         "📈 All Items Analytics",
+        "🖼️ Visual Inventory",
         "📊 Order Analysis",
         "🔮 Demand Forecast",
         "📦 Inventory Management",
@@ -3622,6 +3963,68 @@ def main():
                 st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
         else:
             st.warning("No stock data found.")
+
+    with tab_inventory_visual:  
+        st.markdown("### 📦 Visual Inventory Dashboard")
+        st.markdown("_inFlow-style pictorial inventory view_")
+        
+        # Option 1: Use sample data
+        inventory_items = get_sample_inventory_data()
+        
+        # Option 2: Use data from Google Sheets
+        # Try to load from Google Sheets first
+        try:
+            gsheet = GoogleSheetReader()
+            if gsheet.authenticate():
+                stock_df = gsheet.get_stock_with_pricing()
+                if not stock_df.empty:
+                    inventory_items = {}
+                    for _, row in stock_df.iterrows():
+                        item_name = row.get('ITEM_NAME', 'Unknown')
+                        inventory_items[item_name] = {
+                            'icon': '📦',  # You can map based on category
+                            'stock': float(row.get('QUANTITY', 0)),
+                            'reorder': float(row.get('REORDER LEVEL', 0)),
+                            'max': float(row.get('QUANTITY', 0)) * 2,  # Estimate max
+                            'unit': row.get('UNIT_OF_MEASURE', 'kg'),
+                            'category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                            'location': 'Warehouse',
+                            'price': float(row.get('UNIT PRICE', 0)) if pd.notna(row.get('UNIT PRICE', 0)) else 0
+                        }
+        except Exception as e:
+            st.warning(f"Could not load from Google Sheets: {e}. Using sample data.")
+            inventory_items = get_sample_inventory_data()
+        
+        # Add filters
+        search, category_filter, show_low_stock = inventory_filters(inventory_items)
+        
+        # Apply filters
+        filtered_items = {}
+        for item, details in inventory_items.items():
+            # Search filter
+            if search and search.lower() not in item.lower():
+                continue
+            
+            # Category filter
+            if category_filter != 'All' and details.get('category', 'Uncategorized') != category_filter:
+                continue
+            
+            # Low stock filter
+            if show_low_stock and details.get('stock', 0) >= details.get('reorder', 0):
+                continue
+            
+            filtered_items[item] = details
+        
+        # Show stats
+        inventory_stats_summary(filtered_items)
+        
+        st.markdown("---")
+        
+        # Show the grid
+        if filtered_items:
+            visual_inventory_grid(filtered_items, columns=3)
+        else:
+            st.info("No items match your filters")        
 
     with tab1:
         if not df.empty:
