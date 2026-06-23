@@ -1249,84 +1249,446 @@ def status_badge(status, message):
     </div>
     """, unsafe_allow_html=True)
 
-def quick_action_fab():
+# ===========================================================
+# 🎨 QUICK CREATE MENU (Zoho Style)
+def quick_create_menu(inventory_tracker):
     """
-    Floating action button for quick actions (like Zoho's + menu)
-    Usage: Add this at the bottom of your main() function
+    Zoho-style Quick Create Menu with floating action button
     """
+    # Check if we need to show modals
+    if 'show_quick_receipt' not in st.session_state:
+        st.session_state.show_quick_receipt = False
+    if 'show_quick_usage' not in st.session_state:
+        st.session_state.show_quick_usage = False
+    
+    # CSS for the FAB and modal
     st.markdown("""
     <style>
+    /* Floating Action Button */
     .fab-container {
         position: fixed;
         bottom: 30px;
         right: 30px;
-        z-index: 999;
+        z-index: 1000;
         display: flex;
         flex-direction: column;
-        align-items: center;
+        align-items: flex-end;
         gap: 10px;
     }
     
-    .fab-button {
+    .fab-main {
         width: 60px;
         height: 60px;
         border-radius: 50%;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        font-size: 30px;
+        font-size: 28px;
         box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
         cursor: pointer;
         transition: all 0.3s ease;
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
     }
     
-    .fab-button:hover {
+    .fab-main:hover {
         transform: scale(1.1) rotate(90deg);
         box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
     }
     
-    .fab-label {
-        background: rgba(0,0,0,0.7);
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        backdrop-filter: blur(4px);
-        animation: fadeIn 0.3s ease;
+    .fab-main.active {
+        transform: rotate(45deg);
     }
     
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+    /* Quick Action Menu Items */
+    .fab-menu {
+        display: none;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    
+    .fab-menu.show {
+        display: flex;
+    }
+    
+    .fab-item {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 10px 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+        color: #333;
+        min-width: 150px;
+    }
+    
+    .fab-item:hover {
+        transform: translateX(-5px);
+        box-shadow: 0 6px 30px rgba(0, 0, 0, 0.15);
+        background: white;
+    }
+    
+    .fab-item .icon {
+        font-size: 20px;
+    }
+    
+    .fab-item .shortcut {
+        font-size: 11px;
+        color: #999;
+        margin-left: auto;
+    }
+    
+    /* Quick Modal Overlay */
+    .quick-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(4px);
+        z-index: 2000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .quick-modal-overlay.show {
+        display: flex;
+    }
+    
+    .quick-modal {
+        background: white;
+        border-radius: 20px;
+        padding: 30px;
+        max-width: 450px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: modalSlideUp 0.3s ease;
+    }
+    
+    @keyframes modalSlideUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px) scale(0.95);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+    
+    .quick-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    
+    .quick-modal-header h3 {
+        margin: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .quick-modal-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #999;
+        transition: all 0.3s ease;
+    }
+    
+    .quick-modal-close:hover {
+        color: #333;
+        transform: rotate(90deg);
+    }
+    
+    .quick-modal .stButton button {
+        width: 100%;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .fab-main {
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+        }
+        .fab-item {
+            font-size: 13px;
+            padding: 8px 16px;
+            min-width: 130px;
+        }
+        .quick-modal {
+            padding: 20px;
+            max-width: 95%;
+        }
     }
     </style>
     
-    <div class="fab-container">
-        <button class="fab-button" onclick="
-            // Toggle sidebar visibility
-            const sidebar = document.querySelector('[data-testid=stSidebar]');
-            if (sidebar) {
-                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-            }
-        ">
-            <span style="font-size:35px;">+</span>
+    <!-- FAB Container -->
+    <div class="fab-container" id="fabContainer">
+        <div class="fab-menu" id="fabMenu">
+            <div class="fab-item" onclick="document.getElementById('quickReceiptBtn').click();">
+                <span class="icon">📥</span>
+                Quick Receipt
+                <span class="shortcut">⌘R</span>
+            </div>
+            <div class="fab-item" onclick="document.getElementById('quickUsageBtn').click();">
+                <span class="icon">📤</span>
+                Quick Usage
+                <span class="shortcut">⌘U</span>
+            </div>
+            <div class="fab-item" onclick="document.getElementById('quickReportBtn').click();">
+                <span class="icon">📊</span>
+                Generate Report
+                <span class="shortcut">⌘P</span>
+            </div>
+        </div>
+        <button class="fab-main" id="fabToggle" onclick="toggleFabMenu()">
+            <span id="fabIcon">+</span>
         </button>
-        <div class="fab-label" style="display:none;" id="fabLabel">Quick Actions</div>
     </div>
     
     <script>
-        // Show label on hover
-        document.querySelector('.fab-button').addEventListener('mouseenter', function() {
-            document.getElementById('fabLabel').style.display = 'block';
+        function toggleFabMenu() {
+            const menu = document.getElementById('fabMenu');
+            const icon = document.getElementById('fabIcon');
+            const btn = document.getElementById('fabToggle');
+            
+            menu.classList.toggle('show');
+            btn.classList.toggle('active');
+            
+            if (menu.classList.contains('show')) {
+                icon.textContent = '✕';
+            } else {
+                icon.textContent = '+';
+            }
+        }
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const container = document.getElementById('fabContainer');
+            if (!container.contains(event.target)) {
+                const menu = document.getElementById('fabMenu');
+                const icon = document.getElementById('fabIcon');
+                const btn = document.getElementById('fabToggle');
+                menu.classList.remove('show');
+                btn.classList.remove('active');
+                icon.textContent = '+';
+            }
         });
-        document.querySelector('.fab-button').addEventListener('mouseleave', function() {
-            document.getElementById('fabLabel').style.display = 'none';
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            // Cmd/Ctrl + R for Receipt
+            if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
+                event.preventDefault();
+                document.getElementById('quickReceiptBtn').click();
+            }
+            // Cmd/Ctrl + U for Usage
+            if ((event.metaKey || event.ctrlKey) && event.key === 'u') {
+                event.preventDefault();
+                document.getElementById('quickUsageBtn').click();
+            }
         });
     </script>
     """, unsafe_allow_html=True)
+    
+    # Hidden buttons to trigger modals from JavaScript
+    if st.button("📥 Quick Receipt", key="quickReceiptBtn", type="primary"):
+        st.session_state.show_quick_receipt = True
+        st.session_state.show_quick_usage = False
+        st.rerun()
+    
+    if st.button("📤 Quick Usage", key="quickUsageBtn", type="primary"):
+        st.session_state.show_quick_usage = True
+        st.session_state.show_quick_receipt = False
+        st.rerun()
+    
+    if st.button("📊 Generate Report", key="quickReportBtn", type="primary"):
+        # Trigger report generation
+        st.session_state.generate_report = True
+        st.rerun()
+    
+    # Show Quick Receipt Modal
+    if st.session_state.get('show_quick_receipt', False):
+        show_quick_receipt_modal(inventory_tracker)
+    
+    # Show Quick Usage Modal
+    if st.session_state.get('show_quick_usage', False):
+        show_quick_usage_modal(inventory_tracker) 
+
+def show_quick_receipt_modal(inventory_tracker):
+    """
+    Display Quick Receipt Modal (inline in sidebar)
+    """
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 15px;
+    ">
+        <div style="font-size: 18px; font-weight: 600;">📥 Quick Receipt</div>
+        <div style="font-size: 13px; opacity: 0.8;">Record a new stock receipt</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.sidebar.container():
+        col1, col2 = st.columns(2)
+        with col1:
+            qty = st.number_input(
+                "Quantity (kg)",
+                min_value=0.0,
+                value=300.0,
+                step=50.0,
+                key="quick_receipt_qty"
+            )
+        with col2:
+            receipt_date = st.date_input(
+                "Date",
+                value=datetime.today(),
+                key="quick_receipt_date"
+            )
+        
+        notes = st.text_input(
+            "Notes (optional)",
+            placeholder="e.g., Supplier: XYZ, Order #123",
+            key="quick_receipt_notes"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Save Receipt", type="primary", use_container_width=True):
+                # Process the receipt
+                correct_period = get_period_from_date(receipt_date)
+                
+                # Update inventory
+                inventory_tracker.current_stock += qty
+                update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
+                
+                # Add to transaction history
+                add_transaction_to_history(
+                    transaction_type="receipt",
+                    quantity=qty,
+                    description=f"Quick Receipt: {notes if notes else 'No notes'}",
+                    date=receipt_date,
+                    period=correct_period
+                )
+                
+                # Show success and close modal
+                st.session_state.quick_receipt_success = True
+                st.session_state.show_quick_receipt = False
+                st.rerun()
+        
+        with col2:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state.show_quick_receipt = False
+                st.rerun()
+        
+        # Show success message
+        if st.session_state.get('quick_receipt_success', False):
+            st.success(f"✅ Receipt of {qty:.0f} kg recorded successfully!")
+            st.session_state.quick_receipt_success = False
+
+def show_quick_usage_modal(inventory_tracker):
+    """
+    Display Quick Usage Modal (inline in sidebar)
+    """
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 15px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 15px;
+    ">
+        <div style="font-size: 18px; font-weight: 600;">📤 Quick Usage</div>
+        <div style="font-size: 13px; opacity: 0.8;">Record stock usage/consumption</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.sidebar.container():
+        col1, col2 = st.columns(2)
+        with col1:
+            qty = st.number_input(
+                "Quantity Used (kg)",
+                min_value=0.0,
+                value=150.0,
+                step=25.0,
+                key="quick_usage_qty"
+            )
+        with col2:
+            usage_date = st.date_input(
+                "Date",
+                value=datetime.today(),
+                key="quick_usage_date"
+            )
+        
+        # Check if stock is sufficient
+        current_stock = inventory_tracker.current_stock
+        if qty > current_stock:
+            st.warning(f"⚠️ Insufficient stock! Current stock: {current_stock:.0f} kg")
+        
+        notes = st.text_input(
+            "Notes (optional)",
+            placeholder="e.g., Production, Packaging, etc.",
+            key="quick_usage_notes"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Save Usage", type="primary", use_container_width=True):
+                if qty <= current_stock:
+                    # Process the usage
+                    alert = inventory_tracker.update_stock(qty, f"Quick Usage: {notes if notes else 'No notes'}", usage_date)
+                    add_transaction_to_history(
+                        transaction_type="usage",
+                        quantity=qty,
+                        description=f"Quick Usage: {notes if notes else 'No notes'}",
+                        date=usage_date,
+                        period=st.session_state.selected_period
+                    )
+                    
+                    if alert is not None:
+                        st.error(alert["message"])
+                    else:
+                        st.session_state.quick_usage_success = True
+                        st.session_state.show_quick_usage = False
+                        st.rerun()
+                else:
+                    st.error(f"❌ Insufficient stock! Available: {current_stock:.0f} kg")
+        
+        with col2:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state.show_quick_usage = False
+                st.rerun()
+        
+        # Show success message
+        if st.session_state.get('quick_usage_success', False):
+            st.success(f"✅ Usage of {qty:.0f} kg recorded successfully!")
+            st.session_state.quick_usage_success = False
+
+# END OF QUICK CREATE MENU
 
 def responsive_metric_grid(metrics, columns=4):
     """
