@@ -3920,13 +3920,15 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
     return fig_orders, fig_cost_overview, fig_forecast
 
 def main():
-    # Initialize database
-    init_db()
-    fix_order_date()
-
-    seed_historical_data()
-    # ADD THIS ONE LINE - clears cached data so it loads fresh
-    get_historical_orders_from_db.clear()
+    if 'initialized' not in st.session_state:
+        # Initialize database
+        init_db()
+        fix_order_date()
+        seed_historical_data()
+        get_historical_orders_from_db.clear()
+        
+        st.session_state.initialized = True
+        print("✅ Application initialized (once per session)")
     
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
@@ -3982,96 +3984,97 @@ def main():
     kpis = analyzer.calculate_kpis(period=st.session_state.selected_period)
 
    # Try to load from Google Sheets first
-    inventory_items = {}
-    stock_df = None
-    try:
-        gsheet = GoogleSheetReader()
-        if gsheet.authenticate():
-            stock_df = gsheet.get_stock_with_pricing()
-            if not stock_df.empty:
-                for _, row in stock_df.iterrows():
-                    try:
-                        item_name = row.get('ITEM_NAME', 'Unknown')
-                        if not item_name or str(item_name).strip() == '':
-                            continue
-                        
-                        # Safe conversion for stock
-                        stock_val = row.get('QUANTITY', 0)
-                        if pd.isna(stock_val) or str(stock_val).strip() == '':
-                            stock = 0
-                        else:
-                            try:
-                                stock = float(stock_val)
-                            except (ValueError, TypeError):
+    @st.cache_data(ttl=600)
+    def load_inventory_data():
+        """Load inventory data from Google Sheets with caching"""
+        inventory_items = {}
+        stock_df = None
+        try:
+            gsheet = GoogleSheetReader()
+            if gsheet.authenticate():
+                stock_df = gsheet.get_stock_with_pricing()
+                if not stock_df.empty:
+                    for _, row in stock_df.iterrows():
+                        try:
+                            item_name = row.get('ITEM_NAME', 'Unknown')
+                            if not item_name or str(item_name).strip() == '':
+                                continue
+                            
+                            # Safe conversion for stock
+                            stock_val = row.get('QUANTITY', 0)
+                            if pd.isna(stock_val) or str(stock_val).strip() == '':
                                 stock = 0
-                        
-                        # Safe conversion for reorder
-                        reorder_val = row.get('REORDER LEVEL', 0)
-                        if pd.isna(reorder_val) or str(reorder_val).strip() == '':
-                            reorder = stock * 0.5
-                        else:
-                            try:
-                                reorder = float(reorder_val)
-                            except (ValueError, TypeError):
+                            else:
+                                try:
+                                    stock = float(stock_val)
+                                except (ValueError, TypeError):
+                                    stock = 0
+                            
+                            # Safe conversion for reorder
+                            reorder_val = row.get('REORDER LEVEL', 0)
+                            if pd.isna(reorder_val) or str(reorder_val).strip() == '':
                                 reorder = stock * 0.5
-                        
-                        # Safe conversion for price
-                        price_val = row.get('UNIT PRICE', 0)
-                        if pd.isna(price_val) or str(price_val).strip() == '':
-                            price = 0
-                        else:
-                            try:
-                                price = float(price_val)
-                            except (ValueError, TypeError):
+                            else:
+                                try:
+                                    reorder = float(reorder_val)
+                                except (ValueError, TypeError):
+                                    reorder = stock * 0.5
+                            
+                            # Safe conversion for price
+                            price_val = row.get('UNIT PRICE', 0)
+                            if pd.isna(price_val) or str(price_val).strip() == '':
                                 price = 0
-                        
-                        # Skip items with zero or negative stock
-                        if stock <= 0:
+                            else:
+                                try:
+                                    price = float(price_val)
+                                except (ValueError, TypeError):
+                                    price = 0
+                            
+                            # Skip items with zero or negative stock
+                            if stock <= 0:
+                                continue
+                            
+                            # Map icons based on category
+                            icon_map = {
+                                'Dry Ice': '🧊',
+                                'Chemicals': '🧪',
+                                'Packaging': '📦',
+                                'Equipment': '⚙️',
+                                'Safety': '🛡️',
+                                'Default': '📦'
+                            }
+                            category = row.get('ITEM_CATEGORY', 'Default')
+                            if pd.isna(category) or str(category).strip() == '':
+                                category = 'Default'
+                            icon = icon_map.get(category, icon_map['Default'])
+                            
+                            inventory_items[item_name] = {
+                                'icon': icon,
+                                'stock': stock,
+                                'reorder': reorder,
+                                'max': max(stock * 2, reorder * 3, 100),
+                                'unit': row.get('UNIT_OF_MEASURE', 'kg') if not pd.isna(row.get('UNIT_OF_MEASURE', 'kg')) else 'kg',
+                                'category': category if category else 'Uncategorized',
+                                'location': 'Warehouse',
+                                'price': price
+                            }
+                        except Exception as e:
+                            # Skip problematic rows
                             continue
-                        
-                        # Map icons based on category
-                        icon_map = {
-                            'Dry Ice': '🧊',
-                            'Chemicals': '🧪',
-                            'Packaging': '📦',
-                            'Equipment': '⚙️',
-                            'Safety': '🛡️',
-                            'Default': '📦'
-                        }
-                        category = row.get('ITEM_CATEGORY', 'Default')
-                        if pd.isna(category) or str(category).strip() == '':
-                            category = 'Default'
-                        icon = icon_map.get(category, icon_map['Default'])
-                        
-                        inventory_items[item_name] = {
-                            'icon': icon,
-                            'stock': stock,
-                            'reorder': reorder,
-                            'max': max(stock * 2, reorder * 3, 100),
-                            'unit': row.get('UNIT_OF_MEASURE', 'kg') if not pd.isna(row.get('UNIT_OF_MEASURE', 'kg')) else 'kg',
-                            'category': category if category else 'Uncategorized',
-                            'location': 'Warehouse',
-                            'price': price
-                        }
-                    except Exception as e:
-                        # Skip problematic rows
-                        continue
-                
-                # If no valid items were loaded, use sample data
-                if not inventory_items:
-                    st.info("No valid inventory items found in Google Sheets. Using sample data.")
+                else:
                     inventory_items = get_sample_inventory_data()
             else:
                 inventory_items = get_sample_inventory_data()
-        else:
+        except Exception as e:
+            st.warning(f"Could not load from Google Sheets: {e}. Using sample data.")
             inventory_items = get_sample_inventory_data()
-    except Exception as e:
-        st.warning(f"Could not load from Google Sheets: {e}. Using sample data.")
-        inventory_items = get_sample_inventory_data()
-
-    # If inventory_items is still empty (shouldn't happen), use sample data
-    if not inventory_items:
-        inventory_items = get_sample_inventory_data()
+        
+        if not inventory_items:
+            inventory_items = get_sample_inventory_data()
+        
+        return inventory_items, stock_df
+    
+    inventory_items, stock_df = load_inventory_data()
 
     # Initialize other components
     mobile_ui = MobileInterface()
@@ -4086,19 +4089,21 @@ def main():
         st.session_state.last_loaded_period = st.session_state.selected_period # Update the tracker
     
     
-    # --- 1. Generate Forecast (Logic from former Tab 2) ---
-    if not df.empty:
-        with st.spinner("🔄 Generating forecast... This may take a moment."):
-            daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
-            daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
-            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
-            total_forecasted_demand = np.sum(ensemble_forecast_values)
-            forecast_std_dev = np.std(ensemble_forecast_values)
-    else:
-        # Provide default values if no data exists
-        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = None, np.array([0]), {}, 0
-        total_forecasted_demand = 0
-        forecast_std_dev = 0
+    #1. Generate Forecast (Logic from former Tab 2) ---
+    @st.cache_data(ttl=1800)
+    def get_forecast_data(df):
+        """Get cached forecast data"""
+        if df.empty:
+            return None, np.array([0]), {}, 0, 0
+        
+        daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
+        daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
+        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
+        total_forecasted_demand = np.sum(ensemble_forecast_values)
+        forecast_std_dev = np.std(ensemble_forecast_values)
+        return fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev
+    
+    fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev = get_forecast_data(df)
 
     
     if total_forecasted_demand <= 0:
