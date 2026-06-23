@@ -4521,6 +4521,7 @@ def main():
 
     with tab_inventory_visual:  
         st.markdown("### 📦 Visual Inventory Dashboard")
+        st.markdown("_inFlow-style pictorial inventory view with additional visualizations_")
         
         # Try to load from Google Sheets first
         inventory_items = {}
@@ -4633,16 +4634,20 @@ def main():
             
             filtered_items[item] = details
         
-        # Show stats
-        inventory_stats_summary(filtered_items)
-        
-        st.markdown("---")
-        
-        # Show the grid
-        if filtered_items:
-            visual_inventory_grid(filtered_items, columns=3)
-        else:
-            st.info("No items match your filters")
+        # ============================================================
+        # SECTION 1: GRID VIEW (Expander - Default Open)
+        # ============================================================
+        with st.expander("🖼️ View Inventory Grid", expanded=True):
+            # Show stats
+            inventory_stats_summary(filtered_items)
+            
+            st.markdown("---")
+            
+            # Show the grid
+            if filtered_items:
+                visual_inventory_grid(filtered_items, columns=3)
+            else:
+                st.info("No items match your filters")
         
         # ============================================================
         # 🎨 HEAT MAP EXPANDER
