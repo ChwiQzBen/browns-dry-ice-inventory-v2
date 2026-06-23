@@ -3968,31 +3968,95 @@ def main():
         st.markdown("### 📦 Visual Inventory Dashboard")
         st.markdown("_inFlow-style pictorial inventory view_")
         
-        # Option 1: Use sample data
-        inventory_items = get_sample_inventory_data()
-        
-        # Option 2: Use data from Google Sheets
         # Try to load from Google Sheets first
+        inventory_items = {}
         try:
             gsheet = GoogleSheetReader()
             if gsheet.authenticate():
                 stock_df = gsheet.get_stock_with_pricing()
                 if not stock_df.empty:
-                    inventory_items = {}
                     for _, row in stock_df.iterrows():
-                        item_name = row.get('ITEM_NAME', 'Unknown')
-                        inventory_items[item_name] = {
-                            'icon': '📦',  # You can map based on category
-                            'stock': float(row.get('QUANTITY', 0)),
-                            'reorder': float(row.get('REORDER LEVEL', 0)),
-                            'max': float(row.get('QUANTITY', 0)) * 2,  # Estimate max
-                            'unit': row.get('UNIT_OF_MEASURE', 'kg'),
-                            'category': row.get('ITEM_CATEGORY', 'Uncategorized'),
-                            'location': 'Warehouse',
-                            'price': float(row.get('UNIT PRICE', 0)) if pd.notna(row.get('UNIT PRICE', 0)) else 0
-                        }
+                        try:
+                            item_name = row.get('ITEM_NAME', 'Unknown')
+                            if not item_name or str(item_name).strip() == '':
+                                continue
+                            
+                            # Safe conversion for stock
+                            stock_val = row.get('QUANTITY', 0)
+                            if pd.isna(stock_val) or str(stock_val).strip() == '':
+                                stock = 0
+                            else:
+                                try:
+                                    stock = float(stock_val)
+                                except (ValueError, TypeError):
+                                    stock = 0
+                            
+                            # Safe conversion for reorder
+                            reorder_val = row.get('REORDER LEVEL', 0)
+                            if pd.isna(reorder_val) or str(reorder_val).strip() == '':
+                                reorder = stock * 0.5
+                            else:
+                                try:
+                                    reorder = float(reorder_val)
+                                except (ValueError, TypeError):
+                                    reorder = stock * 0.5
+                            
+                            # Safe conversion for price
+                            price_val = row.get('UNIT PRICE', 0)
+                            if pd.isna(price_val) or str(price_val).strip() == '':
+                                price = 0
+                            else:
+                                try:
+                                    price = float(price_val)
+                                except (ValueError, TypeError):
+                                    price = 0
+                            
+                            # Skip items with zero or negative stock
+                            if stock <= 0:
+                                continue
+                            
+                            # Map icons based on category
+                            icon_map = {
+                                'Dry Ice': '🧊',
+                                'Chemicals': '🧪',
+                                'Packaging': '📦',
+                                'Equipment': '⚙️',
+                                'Safety': '🛡️',
+                                'Default': '📦'
+                            }
+                            category = row.get('ITEM_CATEGORY', 'Default')
+                            if pd.isna(category) or str(category).strip() == '':
+                                category = 'Default'
+                            icon = icon_map.get(category, icon_map['Default'])
+                            
+                            inventory_items[item_name] = {
+                                'icon': icon,
+                                'stock': stock,
+                                'reorder': reorder,
+                                'max': max(stock * 2, reorder * 3, 100),
+                                'unit': row.get('UNIT_OF_MEASURE', 'kg') if not pd.isna(row.get('UNIT_OF_MEASURE', 'kg')) else 'kg',
+                                'category': category if category else 'Uncategorized',
+                                'location': 'Warehouse',
+                                'price': price
+                            }
+                        except Exception as e:
+                            # Skip problematic rows
+                            continue
+                    
+                    # If no valid items were loaded, use sample data
+                    if not inventory_items:
+                        st.info("No valid inventory items found in Google Sheets. Using sample data.")
+                        inventory_items = get_sample_inventory_data()
+                else:
+                    inventory_items = get_sample_inventory_data()
+            else:
+                inventory_items = get_sample_inventory_data()
         except Exception as e:
             st.warning(f"Could not load from Google Sheets: {e}. Using sample data.")
+            inventory_items = get_sample_inventory_data()
+        
+        # If inventory_items is still empty (shouldn't happen), use sample data
+        if not inventory_items:
             inventory_items = get_sample_inventory_data()
         
         # Add filters
@@ -4024,7 +4088,7 @@ def main():
         if filtered_items:
             visual_inventory_grid(filtered_items, columns=3)
         else:
-            st.info("No items match your filters")        
+            st.info("No items match your filters")       
 
     with tab1:
         if not df.empty:
