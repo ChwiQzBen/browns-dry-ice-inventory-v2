@@ -1254,20 +1254,6 @@ def status_badge(status, message):
 def visual_inventory_grid(items, columns=3):
     """
     Display inventory items in a visual grid like inFlow's pictorial view
-    
-    Args:
-        items: Dictionary with item names as keys and details as values
-               Format: {
-                   'Item Name': {
-                       'icon': '❄️',
-                       'stock': 450,
-                       'reorder': 200,
-                       'max': 600,
-                       'category': 'Dry Ice',
-                       'location': 'Warehouse A'
-                   }
-               }
-        columns: Number of columns in the grid (default: 3)
     """
     if not items:
         st.info("No inventory items to display")
@@ -1296,24 +1282,19 @@ def visual_inventory_grid(items, columns=3):
             }
             cat_color = category_colors.get(details.get('category', 'Default'), '#90a4ae')
             
-            st.markdown(f"""
+            html_content = f"""
             <div style="
                 border: 1px solid {'#ffcdd2' if is_low_stock else '#e0e0e0'};
-                border-radius: 16px;
-                padding: 18px 15px;
+                border-radius: 12px;
+                padding: 15px 12px;
                 text-align: center;
                 background: {bg_color};
-                transition: all 0.3s ease;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-                cursor: pointer;
                 margin-bottom: 12px;
                 position: relative;
-                overflow: hidden;
-            "
-            onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.12)';"
-            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';"
-            onclick="this.style.transform='scale(0.98)'; setTimeout(() => this.style.transform='scale(1)', 150);"
-            >
+                min-height: 200px;
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            ">
                 <!-- Category Badge -->
                 <div style="
                     position: absolute;
@@ -1332,74 +1313,65 @@ def visual_inventory_grid(items, columns=3):
                 </div>
                 
                 <!-- Icon -->
-                <div style="font-size: 36px; margin-bottom: 6px;">
+                <div style="font-size: 32px; margin-bottom: 4px;">
                     {details.get('icon', '📦')}
                 </div>
                 
                 <!-- Item Name -->
                 <div style="
                     font-weight: 600;
-                    font-size: 14px;
+                    font-size: 13px;
                     color: #333;
-                    margin: 6px 0;
-                    line-height: 1.3;
-                    min-height: 36px;
+                    margin: 4px 0;
+                    line-height: 1.2;
+                    min-height: 32px;
                 ">
-                    {item}
+                    {item[:30]}{'...' if len(item) > 30 else ''}
                 </div>
                 
                 <!-- Stock Level -->
                 <div style="
-                    font-size: 24px;
+                    font-size: 22px;
                     font-weight: 700;
                     color: {stock_color};
-                    margin: 4px 0;
+                    margin: 2px 0;
                 ">
-                    {details.get('stock', 0):,.0f} <span style="font-size: 12px; color: #999;">{details.get('unit', 'kg')}</span>
+                    {details.get('stock', 0):,.0f} <span style="font-size: 11px; color: #999;">{details.get('unit', 'kg')}</span>
                 </div>
                 
                 <!-- Reorder Level -->
                 <div style="
-                    font-size: 12px;
+                    font-size: 11px;
                     color: #888;
-                    margin-bottom: 10px;
+                    margin-bottom: 6px;
                 ">
                     Reorder: {details.get('reorder', 0):,.0f} {details.get('unit', 'kg')}
                 </div>
                 
                 <!-- Progress Bar -->
                 <div style="
-                    margin: 8px 0 4px 0;
-                    height: 6px;
+                    margin: 6px 0 4px 0;
+                    height: 5px;
                     background: #e9ecef;
-                    border-radius: 4px;
+                    border-radius: 3px;
                     overflow: hidden;
                 ">
                     <div style="
                         width: {stock_pct:.1f}%;
-                        height: 6px;
+                        height: 5px;
                         background: {stock_color};
-                        border-radius: 4px;
+                        border-radius: 3px;
                         transition: width 0.6s ease;
                     "></div>
-                </div>
-                
-                <!-- Location -->
-                <div style="
-                    font-size: 11px;
-                    color: #aaa;
-                    margin-top: 6px;
-                ">
-                    📍 {details.get('location', 'N/A')}
                 </div>
                 
                 <!-- Status Badge -->
                 <div style="
                     display: inline-block;
-                    margin-top: 6px;
-                    padding: 2px 12px;
-                    border-radius: 12px;
-                    font-size: 10px;
+                    margin-top: 4px;
+                    padding: 2px 10px;
+                    border-radius: 10px;
+                    font-size: 9px;
                     font-weight: 600;
                     background: {'#ffe6e6' if is_low_stock else '#e6f4ea'};
                     color: {'#dc3545' if is_low_stock else '#1e7e34'};
@@ -1407,7 +1379,18 @@ def visual_inventory_grid(items, columns=3):
                     {'⚠️ LOW STOCK' if is_low_stock else '✅ In Stock'}
                 </div>
             </div>
-            """, unsafe_allow_html=True)  
+            """
+            
+            # Try multiple rendering methods
+            try:
+                if hasattr(st, 'html'):
+                    st.html(html_content)
+                else:
+                    st.markdown(html_content, unsafe_allow_html=True)
+            except Exception as e:
+                # Fallback to st.markdown
+                st.markdown(html_content, unsafe_allow_html=True) 
+
 def get_sample_inventory_data():
     """
     Get sample inventory data for testing the visual grid
@@ -1491,7 +1474,7 @@ def inventory_stats_summary(items):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown(f"""
+        html = f"""
         <div style="
             background: rgba(255,255,255,0.06);
             backdrop-filter: blur(8px);
@@ -1504,10 +1487,17 @@ def inventory_stats_summary(items):
             <div style="font-size: 20px; font-weight: 700;">{total_items}</div>
             <div style="font-size: 12px; color: #888;">Total Items</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        try:
+            if hasattr(st, 'html'):
+                st.html(html)
+            else:
+                st.markdown(html, unsafe_allow_html=True)
+        except:
+            st.markdown(html, unsafe_allow_html=True)
     
     with col2:
-        st.markdown(f"""
+        html = f"""
         <div style="
             background: rgba(255,255,255,0.06);
             backdrop-filter: blur(8px);
@@ -1520,11 +1510,18 @@ def inventory_stats_summary(items):
             <div style="font-size: 20px; font-weight: 700;">{total_stock:,.0f}</div>
             <div style="font-size: 12px; color: #888;">Total Stock (kg)</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        try:
+            if hasattr(st, 'html'):
+                st.html(html)
+            else:
+                st.markdown(html, unsafe_allow_html=True)
+        except:
+            st.markdown(html, unsafe_allow_html=True)
     
     with col3:
         color = '#dc3545' if low_stock_items > 0 else '#28a745'
-        st.markdown(f"""
+        html = f"""
         <div style="
             background: rgba(255,255,255,0.06);
             backdrop-filter: blur(8px);
@@ -1537,10 +1534,17 @@ def inventory_stats_summary(items):
             <div style="font-size: 20px; font-weight: 700; color: {color};">{low_stock_items}</div>
             <div style="font-size: 12px; color: #888;">Low Stock Items</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        try:
+            if hasattr(st, 'html'):
+                st.html(html)
+            else:
+                st.markdown(html, unsafe_allow_html=True)
+        except:
+            st.markdown(html, unsafe_allow_html=True)
     
     with col4:
-        st.markdown(f"""
+        html = f"""
         <div style="
             background: rgba(255,255,255,0.06);
             backdrop-filter: blur(8px);
@@ -1553,7 +1557,14 @@ def inventory_stats_summary(items):
             <div style="font-size: 20px; font-weight: 700;">{len(categories)}</div>
             <div style="font-size: 12px; color: #888;">Categories</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        try:
+            if hasattr(st, 'html'):
+                st.html(html)
+            else:
+                st.markdown(html, unsafe_allow_html=True)
+        except:
+            st.markdown(html, unsafe_allow_html=True)
 
 def inventory_filters(items):
     """
@@ -3966,7 +3977,6 @@ def main():
 
     with tab_inventory_visual:  
         st.markdown("### 📦 Visual Inventory Dashboard")
-        st.markdown("_inFlow-style pictorial inventory view_")
         
         # Try to load from Google Sheets first
         inventory_items = {}
