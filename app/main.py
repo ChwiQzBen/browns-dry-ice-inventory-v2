@@ -1599,6 +1599,247 @@ def inventory_filters(items):
         )
     
     return search, category_filter, show_low_stock
+
+# ============================================================
+# 🎨 INVENTORY HEAT MAP
+# ============================================================
+
+def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
+    """
+    Display an inventory heat map showing stock levels with color coding
+    
+    Args:
+        inventory_items: Dictionary with item names as keys and details as values
+        title: Title for the heat map
+        columns: Number of columns in the grid (default: 6)
+    """
+    if not inventory_items:
+        st.info("No inventory items to display in heat map")
+        return
+    
+    # Convert inventory_items dict to heatmap data
+    heatmap_data = []
+    for item_name, details in inventory_items.items():
+        stock = details.get('stock', 0)
+        reorder = details.get('reorder', 0)
+        eoq = details.get('eoq', details.get('max', stock * 2))
+        
+        # Determine status
+        if stock <= 0:
+            status = 'Critical'
+            color = '#dc3545'  # Red
+        elif stock < reorder:
+            status = 'Low'
+            color = '#ff9800'  # Orange
+        elif stock >= reorder and stock < eoq:
+            status = 'Good'
+            color = '#4caf50'  # Green
+        else:
+            status = 'Overstocked'
+            color = '#2196f3'  # Blue
+        
+        heatmap_data.append({
+            'Item': item_name[:20] + ('...' if len(item_name) > 20 else ''),
+            'Item_Full': item_name,
+            'Stock': stock,
+            'Reorder': reorder,
+            'EOQ': eoq,
+            'Status': status,
+            'Color': color,
+            'Unit': details.get('unit', 'kg'),
+            'Category': details.get('category', 'Uncategorized'),
+            'Stock_Percentage': min(100, (stock / eoq) * 100) if eoq > 0 else 0
+        })
+    
+    # Sort items: Critical first, then Low, then Good, then Overstocked
+    status_order = {'Critical': 0, 'Low': 1, 'Good': 2, 'Overstocked': 3}
+    heatmap_data.sort(key=lambda x: status_order.get(x['Status'], 4))
+    
+    # Display title
+    st.markdown(f"""
+    <div style="
+        background: rgba(255,255,255,0.05);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 15px 20px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255,255,255,0.08);
+    ">
+        <div style="
+            font-size: 1.2rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        ">
+            🔥 {title}
+        </div>
+        <div style="color: #888; font-size: 13px; margin-top: 4px;">
+            Color legend: 🔴 Critical | 🟠 Low Stock | 🟢 Good | 🔵 Overstocked
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Create columns for the grid
+    cols = st.columns(columns)
+    
+    for idx, item in enumerate(heatmap_data):
+        with cols[idx % columns]:
+            # Get status icon
+            status_icons = {
+                'Critical': '🔴',
+                'Low': '🟠',
+                'Good': '🟢',
+                'Overstocked': '🔵'
+            }
+            status_icon = status_icons.get(item['Status'], '⚪')
+            
+            stock_pct = item['Stock_Percentage']
+            
+            # Create the heat map card
+            html = f"""
+            <div style="
+                background: {item['Color']};
+                color: white;
+                padding: 12px 8px;
+                border-radius: 10px;
+                text-align: center;
+                margin: 4px 0;
+                min-height: 80px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                transition: all 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            "
+            onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.2)';"
+            onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';"
+            title="{item['Item_Full']} - Stock: {item['Stock']} {item['Unit']} | Reorder: {item['Reorder']} {item['Unit']}"
+            >
+                <!-- Status Indicator -->
+                <div style="
+                    position: absolute;
+                    top: 4px;
+                    left: 8px;
+                    font-size: 12px;
+                ">
+                    {status_icon}
+                </div>
+                
+                <!-- Item Name -->
+                <div style="
+                    font-size: 11px;
+                    font-weight: 500;
+                    opacity: 0.9;
+                    margin-bottom: 4px;
+                    line-height: 1.2;
+                    min-height: 24px;
+                ">
+                    {item['Item']}
+                </div>
+                
+                <!-- Stock Level -->
+                <div style="
+                    font-size: 20px;
+                    font-weight: 700;
+                    line-height: 1.2;
+                ">
+                    {item['Stock']:,.0f}
+                </div>
+                
+                <!-- Unit -->
+                <div style="
+                    font-size: 9px;
+                    opacity: 0.7;
+                    margin-top: 1px;
+                ">
+                    {item['Unit']}
+                </div>
+                
+                <!-- Progress Bar (Stock Level Indicator) -->
+                <div style="
+                    margin-top: 4px;
+                    height: 3px;
+                    background: rgba(255,255,255,0.3);
+                    border-radius: 2px;
+                    overflow: hidden;
+                ">
+                    <div style="
+                        width: {stock_pct:.1f}%;
+                        height: 3px;
+                        background: rgba(255,255,255,0.8);
+                        border-radius: 2px;
+                        transition: width 0.6s ease;
+                    "></div>
+                </div>
+            </div>
+            """
+            
+            # Render with fallback
+            try:
+                if hasattr(st, 'html'):
+                    st.html(html)
+                else:
+                    st.markdown(html, unsafe_allow_html=True)
+            except:
+                st.markdown(html, unsafe_allow_html=True)
+    
+    # Display summary statistics
+    st.markdown("---")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    total_items = len(heatmap_data)
+    critical_items = sum(1 for item in heatmap_data if item['Status'] == 'Critical')
+    low_items = sum(1 for item in heatmap_data if item['Status'] == 'Low')
+    good_items = sum(1 for item in heatmap_data if item['Status'] == 'Good')
+    overstocked_items = sum(1 for item in heatmap_data if item['Status'] == 'Overstocked')
+    
+    with col1:
+        st.metric("📦 Total Items", total_items)
+    with col2:
+        st.metric("🔴 Critical", critical_items, delta=f"-{critical_items}" if critical_items > 0 else None)
+    with col3:
+        st.metric("🟠 Low Stock", low_items, delta=f"-{low_items}" if low_items > 0 else None)
+    with col4:
+        st.metric("🟢 Good", good_items)
+    with col5:
+        st.metric("🔵 Overstocked", overstocked_items)
+
+def inventory_heatmap_filters(heatmap_data):
+    """
+    Add filter controls for the inventory heat map
+    """
+    # Get unique statuses and categories
+    statuses = ['All'] + sorted(set(item['Status'] for item in heatmap_data))
+    categories = ['All'] + sorted(set(item['Category'] for item in heatmap_data))
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        search = st.text_input(
+            "🔍 Search Items",
+            placeholder="Type item name...",
+            key="heatmap_search"
+        )
+    
+    with col2:
+        status_filter = st.selectbox(
+            "📊 Status",
+            statuses,
+            key="heatmap_status_filter"
+        )
+    
+    with col3:
+        category_filter = st.selectbox(
+            "📂 Category",
+            categories,
+            key="heatmap_category_filter"
+        )
+    
+    return search, status_filter, category_filter   
         
 # ===========================================================
 # 🎨 QUICK CREATE MENU (Zoho Style)
@@ -4098,7 +4339,114 @@ def main():
         if filtered_items:
             visual_inventory_grid(filtered_items, columns=3)
         else:
-            st.info("No items match your filters")       
+            st.info("No items match your filters")
+        
+        # ============================================================
+        # 🎨 HEAT MAP EXPANDER
+        # ============================================================
+        st.markdown("---")
+        
+        with st.expander("🔥 View Inventory Heat Map", expanded=False):
+            st.markdown("""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 15px;
+                margin-bottom: 15px;
+                border: 1px solid rgba(255,255,255,0.08);
+            ">
+                <div style="color: #888; font-size: 13px;">
+                    Color-coded overview of inventory stock levels. 
+                    <span style="color: #dc3545;">🔴 Critical</span> | 
+                    <span style="color: #ff9800;">🟠 Low Stock</span> | 
+                    <span style="color: #4caf50;">🟢 Good</span> | 
+                    <span style="color: #2196f3;">🔵 Overstocked</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Use the filtered_items from the visual inventory
+            if filtered_items:
+                # Create heatmap data from filtered items
+                heatmap_data = []
+                for item_name, details in filtered_items.items():
+                    stock = details.get('stock', 0)
+                    reorder = details.get('reorder', 0)
+                    eoq = details.get('max', stock * 2)
+                    
+                    if stock <= 0:
+                        status = 'Critical'
+                    elif stock < reorder:
+                        status = 'Low'
+                    elif stock >= reorder and stock < eoq:
+                        status = 'Good'
+                    else:
+                        status = 'Overstocked'
+                    
+                    heatmap_data.append({
+                        'Item': item_name,
+                        'Stock': stock,
+                        'Reorder': reorder,
+                        'EOQ': eoq,
+                        'Status': status,
+                        'Category': details.get('category', 'Uncategorized'),
+                        'Unit': details.get('unit', 'kg')
+                    })
+                
+                # Add heat map specific filters
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    heatmap_search = st.text_input(
+                        "🔍 Search Items",
+                        placeholder="Type item name...",
+                        key="heatmap_search"
+                    )
+                with col2:
+                    # Get unique statuses for filter
+                    status_options = ['All'] + sorted(set(item['Status'] for item in heatmap_data))
+                    heatmap_status = st.selectbox(
+                        "📊 Status",
+                        status_options,
+                        key="heatmap_status_filter"
+                    )
+                with col3:
+                    # Get unique categories for filter
+                    cat_options = ['All'] + sorted(set(item['Category'] for item in heatmap_data))
+                    heatmap_category = st.selectbox(
+                        "📂 Category",
+                        cat_options,
+                        key="heatmap_category_filter"
+                    )
+                
+                # Apply heat map filters
+                filtered_heatmap = []
+                for item in heatmap_data:
+                    if heatmap_search and heatmap_search.lower() not in item['Item'].lower():
+                        continue
+                    if heatmap_status != 'All' and item['Status'] != heatmap_status:
+                        continue
+                    if heatmap_category != 'All' and item['Category'] != heatmap_category:
+                        continue
+                    filtered_heatmap.append(item)
+                
+                # Convert back to dict
+                heatmap_items = {}
+                for item in filtered_heatmap:
+                    heatmap_items[item['Item']] = {
+                        'stock': item['Stock'],
+                        'reorder': item['Reorder'],
+                        'max': item['EOQ'],
+                        'unit': item['Unit'],
+                        'category': item['Category']
+                    }
+                
+                if heatmap_items:
+                    inventory_heatmap(heatmap_items, title="Inventory Stock Levels", columns=6)
+                else:
+                    st.info("No items match your heat map filters")
+            else:
+                st.info("No inventory items to display in heat map")       
 
     with tab1:
         if not df.empty:
