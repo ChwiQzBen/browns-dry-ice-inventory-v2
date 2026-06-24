@@ -5805,7 +5805,7 @@ def main():
                 0
             )
 
-        with st.spinner("Loading inventory data..."):
+        with st.spinner("📊Loading inventory data..."):
             stock_df, current_df, low_df, category_count = load_inventory_data()
 
         # Everything below stays INSIDE tab_inventory
@@ -6531,7 +6531,7 @@ def main():
                 st.error(f"Error loading data: {e}")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         
-        with st.spinner("Loading analytics data..."):
+        with st.spinner("📊Loading analytics data..."):
             stock_df, check_in_df, check_out_df, current_stock_df = load_analytics_data()
         
         if not stock_df.empty:
