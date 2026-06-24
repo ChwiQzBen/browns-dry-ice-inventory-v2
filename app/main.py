@@ -6179,7 +6179,7 @@ def main():
                     st.info("No current stock records found.")
         
         with movement_tab4:
-            st.markdown("### 📋 Stock Take (inFlow Style)")
+            st.markdown
             
             # Add description
             st.markdown("""
