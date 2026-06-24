@@ -5827,7 +5827,7 @@ def main():
                         f"{price_count} out of {len(stock_df)} items"
                     )
 
-            # --- ABC ANALYSIS (Fixed) ---
+            # --- ABC ANALYSIS (Operationalized) ---
             if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
                 st.divider()
                 st.markdown("### 📊 ABC Analysis (Pareto Analysis)")
@@ -5864,6 +5864,285 @@ def main():
                         
                         abc_df['ABC_CLASS'] = abc_df.apply(get_abc_class, axis=1)
                         
+                        # ============================================================
+                        # 🎯 OPERATIONALIZE ABC ANALYSIS - inFlow Style
+                        # ============================================================
+                        
+                        # Define cycle counting frequencies based on ABC class
+                        cycle_frequencies = {
+                            '🔴 A (70% value)': {
+                                'frequency': 'Monthly',
+                                'days': 30,
+                                'priority': 'High',
+                                'color': '#dc3545',
+                                'count_per_year': 12
+                            },
+                            '🟡 B (20% value)': {
+                                'frequency': 'Quarterly',
+                                'days': 90,
+                                'priority': 'Medium',
+                                'color': '#ffc107',
+                                'count_per_year': 4
+                            },
+                            '🟢 C (10% value)': {
+                                'frequency': 'Annually',
+                                'days': 365,
+                                'priority': 'Low',
+                                'color': '#28a745',
+                                'count_per_year': 1
+                            }
+                        }
+                        
+                        # Create cycle counting schedule
+                        cycle_schedule = []
+                        for _, row in abc_df.iterrows():
+                            class_label = row['ABC_CLASS']
+                            freq_info = cycle_frequencies.get(class_label, cycle_frequencies['🟢 C (10% value)'])
+                            
+                            cycle_schedule.append({
+                                'Item': row['ITEM_NAME'],
+                                'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                                'ABC Class': class_label,
+                                'Annual Value': row['ANNUAL_VALUE'],
+                                'Count Frequency': freq_info['frequency'],
+                                'Priority': freq_info['priority'],
+                                'Counts per Year': freq_info['count_per_year']
+                            })
+                        
+                        cycle_df = pd.DataFrame(cycle_schedule)
+                        
+                        # Display cycle counting schedule summary
+                        st.markdown("#### 🔄 Cycle Counting Recommendations")
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        # Count items by class
+                        a_count = len(abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'])
+                        b_count = len(abc_df[abc_df['ABC_CLASS'] == '🟡 B (20% value)'])
+                        c_count = len(abc_df[abc_df['ABC_CLASS'] == '🟢 C (10% value)'])
+                        
+                        with col1:
+                            st.metric(
+                                "🔴 A Items (Monthly)",
+                                a_count,
+                                delta=f"{a_count * 12} counts/year"
+                            )
+                        with col2:
+                            st.metric(
+                                "🟡 B Items (Quarterly)",
+                                b_count,
+                                delta=f"{b_count * 4} counts/year"
+                            )
+                        with col3:
+                            st.metric(
+                                "🟢 C Items (Annually)",
+                                c_count,
+                                delta=f"{c_count} counts/year"
+                            )
+                        with col4:
+                            total_counts = (a_count * 12) + (b_count * 4) + c_count
+                            st.metric(
+                                "📊 Total Counts/Year",
+                                total_counts,
+                                delta=f"~{total_counts // 12} counts/month"
+                            )
+                        
+                        # Show detailed cycle counting schedule with styling
+                        with st.expander("📋 View Cycle Counting Schedule", expanded=False):
+                            # Style by priority
+                            def style_priority(val):
+                                if 'High' in val:
+                                    return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+                                elif 'Medium' in val:
+                                    return 'background-color: #fff3cd; color: #856404;'
+                                else:
+                                    return 'background-color: #d4edda; color: #155724;'
+                            
+                            styled_cycle_df = cycle_df.style.applymap(
+                                style_priority, subset=['Priority']
+                            )
+                            
+                            st.dataframe(
+                                styled_cycle_df,
+                                use_container_width=True,
+                                height=300,
+                                hide_index=True
+                            )
+                        
+                        # ============================================================
+                        # 🎯 REPLENISHMENT STRATEGY BY ABC CLASS
+                        # ============================================================
+                        st.markdown("#### 📦 Replenishment Strategy by ABC Class")
+                        
+                        # Create replenishment strategies
+                        replenishment_data = []
+                        for _, row in abc_df.iterrows():
+                            class_label = row['ABC_CLASS']
+                            stock = row.get('QUANTITY', 0)
+                            
+                            # Get reorder level (if available, otherwise use 50% of stock)
+                            if 'REORDER LEVEL' in row and pd.notna(row['REORDER LEVEL']):
+                                reorder = row['REORDER LEVEL']
+                            else:
+                                reorder = stock * 0.5
+                            
+                            # Set safety stock multiplier based on ABC class
+                            if '🔴 A' in class_label:
+                                safety_multiplier = 0.3
+                                order_frequency = 'Monthly'
+                            elif '🟡 B' in class_label:
+                                safety_multiplier = 0.2
+                                order_frequency = 'Quarterly'
+                            else:
+                                safety_multiplier = 0.1
+                                order_frequency = 'As Needed'
+                            
+                            safety_stock = reorder * (1 + safety_multiplier)
+                            
+                            # Check if below safety stock
+                            below_safety = stock < safety_stock
+                            
+                            replenishment_data.append({
+                                'Item': row['ITEM_NAME'],
+                                'ABC Class': class_label,
+                                'Current Stock': stock,
+                                'Reorder Point': round(reorder, 0),
+                                'Safety Stock': round(safety_stock, 0),
+                                'Order Frequency': order_frequency,
+                                'Annual Value': row['ANNUAL_VALUE'],
+                                'Below Safety': '⚠️ Yes' if below_safety else '✅ No'
+                            })
+                        
+                        replenishment_df = pd.DataFrame(replenishment_data)
+                        
+                        # Display replenishment summary
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            # Count items needing immediate attention
+                            urgent_items = len(replenishment_df[replenishment_df['Below Safety'] == '⚠️ Yes'])
+                            st.metric(
+                                "⚠️ Below Safety Stock",
+                                urgent_items,
+                                delta=f"-{urgent_items}" if urgent_items > 0 else None
+                            )
+                        with col2:
+                            # Total value of A items
+                            a_value = replenishment_df[replenishment_df['ABC Class'] == '🔴 A (70% value)']['Annual Value'].sum()
+                            st.metric(
+                                "💰 A Items Value",
+                                f"KSh {a_value:,.0f}",
+                                f"{a_value/total_value*100:.0f}% of total"
+                            )
+                        with col3:
+                            # Most critical items
+                            critical = replenishment_df[
+                                (replenishment_df['ABC Class'] == '🔴 A (70% value)') &
+                                (replenishment_df['Below Safety'] == '⚠️ Yes')
+                            ]
+                            st.metric(
+                                "🎯 Critical A Items",
+                                len(critical),
+                                delta="⚠️ Needs Reorder"
+                            )
+                        
+                        # Show detailed replenishment recommendations
+                        with st.expander("📋 View Replenishment Recommendations by ABC Class", expanded=False):
+                            # Color code by ABC class
+                            def style_abc_class(val):
+                                if '🔴 A' in val:
+                                    return 'background-color: #f8d7da; font-weight: bold;'
+                                elif '🟡 B' in val:
+                                    return 'background-color: #fff3cd;'
+                                else:
+                                    return 'background-color: #d4edda;'
+                            
+                            styled_replenishment = replenishment_df.style.applymap(
+                                style_abc_class, subset=['ABC Class']
+                            )
+                            
+                            st.dataframe(
+                                styled_replenishment,
+                                use_container_width=True,
+                                height=300,
+                                hide_index=True
+                            )
+                        
+                        # ============================================================
+                        # 🎯 DAILY / WEEKLY ACTION PLAN
+                        # ============================================================
+                        st.markdown("#### 📋 Action Plan by ABC Class")
+                        
+                        # Create action plan cards
+                        action_plan = {
+                            '🔴 A (70% value)': {
+                                'icon': '🔴',
+                                'actions': [
+                                    '📊 Count weekly (or more frequently)',
+                                    '📦 Maintain higher safety stock',
+                                    '🔄 Reorder more frequently',
+                                    '👀 Monitor daily',
+                                    '📈 Review weekly performance'
+                                ]
+                            },
+                            '🟡 B (20% value)': {
+                                'icon': '🟡',
+                                'actions': [
+                                    '📊 Count monthly',
+                                    '📦 Maintain moderate safety stock',
+                                    '🔄 Reorder as needed',
+                                    '👀 Monitor weekly',
+                                    '📈 Review monthly'
+                                ]
+                            },
+                            '🟢 C (10% value)': {
+                                'icon': '🟢',
+                                'actions': [
+                                    '📊 Count quarterly',
+                                    '📦 Maintain basic safety stock',
+                                    '🔄 Reorder on demand',
+                                    '👀 Monitor monthly',
+                                    '📈 Review quarterly'
+                                ]
+                            }
+                        }
+                        
+                        # Display action plan as cards
+                        cols = st.columns(3)
+                        for idx, (class_name, plan) in enumerate(action_plan.items()):
+                            with cols[idx]:
+                                count = len(abc_df[abc_df['ABC_CLASS'] == class_name])
+                                st.markdown(f"""
+                                <div style="
+                                    border: 2px solid {cycle_frequencies[class_name]['color']};
+                                    border-radius: 12px;
+                                    padding: 15px;
+                                    margin-bottom: 10px;
+                                    background: rgba(255,255,255,0.05);
+                                    min-height: 200px;
+                                ">
+                                    <div style="font-size: 16px; font-weight: 700; color: {cycle_frequencies[class_name]['color']};">
+                                        {plan['icon']} {class_name}
+                                        <span style="font-size: 12px; color: #888;">({count} items)</span>
+                                    </div>
+                                    <div style="font-size: 13px; color: #666; margin-top: 8px;">
+                                        <strong>Count:</strong> {cycle_frequencies[class_name]['frequency']}<br>
+                                        <strong>Priority:</strong> {cycle_frequencies[class_name]['priority']}
+                                    </div>
+                                    <div style="margin-top: 8px;">
+                                        <ul style="padding-left: 20px; margin: 0;">
+                                            {''.join([f'<li style="font-size: 12px; color: #555;">{action}</li>' for action in plan['actions']])}
+                                        </ul>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        
+                        # ============================================================
+                        # 🎯 ABC CLASS BREAKDOWN - Original (Keep this)
+                        # ============================================================
+                        st.markdown("---")
+                        st.markdown("#### 📊 ABC Class Breakdown")
+                        
                         # Show ABC breakdown
                         abc_counts = abc_df['ABC_CLASS'].value_counts()
                         
@@ -5885,7 +6164,7 @@ def main():
                         abc_summary.columns = ['Class', 'Item Count', 'Total Value']
                         st.dataframe(abc_summary, use_container_width=True, hide_index=True)
                         
-                        # Show top A items
+                        # Show top A items with download
                         with st.expander("🔍 View Top A Items (70% Value)", expanded=False):
                             top_a = abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'].head(20)
                             st.dataframe(
@@ -5893,6 +6172,16 @@ def main():
                                 use_container_width=True,
                                 hide_index=True
                             )
+                            
+                            # Add export button for A items
+                            if not top_a.empty:
+                                csv_a = top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']].to_csv(index=False).encode('utf-8')
+                                st.download_button(
+                                    label="📥 Download A Items List",
+                                    data=csv_a,
+                                    file_name=f"a_items_{datetime.now().strftime('%Y%m%d')}.csv",
+                                    mime='text/csv'
+                                )
                     else:
                         st.info("Total inventory value is zero. Cannot perform ABC analysis.")
                 else:
