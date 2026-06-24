@@ -5085,18 +5085,76 @@ def main():
     #1. Generate Forecast (Logic from former Tab 2) ---
     @st.cache_data(ttl=1800)
     def get_forecast_data(df):
-        """Get cached forecast data"""
-        if df.empty:
-            return None, np.array([0]), {}, 0, 0
+        """Get cached forecast data with proper error handling"""
+        # Check if df is None or empty
+        if df is None or df.empty:
+            return None, np.array([0]), {}, 0, 0, 0
         
-        daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
-        daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
-        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
-        total_forecasted_demand = np.sum(ensemble_forecast_values)
-        forecast_std_dev = np.std(ensemble_forecast_values)
-        return fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev
+        # Check if DataFrame has required columns
+        if 'Date' not in df.columns or 'Order_Quantity_kg' not in df.columns:
+            return None, np.array([0]), {}, 0, 0, 0
+        
+        # Check if there's enough data
+        if len(df) < 5:
+            st.warning(f"⚠️ Limited historical data ({len(df)} points). Forecast reliability may be reduced.")
+            # Use simple average for limited data
+            avg_value = df['Order_Quantity_kg'].mean() if 'Order_Quantity_kg' in df.columns else 0
+            # Create a simple forecast using average
+            ensemble_forecast_values = np.full(30, max(0, avg_value))
+            total_forecasted_demand = np.sum(ensemble_forecast_values)
+            forecast_std_dev = np.std(ensemble_forecast_values)
+            
+            # Create a simple visualization
+            dates = pd.to_datetime(df['Date'])
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=dates, y=df['Order_Quantity_kg'], name='Actual Demand', 
+                                    line=dict(color='blue', width=2)))
+            future_dates = pd.date_range(dates.max(), periods=31)[1:]
+            fig.add_trace(go.Scatter(x=future_dates, y=ensemble_forecast_values, 
+                                    name='Conservative Forecast', 
+                                    line=dict(color='orange', width=3)))
+            fig.update_layout(title='Conservative Forecast (Limited Historical Data)', 
+                             xaxis_title='Date', yaxis_title='Demand (kg)')
+            
+            return fig, ensemble_forecast_values, {'Simple Average': avg_value}, 0.2, total_forecasted_demand, forecast_std_dev
+        
+        try:
+            daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
+            daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
+            
+            # Check if resampled data has any values
+            if daily_df.empty or daily_df['Order_Quantity_kg'].sum() == 0:
+                return None, np.array([0]), {}, 0, 0, 0
+            
+            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
+            
+            # Check if forecast returned valid values
+            if ensemble_forecast_values is None or len(ensemble_forecast_values) == 0:
+                return None, np.array([0]), {}, 0, 0, 0
+            
+            total_forecasted_demand = np.sum(ensemble_forecast_values)
+            forecast_std_dev = np.std(ensemble_forecast_values)
+            
+            return fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev
+            
+        except Exception as e:
+            st.warning(f"⚠️ Forecast generation failed: {str(e)}")
+            return None, np.array([0]), {}, 0, 0, 0
     
-    fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev = get_forecast_data(df)
+    # Check if we have data before generating forecast
+    if not df.empty and len(df) >= 5:
+        with st.spinner("🔄 Generating forecast..."):
+            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev = get_forecast_data(df)
+    else:
+        # No data or insufficient data for forecasting
+        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = None, np.array([0]), {}, 0
+        total_forecasted_demand = 0
+        forecast_std_dev = 0
+        
+        if df.empty:
+            st.info("📊 No order data found for this period. Record a receipt to begin analysis.")
+        else:
+            st.warning(f"⚠️ Insufficient data ({len(df)} orders). Need at least 5 orders for reliable forecasting.")
 
     
     if total_forecasted_demand <= 0:
