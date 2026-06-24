@@ -1385,7 +1385,7 @@ def visual_inventory_grid(items, columns=3):
             """
             
             # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
-            st.html(html_content) 
+            st.markdown(html_content, unsafe_allow_html=True)
 
 def get_sample_inventory_data():
     """
