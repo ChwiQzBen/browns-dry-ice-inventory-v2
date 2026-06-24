@@ -1754,28 +1754,7 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
             st.markdown(html_content, unsafe_allow_html=True)
     
-    # Display summary statistics
-    st.markdown("---")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    total_items = len(heatmap_data)
-    critical_items = sum(1 for item in heatmap_data if item['Status'] == 'Critical')
-    low_items = sum(1 for item in heatmap_data if item['Status'] == 'Low')
-    good_items = sum(1 for item in heatmap_data if item['Status'] == 'Good')
-    overstocked_items = sum(1 for item in heatmap_data if item['Status'] == 'Overstocked')
-    
-    with col1:
-        st.metric("📦 Total Items", total_items)
-    with col2:
-        st.metric("🔴 Critical", critical_items, delta=f"-{critical_items}" if critical_items > 0 else None)
-    with col3:
-        st.metric("🟠 Low Stock", low_items, delta=f"-{low_items}" if low_items > 0 else None)
-    with col4:
-        st.metric("🟢 Good", good_items)
-    with col5:
-        st.metric("🔵 Overstocked", overstocked_items)
-    
-    # Display summary statistics
+    # Display summary statistics (ONLY ONCE)
     st.markdown("---")
     col1, col2, col3, col4, col5 = st.columns(5)
     
