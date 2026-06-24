@@ -5448,7 +5448,8 @@ def main():
     # Update session state when selection changes
     if selected_menu != st.session_state.stock_take_selected_menu:
         st.session_state.stock_take_selected_menu = selected_menu
-        st.rerun()
+    
+
     # Sidebar - System Parameters (Always Visible)
     st.sidebar.header("⚙️ System Parameters")
     with st.sidebar.expander("Inventory Parameters"):
@@ -6389,7 +6390,7 @@ def main():
         
         st.divider()
         
-        @st.cache_data(ttl=300)
+        @st.cache_data(ttl=300, show_spinner=False)
         def load_movement_data():
             gsheet = GoogleSheetReader()
             if gsheet.authenticate():
@@ -6399,7 +6400,6 @@ def main():
                 return check_in, check_out, current_stock
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         
-        with st.spinner("Loading stock movement data..."):
             check_in_df, check_out_df, current_stock_df = load_movement_data()
         
         # Show summary metrics
