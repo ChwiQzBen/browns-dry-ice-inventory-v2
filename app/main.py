@@ -6400,8 +6400,9 @@ def main():
                 return check_in, check_out, current_stock
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         
-            check_in_df, check_out_df, current_stock_df = load_movement_data()
-        
+        with st.spinner("📊 Please wait..."):
+           check_in_df, check_out_df, current_stock_df = load_movement_data()
+       
         # Show summary metrics
         col1, col2, col3 = st.columns(3)
         with col1:
