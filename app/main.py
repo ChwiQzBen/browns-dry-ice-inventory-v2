@@ -5886,7 +5886,7 @@ def main():
                         st.dataframe(abc_summary, use_container_width=True, hide_index=True)
                         
                         # Show top A items
-                        with st.expander("🔍 View Top A Items (70% Value)"):
+                        with st.expander("🔍 View Top A Items (70% Value)", expanded=False):
                             top_a = abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'].head(20)
                             st.dataframe(
                                 top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']],
@@ -5898,61 +5898,61 @@ def main():
                 else:
                     st.info("No valid items with both quantity and price data found for ABC analysis.")
 
-
-                # --- CATEGORY-LEVEL INVENTORY SUMMARY ---
+            # --- CATEGORY-LEVEL INVENTORY SUMMARY (WRAPPED IN EXPANDER) ---
             if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
                 st.divider()
-                st.markdown("### 📊 Category-Level Inventory Summary")
                 
-                # Convert to numeric
-                cat_df = stock_df.copy()
-                cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
-                cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
-                
-                # Drop rows with missing values
-                cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                
-                if not cat_df.empty:
-                    # Calculate annual value first
-                    cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                # Wrap Category-Level Inventory Summary in expander - collapsed by default
+                with st.expander("📊 Category-Level Inventory Summary", expanded=False):
+                    # Convert to numeric
+                    cat_df = stock_df.copy()
+                    cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
+                    cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
                     
-                    # Group by category with all aggregations at once
-                    category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
-                        'ITEM_NAME': 'count',
-                        'QUANTITY': 'sum',
-                        'UNIT PRICE': 'mean',
-                        'ANNUAL_VALUE': 'sum'
-                    }).reset_index()
+                    # Drop rows with missing values
+                    cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
                     
-                    # Rename columns
-                    category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
-                    
-                    # Format currency columns (keep as numbers for chart, format for display)
-                    display_summary = category_summary.copy()
-                    display_summary['Avg Unit Price'] = display_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
-                    display_summary['Total Value'] = display_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
-                    
-                    # Show summary table
-                    st.dataframe(display_summary, use_container_width=True, hide_index=True)
-                    
-                    # Chart: Category breakdown (use numeric values)
-                    fig_category = px.bar(
-                        category_summary,
-                        x='Category',
-                        y='Total Value',
-                        title='Inventory Value by Category',
-                        color='Category',
-                        height=400,
-                        labels={'Total Value': 'Total Value (KSh)'}
-                    )
-                    fig_category.update_layout(showlegend=False)
-                    st.plotly_chart(fig_category, use_container_width=True)
-                    
-                    # Show total value
-                    total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
-                    st.metric("💰 Total Inventory Value Across All Categories", f"KSh {total_inventory_value:,.2f}")
-                else:
-                    st.info("No valid data available for category summary.")
+                    if not cat_df.empty:
+                        # Calculate annual value first
+                        cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                        
+                        # Group by category with all aggregations at once
+                        category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
+                            'ITEM_NAME': 'count',
+                            'QUANTITY': 'sum',
+                            'UNIT PRICE': 'mean',
+                            'ANNUAL_VALUE': 'sum'
+                        }).reset_index()
+                        
+                        # Rename columns
+                        category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
+                        
+                        # Format currency columns (keep as numbers for chart, format for display)
+                        display_summary = category_summary.copy()
+                        display_summary['Avg Unit Price'] = display_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
+                        display_summary['Total Value'] = display_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
+                        
+                        # Show summary table
+                        st.dataframe(display_summary, use_container_width=True, hide_index=True)
+                        
+                        # Chart: Category breakdown (use numeric values)
+                        fig_category = px.bar(
+                            category_summary,
+                            x='Category',
+                            y='Total Value',
+                            title='Inventory Value by Category',
+                            color='Category',
+                            height=400,
+                            labels={'Total Value': 'Total Value (KSh)'}
+                        )
+                        fig_category.update_layout(showlegend=False)
+                        st.plotly_chart(fig_category, use_container_width=True)
+                        
+                        # Show total value
+                        total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
+                        st.metric("💰 Total Inventory Value Across All Categories", f"KSh {total_inventory_value:,.2f}")
+                    else:
+                        st.info("No valid data available for category summary.")
                     
             # Search + Filter
             col1, col2 = st.columns(2)
@@ -6012,34 +6012,46 @@ def main():
                     == category_filter
                 ]
 
-            # Display table
-            st.markdown(
-                f"### 📋 Stock Listing ({len(filtered_df)} items)"
-            )
+            # Wrap Stock Listing in expander - collapsed by default
+            with st.expander(f"📋 Stock Listing ({len(filtered_df)} items)", expanded=False):
+                display_cols = [
+                    'ITEM_SERIAL',
+                    'ITEM_CATEGORY',
+                    'ITEM_NAME',
+                    'UNIT_OF_MEASURE',
+                    'QUANTITY',
+                    'UNIT PRICE',
+                    'REORDER LEVEL'
+                ]
 
-            display_cols = [
-                'ITEM_SERIAL',
-                'ITEM_CATEGORY',
-                'ITEM_NAME',
-                'UNIT_OF_MEASURE',
-                'QUANTITY',
-                'UNIT PRICE',
-                'REORDER LEVEL'
-            ]
+                display_cols = [
+                    col for col in display_cols
+                    if col in filtered_df.columns
+                ]
 
-            display_cols = [
-                col for col in display_cols
-                if col in filtered_df.columns
-            ]
+                st.dataframe(
+                    filtered_df[display_cols],
+                    use_container_width=True,
+                    height=400,
+                    hide_index=True
+                )
 
-            st.dataframe(
-                filtered_df[display_cols],
-                use_container_width=True,
-                height=400,
-                hide_index=True
-            )
+                # CSV export
+                if not filtered_df.empty:
+                    csv = (
+                        filtered_df
+                        .to_csv(index=False)
+                        .encode('utf-8')
+                    )
 
-            # Low stock section
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+
+            # Low stock section (already has expander)
             if not low_df.empty:
                 st.divider()
 
@@ -6047,34 +6059,18 @@ def main():
                     f"⚠️ {len(low_df)} items are low in stock and need reordering!"
                 )
 
-                with st.expander("📋 View Low Stock Items"):
+                with st.expander("📋 View Low Stock Items", expanded=False):
                     st.dataframe(
                         low_df,
                         use_container_width=True,
                         height=300
                     )
 
-            # CSV export
-            if not filtered_df.empty:
-                csv = (
-                    filtered_df
-                    .to_csv(index=False)
-                    .encode('utf-8')
-                )
-
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv,
-                    file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-
         else:
             st.info(
             "📊 No inventory data found. "
             "Please check your Google Sheets connection."
-        )
-            
+        )  
     with tab_movements:
         st.markdown("## 📊 Stock Movements & Stock Take")
     
