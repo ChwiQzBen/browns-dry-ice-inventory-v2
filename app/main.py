@@ -1484,13 +1484,7 @@ def inventory_stats_summary(items):
             <div style="font-size: 12px; color: #888;">Total Items</div>
         </div>
         """
-        try:
-            if hasattr(st, 'html'):
-                st.html(html)
-            else:
-                st.markdown(html, unsafe_allow_html=True)
-        except:
-            st.markdown(html, unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
     
     with col2:
         html = f"""
@@ -1507,13 +1501,7 @@ def inventory_stats_summary(items):
             <div style="font-size: 12px; color: #888;">Total Stock (kg)</div>
         </div>
         """
-        try:
-            if hasattr(st, 'html'):
-                st.html(html)
-            else:
-                st.markdown(html, unsafe_allow_html=True)
-        except:
-            st.markdown(html, unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
     
     with col3:
         color = '#dc3545' if low_stock_items > 0 else '#28a745'
@@ -1531,13 +1519,7 @@ def inventory_stats_summary(items):
             <div style="font-size: 12px; color: #888;">Low Stock Items</div>
         </div>
         """
-        try:
-            if hasattr(st, 'html'):
-                st.html(html)
-            else:
-                st.markdown(html, unsafe_allow_html=True)
-        except:
-            st.markdown(html, unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
     
     with col4:
         html = f"""
@@ -1554,13 +1536,7 @@ def inventory_stats_summary(items):
             <div style="font-size: 12px; color: #888;">Categories</div>
         </div>
         """
-        try:
-            if hasattr(st, 'html'):
-                st.html(html)
-            else:
-                st.markdown(html, unsafe_allow_html=True)
-        except:
-            st.markdown(html, unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
 
 def inventory_filters(items):
     """
