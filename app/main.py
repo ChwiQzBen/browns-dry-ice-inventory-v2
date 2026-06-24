@@ -3922,23 +3922,9 @@ def stock_take_interface(inventory_items):
     # Ensure we have sample data if inventory is empty
     if not st.session_state.stock_take_inventory:
         st.session_state.stock_take_inventory = get_sample_inventory_data()
-    
-    # ---- SIDEBAR NAVIGATION ----
-    st.sidebar.markdown("### 📋 Stock Take Menu")
-    
-    menu_options = [
-        "📊 Dashboard",
-        "📝 New Count",
-        "📋 Active Counts",
-        "📜 History"
-    ]
-    
-    selected_menu = st.sidebar.radio(
-        "Select Action",
-        menu_options,
-        key="stock_take_menu"
-    )
-    
+        
+    # Use the selected menu from session state (set in main sidebar)
+    selected_menu = st.session_state.get('stock_take_selected_menu', "📊 Dashboard")
     # ---- MAIN CONTENT ----
     if selected_menu == "📊 Dashboard":
         stock_take_dashboard()
@@ -5434,6 +5420,35 @@ def main():
             except Exception as e:
                 st.sidebar.error(f"Error generating report: {str(e)}")
 
+    # 📋 STOCK TAKE MENU            
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📋 Stock Take Menu")
+    
+    # Initialize stock take session if needed
+    init_stock_take_session()
+    
+    menu_options = [
+        "📊 Dashboard",
+        "📝 New Count",
+        "📋 Active Counts",
+        "📜 History"
+    ]
+    
+    # Store selected menu in session state
+    if 'stock_take_selected_menu' not in st.session_state:
+        st.session_state.stock_take_selected_menu = "📊 Dashboard"
+    
+    selected_menu = st.sidebar.radio(
+        "Select Action",
+        menu_options,
+        index=menu_options.index(st.session_state.stock_take_selected_menu),
+        key="stock_take_menu_main"
+    )
+    
+    # Update session state when selection changes
+    if selected_menu != st.session_state.stock_take_selected_menu:
+        st.session_state.stock_take_selected_menu = selected_menu
+        st.rerun()
     # Sidebar - System Parameters (Always Visible)
     st.sidebar.header("⚙️ System Parameters")
     with st.sidebar.expander("Inventory Parameters"):
