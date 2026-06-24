@@ -1284,6 +1284,7 @@ def visual_inventory_grid(items, columns=3):
             }
             cat_color = category_colors.get(details.get('category', 'Default'), '#90a4ae')
             
+            # Build HTML content
             html_content = f"""
             <div style="
                 border: 1px solid {'#ffcdd2' if is_low_stock else '#e0e0e0'};
@@ -1383,15 +1384,8 @@ def visual_inventory_grid(items, columns=3):
             </div>
             """
             
-            # Try multiple rendering methods
-            try:
-                if hasattr(st, 'html'):
-                    st.html(html_content)
-                else:
-                    st.markdown(html_content, unsafe_allow_html=True)
-            except Exception as e:
-                # Fallback to st.markdown
-                st.markdown(html_content, unsafe_allow_html=True) 
+            # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
+            st.markdown(html_content, unsafe_allow_html=True) 
 
 def get_sample_inventory_data():
     """
@@ -1699,8 +1693,8 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             
             stock_pct = item['Stock_Percentage']
             
-            # Create the heat map card
-            html = f"""
+            # Build HTML content
+            html_content = f"""
             <div style="
                 background: {item['Color']};
                 color: white;
@@ -1716,6 +1710,7 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
                 transition: all 0.3s ease;
                 position: relative;
                 overflow: hidden;
+                cursor: pointer;
             "
             onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.2)';"
             onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';"
@@ -1780,14 +1775,29 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             </div>
             """
             
-            # Render with fallback
-            try:
-                if hasattr(st, 'html'):
-                    st.html(html)
-                else:
-                    st.markdown(html, unsafe_allow_html=True)
-            except:
-                st.markdown(html, unsafe_allow_html=True)
+            # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
+            st.markdown(html_content, unsafe_allow_html=True)
+    
+    # Display summary statistics
+    st.markdown("---")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    total_items = len(heatmap_data)
+    critical_items = sum(1 for item in heatmap_data if item['Status'] == 'Critical')
+    low_items = sum(1 for item in heatmap_data if item['Status'] == 'Low')
+    good_items = sum(1 for item in heatmap_data if item['Status'] == 'Good')
+    overstocked_items = sum(1 for item in heatmap_data if item['Status'] == 'Overstocked')
+    
+    with col1:
+        st.metric("📦 Total Items", total_items)
+    with col2:
+        st.metric("🔴 Critical", critical_items, delta=f"-{critical_items}" if critical_items > 0 else None)
+    with col3:
+        st.metric("🟠 Low Stock", low_items, delta=f"-{low_items}" if low_items > 0 else None)
+    with col4:
+        st.metric("🟢 Good", good_items)
+    with col5:
+        st.metric("🔵 Overstocked", overstocked_items)
     
     # Display summary statistics
     st.markdown("---")
