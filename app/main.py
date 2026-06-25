@@ -5267,38 +5267,42 @@ def main():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # ============================================================
-        # 🎯 LOGO, TITLE & PERIOD IN ONE CONTAINER
-        # ============================================================
+    # ============================================================
+    # 🎯 LOGO + TITLE + PERIOD IN ONE RECTANGULAR CONTAINER
+    # ============================================================
         logo_path = "assets/browns_logo.jpg"
         start_date_str = display_start_date.strftime('%B %d, %Y')
         end_date_str = display_end_date.strftime('%B %d, %Y')
         
-        # Container with logo
+    # Container with logo, title, and period
         st.markdown("""
         <div style="
             background: white;
             border-radius: 20px;
-            padding: 25px 20px 20px 20px;
+            padding: 30px 20px 25px 20px;
             margin: 10px 0 20px 0;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
             border: 1px solid rgba(0, 0, 0, 0.06);
             text-align: center;
         ">
-            <div style="margin-bottom: 10px;">
+            <div style="margin-bottom: 12px;">
         """, unsafe_allow_html=True)
         
-        # Display the logo inside the container
+    # Display the logo inside the container
         if os.path.exists(logo_path):
             st.image(logo_path, width=120)
         
         st.markdown("""
             </div>
             <div style="
-                font-size: 26px;
+                font-size: 28px;
                 font-weight: 700;
-                color: #1a237e;
+                background: linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #1565c0 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
                 letter-spacing: -0.3px;
+                margin-bottom: 8px;
             ">
                 DRY ICE INVENTORY OPTIMIZER
             </div>
@@ -5310,12 +5314,14 @@ def main():
             "></div>
             <div style="
                 display: inline-block;
-                background: #f0f4ff;
-                border-radius: 20px;
-                padding: 5px 20px;
-                font-size: 14px;
-                color: #1565c0;
-                font-weight: 500;
+                font-size: 28px;
+                font-weight: 700;
+                background: linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #1565c0 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                letter-spacing: -0.3px;
+                padding: 0;
             ">
                 📅 """ + start_date_str + """ – """ + end_date_str + """
             </div>
