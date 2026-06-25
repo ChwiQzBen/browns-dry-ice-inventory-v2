@@ -5317,7 +5317,7 @@ def main():
                 letter-spacing: -0.3px;
                 padding: 0;
             ">
-                📅 """ + start_date_str + """ – """ + end_date_str + """
+                 """ + start_date_str + """ – """ + end_date_str + """
             </div>
         </div>
         """, unsafe_allow_html=True)
