@@ -5292,10 +5292,8 @@ def main():
         start_date_str = display_start_date.strftime('%B %d, %Y')
         end_date_str = display_end_date.strftime('%B %d, %Y')
         
-        # Get base64 image using helper function
         logo_src = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
         
-        # Container with logo, title, and period - ALL INSIDE HTML
         st.markdown(f"""
         <div style="
             background: white;
@@ -5306,7 +5304,7 @@ def main():
             border: 1px solid rgba(0, 0, 0, 0.06);
             text-align: center;
         ">
-            <!-- Logo INSIDE the container -->
+            <!-- Logo -->
             <div style="margin-bottom: 12px;">
                 <img src="{logo_src}" 
                     style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
@@ -5331,16 +5329,18 @@ def main():
                 width: 60%;
             "></div>
             
-            <!-- Period - same size as title -->
+            <!-- Period - same size as title, no wrap -->
             <div style="
-                display: inline-block;
                 font-size: 28px;
                 font-weight: 700;
                 color: #1a237e;
                 letter-spacing: -0.3px;
-                padding: 0;
+                padding: 0 15px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             ">
-                📅 {start_date_str} – {end_date_str}
+                {start_date_str} – {end_date_str}
             </div>
         </div>
         """, unsafe_allow_html=True)
