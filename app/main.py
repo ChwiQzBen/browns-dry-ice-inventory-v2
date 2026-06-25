@@ -4948,7 +4948,22 @@ def main():
         get_historical_orders_from_db.clear()
         st.session_state.db_initialized = True
         print("✅ Database initialized")
-    
+    # Sidebar - Header with Glass Design (ABOVE Analysis Period)
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px 20px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 20px;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    ">
+        <div style="font-size: 20px; font-weight: 700;">Inventory Control</div>
+        <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
 
@@ -5338,51 +5353,6 @@ def main():
         """, unsafe_allow_html=True)
 
    # Sidebar - Header with Glass Design (ABOVE Analysis Period)
-    st.sidebar.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 15px 20px;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 20px;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-    ">
-        <div style="font-size: 20px; font-weight: 700;">Inventory Control</div>
-        <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ============================================================
-    # ANALYSIS PERIOD SELECTOR
-    # ============================================================
-    st.sidebar.header("🗓️ Analysis Period")
-    analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
-
-    if 'selected_period' not in st.session_state:
-        st.session_state.selected_period = '2024/2025'
-
-    selected_period = st.sidebar.selectbox(
-        "Choose a period to analyze or update:",
-        analysis_periods,
-        index=analysis_periods.index(st.session_state.selected_period),
-        key="analysis_period_selector"  # ← ADDED UNIQUE KEY
-    )
-    st.session_state.selected_period = selected_period
-
-    # Get today's date once and extract start year
-    today = datetime.today()
-    try:
-        start_year = int(selected_period.split('/')[0])
-    except (ValueError, IndexError):
-        st.error("Invalid analysis period format. Using current year as fallback.")
-        start_year = today.year
-
-    display_start_date = datetime(start_year, 7, 1)
-    display_end_date = datetime(start_year + 1, 6, 30)
-    filter_start_date = display_start_date
-    filter_end_date = min(display_end_date, today)
-
     # ============================================================
     # SECTION 1: REAL-TIME INVENTORY (Container Style)
     # ============================================================
