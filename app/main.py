@@ -1284,7 +1284,7 @@ def visual_inventory_grid(items, columns=3):
             }
             cat_color = category_colors.get(details.get('category', 'Default'), '#90a4ae')
             
-            # Build HTML content
+            # Build HTML content - REMOVED ALL JAVASCRIPT
             html_content = f"""
             <div style="
                 border: 1px solid {'#ffcdd2' if is_low_stock else '#e0e0e0'};
@@ -1384,7 +1384,7 @@ def visual_inventory_grid(items, columns=3):
             </div>
             """
             
-            # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
+            # Use st.markdown with unsafe_allow_html=True
             st.markdown(html_content, unsafe_allow_html=True)
 
 def get_sample_inventory_data():
@@ -1579,11 +1579,6 @@ def inventory_filters(items):
 def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
     """
     Display an inventory heat map showing stock levels with color coding
-    
-    Args:
-        inventory_items: Dictionary with item names as keys and details as values
-        title: Title for the heat map
-        columns: Number of columns in the grid (default: 6)
     """
     if not inventory_items:
         st.info("No inventory items to display in heat map")
@@ -1669,7 +1664,7 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             
             stock_pct = item['Stock_Percentage']
             
-            # Build HTML content
+            # Build HTML content - REMOVED ALL JAVASCRIPT
             html_content = f"""
             <div style="
                 background: {item['Color']};
@@ -1688,8 +1683,6 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
                 overflow: hidden;
                 cursor: pointer;
             "
-            onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.2)';"
-            onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';"
             title="{item['Item_Full']} - Stock: {item['Stock']} {item['Unit']} | Reorder: {item['Reorder']} {item['Unit']}"
             >
                 <!-- Status Indicator -->
@@ -1751,10 +1744,10 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             </div>
             """
             
-            # Use st.markdown with unsafe_allow_html=True - works in all Streamlit versions
+            # Use st.markdown with unsafe_allow_html=True
             st.markdown(html_content, unsafe_allow_html=True)
     
-    # Display summary statistics (ONLY ONCE)
+    # Display summary statistics
     st.markdown("---")
     col1, col2, col3, col4, col5 = st.columns(5)
     
