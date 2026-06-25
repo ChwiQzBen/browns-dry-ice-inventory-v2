@@ -5830,7 +5830,7 @@ def main():
     st.sidebar.markdown("""
     <div style="
         border-radius: 12px;
-        padding: 18px 15px;
+        padding: 18px;
         text-align: center;
         background: rgba(0,0,0,0.03);
         border: 1px solid rgba(0,0,0,0.05);
