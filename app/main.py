@@ -8483,11 +8483,11 @@ def main():
         #            st.session_state.transactions = []
         #            st.session_state.confirm_clear_pressed = False
         #            st.success("All transaction and order data has been permanently cleared!")
-        #            st.rerun()
+        #            
         #    with col2:
         #        if st.button("Cancel"):
         #            st.session_state.confirm_clear_pressed = False
-        #            st.rerun()
+        #            
 
 if __name__ == "__main__":
     main()
