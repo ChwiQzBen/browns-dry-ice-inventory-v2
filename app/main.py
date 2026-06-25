@@ -5337,7 +5337,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-   # Sidebar - Header with Glass Design
+   # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     st.sidebar.markdown("""
     <div style="
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -5346,11 +5346,47 @@ def main():
         color: white;
         margin-bottom: 20px;
         text-align: center;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     ">
-        <div style="font-size: 20px; font-weight: 700;">❄️ Inventory Control</div>
+        <div style="font-size: 20px; font-weight: 700;">Inventory Control</div>
         <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ============================================================
+    # ANALYSIS PERIOD SELECTOR (Keep this here - ABOVE containers)
+    # ============================================================
+    st.sidebar.header("🗓️ Analysis Period")
+    analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
+
+    if 'selected_period' not in st.session_state:
+        st.session_state.selected_period = '2024/2025'
+
+    selected_period = st.sidebar.selectbox(
+        "Choose a period to analyze or update:",
+        analysis_periods,
+        index=analysis_periods.index(st.session_state.selected_period)
+    )
+    st.session_state.selected_period = selected_period
+
+    # Get today's date once
+    today = datetime.today()
+    try:
+        start_year = int(selected_period.split('/')[0])
+    except (ValueError, IndexError):
+        st.error("Invalid analysis period format. Using current year as fallback.")
+        start_year = today.year
+
+    try:
+        start_year = int(selected_period.split('/')[0])
+    except (ValueError, IndexError):
+        st.error("Invalid analysis period format. Check the 'analysis_periods' list.")
+        st.stop()
+
+    display_start_date = datetime(start_year, 7, 1)
+    display_end_date = datetime(start_year + 1, 6, 30)
+    filter_start_date = display_start_date
+    filter_end_date = min(display_end_date, today)
 
     # ============================================================
     # SECTION 1: REAL-TIME INVENTORY (Container Style)
@@ -5363,7 +5399,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(79, 195, 247, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #4fc3f7; margin-bottom: 10px;">
+        <div style="
+            background: #4fc3f7;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📦 Real-time Inventory
         </div>
     """, unsafe_allow_html=True)
@@ -5402,7 +5447,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(129, 199, 132, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #81c784; margin-bottom: 10px;">
+        <div style="
+            background: #81c784;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📝 Update Inventory
         </div>
     """, unsafe_allow_html=True)
@@ -5457,7 +5511,16 @@ def main():
             margin-bottom: 15px;
             background: rgba(206, 147, 216, 0.05);
         ">
-            <div style="font-size: 14px; font-weight: 700; color: #ce93d8; margin-bottom: 10px;">
+            <div style="
+                background: #ce93d8;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                display: inline-block;
+                font-size: 14px;
+                font-weight: 700;
+            ">
                 📱 Mobile Quick Order
             </div>
         """, unsafe_allow_html=True)
@@ -5500,7 +5563,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(255, 213, 79, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #ffd54f; margin-bottom: 10px;">
+        <div style="
+            background: #ffd54f;
+            color: #333;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📊 Stock Status
         </div>
     """, unsafe_allow_html=True)
@@ -5535,7 +5607,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(255, 138, 101, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #ff8a65; margin-bottom: 10px;">
+        <div style="
+            background: #ff8a65;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📄 Report Generation
         </div>
     """, unsafe_allow_html=True)
@@ -5637,7 +5718,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(144, 164, 174, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #90a4ae; margin-bottom: 10px;">
+        <div style="
+            background: #90a4ae;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📋 Stock Take Menu
         </div>
     """, unsafe_allow_html=True)
@@ -5675,7 +5765,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(179, 157, 219, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #b39ddb; margin-bottom: 10px;">
+        <div style="
+            background: #b39ddb;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             ⚙️ System Parameters
         </div>
     """, unsafe_allow_html=True)
@@ -5702,7 +5801,16 @@ def main():
         margin-bottom: 15px;
         background: rgba(77, 208, 225, 0.05);
     ">
-        <div style="font-size: 14px; font-weight: 700; color: #4dd0e1; margin-bottom: 10px;">
+        <div style="
+            background: #4dd0e1;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
             📊 Data Summary
         </div>
     """, unsafe_allow_html=True)
@@ -5722,17 +5830,18 @@ def main():
     st.sidebar.markdown("""
     <div style="
         border-radius: 12px;
-        padding: 15px;
+        padding: 18px 15px;
         text-align: center;
         background: rgba(0,0,0,0.03);
+        border: 1px solid rgba(0,0,0,0.05);
     ">
-        <div style="font-size: 14px; font-weight: 600; color: #333;">
+        <div style="font-size: 16px; font-weight: 700; color: #333;">
             🧀 Browns Cheese
         </div>
-        <div style="font-size: 11px; color: #888; margin-top: 4px;">
+        <div style="font-size: 14px; color: #666; margin-top: 4px;">
             Dry Ice Management System
         </div>
-        <div style="font-size: 10px; color: #aaa; margin-top: 6px;">
+        <div style="font-size: 13px; color: #888; margin-top: 6px;">
             © 2025 - Gathura Chege
         </div>
     </div>
