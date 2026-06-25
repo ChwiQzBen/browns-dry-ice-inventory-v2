@@ -1099,14 +1099,25 @@ def get_historical_orders_from_db(period):
                 st.error(f"Supabase error: {e}. Falling back to SQLite.")
     
     # Fallback to SQLite (your existing code)
-    conn = sqlite3.connect('dry_ice.db')
-    c = conn.cursor()
-
-    c.execute('''SELECT date, order_quantity, analysis_period FROM historical_orders
-                 WHERE analysis_period = ? ORDER BY date''', (period,))
-    orders = c.fetchall()
-
-    conn.close()
+    try:
+        conn = sqlite3.connect('dry_ice.db')
+        c = conn.cursor()
+        
+        # Check if table exists first
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='historical_orders'")
+        if not c.fetchone():
+            # Table doesn't exist, return empty DataFrame
+            conn.close()
+            return pd.DataFrame(columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
+        
+        c.execute('''SELECT date, order_quantity, analysis_period FROM historical_orders
+                     WHERE analysis_period = ? ORDER BY date''', (period,))
+        orders = c.fetchall()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        # Table doesn't exist or other SQLite error
+        print(f"SQLite error in get_historical_orders_from_db: {e}")
+        return pd.DataFrame(columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
 
     if orders:
         df = pd.DataFrame(orders, columns=['Date', 'Order_Quantity_kg', 'analysis_period'])
@@ -4885,6 +4896,7 @@ def main():
     # Initialize all session state variables with defaults
     session_defaults = {
         'initialized': True,
+        'db_initialized': False,
         'transactions': [],
         'selected_period': '2024/2025',
         'last_loaded_period': None,
@@ -4911,15 +4923,13 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = value
 
-    if 'initialized' not in st.session_state:
-        # Initialize database
+    if not st.session_state.db_initialized:
         init_db()
         fix_order_date()
         seed_historical_data()
         get_historical_orders_from_db.clear()
-        
-        st.session_state.initialized = True
-        print("✅ Application initialized (once per session)")
+        st.session_state.db_initialized = True
+        print("✅ Database initialized")
     
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
@@ -4959,8 +4969,16 @@ def main():
     filter_end_date = min(display_end_date, today) # The end date for analysis is the earlier of the two
 
     alert = None
-    # Initialize components
-
+   
+    # Ensure database is initialized before any queries
+    if not st.session_state.get('db_initialized', False):
+        init_db()
+        fix_order_date()
+        seed_historical_data()
+        get_historical_orders_from_db.clear()
+        st.session_state.db_initialized = True
+        print("✅ Database initialized")
+    
     # THIS LINE IS MODIFIED to use the selected period from the dropdown
     df = get_historical_orders_from_db(st.session_state.selected_period)
 
