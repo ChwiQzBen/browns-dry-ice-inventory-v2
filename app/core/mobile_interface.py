@@ -198,8 +198,8 @@ class MobileInterface:
             )
             if st.button("Got it! 👍", use_container_width=True, key="mobile_welcome_btn"):
                 st.session_state.mobile_welcome_shown = True
-                st.rerun()
-    
+                
+
     def create_touch_button(self, label, key, help_text=None):
         """Create a button optimized for touch"""
         return st.button(
