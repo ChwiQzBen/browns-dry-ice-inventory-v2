@@ -5292,8 +5292,10 @@ def main():
         start_date_str = display_start_date.strftime('%B %d, %Y')
         end_date_str = display_end_date.strftime('%B %d, %Y')
         
+        # Get base64 image
         logo_src = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
         
+        # SINGLE HTML BLOCK - everything inside
         st.markdown(f"""
         <div style="
             background: white;
@@ -5304,13 +5306,9 @@ def main():
             border: 1px solid rgba(0, 0, 0, 0.06);
             text-align: center;
         ">
-            <!-- Logo -->
             <div style="margin-bottom: 12px;">
-                <img src="{logo_src}" 
-                    style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
+                <img src="{logo_src}" style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
             </div>
-            
-            <!-- Title -->
             <div style="
                 font-size: 28px;
                 font-weight: 700;
@@ -5320,25 +5318,19 @@ def main():
             ">
                 DRY ICE INVENTORY OPTIMIZER
             </div>
-            
-            <!-- Decorative line -->
             <div style="
                 height: 2px;
                 background: linear-gradient(90deg, transparent, #1565c0, transparent);
                 margin: 10px auto 14px auto;
                 width: 60%;
             "></div>
-            
-            <!-- Period - same size as title, no wrap -->
             <div style="
+                display: inline-block;
                 font-size: 28px;
                 font-weight: 700;
                 color: #1a237e;
                 letter-spacing: -0.3px;
-                padding: 0 15px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                padding: 0;
             ">
                 {start_date_str} – {end_date_str}
             </div>
