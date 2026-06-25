@@ -1385,7 +1385,7 @@ def visual_inventory_grid(items, columns=3):
             """
             
             # Use st.html() instead of st.markdown()
-            st.html(html_content)
+            st.components.v1.html(html_content)
 
 def get_sample_inventory_data():
     """
@@ -1745,7 +1745,7 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             """
             
             # Use st.html() instead of st.markdown()
-            st.html(html_content)
+            st.components.v1.html(html_content)
     
     # Display summary statistics
     st.markdown("---")
