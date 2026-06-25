@@ -29,6 +29,24 @@ from core.report_generator import ReportGenerator
 from app.core.google_sheet_reader import GoogleSheetReader
 import warnings
 from supabase import create_client, Client
+import base64
+def get_image_base64(image_path):
+    """Convert image to base64 for embedding in HTML"""
+    try:
+        with open(image_path, "rb") as img_file:
+            img_data = img_file.read()
+            base64_encoded = base64.b64encode(img_data).decode('utf-8')
+            
+            # Detect image type
+            if image_path.lower().endswith('.png'):
+                return f"data:image/png;base64,{base64_encoded}"
+            elif image_path.lower().endswith('.jpg') or image_path.lower().endswith('.jpeg'):
+                return f"data:image/jpeg;base64,{base64_encoded}"
+            else:
+                return f"data:image/jpeg;base64,{base64_encoded}"
+    except Exception as e:
+        print(f"Error loading image: {e}")
+        return ""
 USE_SUPABASE = True
 DATABASE_FILE = 'dry_ice.db'
 BAD_DATE = '2_024-09-26'
@@ -5274,8 +5292,11 @@ def main():
         start_date_str = display_start_date.strftime('%B %d, %Y')
         end_date_str = display_end_date.strftime('%B %d, %Y')
         
-        # Container with logo, title, and period
-        st.markdown("""
+        # Get base64 image using helper function
+        logo_src = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
+        
+        # Container with logo, title, and period - ALL INSIDE HTML
+        st.markdown(f"""
         <div style="
             background: white;
             border-radius: 20px;
@@ -5285,15 +5306,13 @@ def main():
             border: 1px solid rgba(0, 0, 0, 0.06);
             text-align: center;
         ">
+            <!-- Logo INSIDE the container -->
             <div style="margin-bottom: 12px;">
-        """, unsafe_allow_html=True)
-        
-        # Display the logo inside the container
-        if os.path.exists(logo_path):
-            st.image(logo_path, width=120)
-        
-        st.markdown("""
+                <img src="{logo_src}" 
+                    style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
             </div>
+            
+            <!-- Title -->
             <div style="
                 font-size: 28px;
                 font-weight: 700;
@@ -5303,12 +5322,16 @@ def main():
             ">
                 DRY ICE INVENTORY OPTIMIZER
             </div>
+            
+            <!-- Decorative line -->
             <div style="
                 height: 2px;
                 background: linear-gradient(90deg, transparent, #1565c0, transparent);
                 margin: 10px auto 14px auto;
                 width: 60%;
             "></div>
+            
+            <!-- Period - same size as title -->
             <div style="
                 display: inline-block;
                 font-size: 28px;
@@ -5317,7 +5340,7 @@ def main():
                 letter-spacing: -0.3px;
                 padding: 0;
             ">
-                 """ + start_date_str + """ – """ + end_date_str + """
+                📅 {start_date_str} – {end_date_str}
             </div>
         </div>
         """, unsafe_allow_html=True)
