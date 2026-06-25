@@ -3065,11 +3065,19 @@ def quick_create_menu(inventory_tracker):
     """
     Zoho-style Quick Create Menu with floating action button
     """
-    # Check if we need to show modals
+    # Check if we need to show modals - safely initialize all
     if 'show_quick_receipt' not in st.session_state:
         st.session_state.show_quick_receipt = False
     if 'show_quick_usage' not in st.session_state:
         st.session_state.show_quick_usage = False
+    if 'generate_report' not in st.session_state:
+        st.session_state.generate_report = False
+    if 'quick_receipt_success' not in st.session_state:
+        st.session_state.quick_receipt_success = False
+    if 'quick_usage_success' not in st.session_state:
+        st.session_state.quick_usage_success = False
+    if 'quick_orders' not in st.session_state:
+        st.session_state.quick_orders = []
     
     # CSS for the FAB and modal
     st.markdown("""
@@ -3537,7 +3545,7 @@ def glass_table(dataframe, title=None, height=300):
     # END OF UI HELPER FUNCTIONS
     # ============================================================
 def init_stock_take_session():
-    """Initialize stock take session state variables"""
+    """Initialize stock take session state variables (safely)"""
     if 'stock_takes' not in st.session_state:
         st.session_state.stock_takes = {}
     if 'active_count_id' not in st.session_state:
@@ -3548,6 +3556,10 @@ def init_stock_take_session():
         st.session_state.count_assignments = {}
     if 'stock_take_menu' not in st.session_state:
         st.session_state.stock_take_menu = "📊 Dashboard"
+    if 'stock_take_selected_menu' not in st.session_state:
+        st.session_state.stock_take_selected_menu = "📊 Dashboard"
+    if 'stock_take_inventory' not in st.session_state:
+        st.session_state.stock_take_inventory = {}
 
 def generate_count_id():
     """Generate a unique count ID"""
@@ -3870,7 +3882,8 @@ def stock_take_interface(inventory_items):
     """
     Main stock take interface (inFlow style)
     """
-    init_stock_take_session()
+    # Session state is already initialized at the top of main()
+    # Just ensure the inventory is stored
     
     # Store inventory items in session state for persistence
     if 'stock_take_inventory' not in st.session_state:
@@ -4869,6 +4882,35 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
     return fig_orders, fig_cost_overview, fig_forecast
 
 def main():
+    # Initialize all session state variables with defaults
+    session_defaults = {
+        'initialized': True,
+        'transactions': [],
+        'selected_period': '2024/2025',
+        'last_loaded_period': None,
+        'stock_takes': {},
+        'active_count_id': None,
+        'count_sheets': {},
+        'count_assignments': {},
+        'stock_take_menu': "📊 Dashboard",
+        'stock_take_selected_menu': "📊 Dashboard",
+        'inventory_items_count': 0,
+        'inventory_sample': {},
+        'load_attempts': 0,
+        'show_quick_receipt': False,
+        'show_quick_usage': False,
+        'quick_receipt_success': False,
+        'quick_usage_success': False,
+        'generate_report': False,
+        'confirm_clear_pressed': False,
+        'quick_orders': [],
+        'stock_take_inventory': {}
+    }
+    
+    for key, value in session_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
     if 'initialized' not in st.session_state:
         # Initialize database
         init_db()
@@ -5440,10 +5482,7 @@ def main():
     # 📋 STOCK TAKE MENU            
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📋 Stock Take Menu")
-    
-    # Initialize stock take session if needed
-    init_stock_take_session()
-    
+     
     menu_options = [
         "📊 Dashboard",
         "📝 New Count",
