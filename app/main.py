@@ -5370,19 +5370,13 @@ def main():
     )
     st.session_state.selected_period = selected_period
 
-    # Get today's date once
+    # Get today's date once and extract start year
     today = datetime.today()
     try:
         start_year = int(selected_period.split('/')[0])
     except (ValueError, IndexError):
         st.error("Invalid analysis period format. Using current year as fallback.")
         start_year = today.year
-
-    try:
-        start_year = int(selected_period.split('/')[0])
-    except (ValueError, IndexError):
-        st.error("Invalid analysis period format. Check the 'analysis_periods' list.")
-        st.stop()
 
     display_start_date = datetime(start_year, 7, 1)
     display_end_date = datetime(start_year + 1, 6, 30)
