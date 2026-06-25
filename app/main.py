@@ -3331,17 +3331,16 @@ def quick_create_menu(inventory_tracker):
     if st.button("📥 Quick Receipt", key="quickReceiptBtn", type="primary"):
         st.session_state.show_quick_receipt = True
         st.session_state.show_quick_usage = False
-        st.rerun()
     
     if st.button("📤 Quick Usage", key="quickUsageBtn", type="primary"):
         st.session_state.show_quick_usage = True
         st.session_state.show_quick_receipt = False
-        st.rerun()
+        
     
     if st.button("📊 Generate Report", key="quickReportBtn", type="primary"):
         # Trigger report generation
         st.session_state.generate_report = True
-        st.rerun()
+        
     
     # Show Quick Receipt Modal
     if st.session_state.get('show_quick_receipt', False):
@@ -3414,12 +3413,12 @@ def show_quick_receipt_modal(inventory_tracker):
                 # Show success and close modal
                 st.session_state.quick_receipt_success = True
                 st.session_state.show_quick_receipt = False
-                st.rerun()
+                
         
         with col2:
             if st.button("Cancel", use_container_width=True):
                 st.session_state.show_quick_receipt = False
-                st.rerun()
+                
         
         # Show success message
         if st.session_state.get('quick_receipt_success', False):
@@ -3491,14 +3490,14 @@ def show_quick_usage_modal(inventory_tracker):
                     else:
                         st.session_state.quick_usage_success = True
                         st.session_state.show_quick_usage = False
-                        st.rerun()
+                        
                 else:
                     st.error(f"❌ Insufficient stock! Available: {current_stock:.0f} kg")
         
         with col2:
             if st.button("Cancel", use_container_width=True):
                 st.session_state.show_quick_usage = False
-                st.rerun()
+                
         
         # Show success message
         if st.session_state.get('quick_usage_success', False):
@@ -4023,7 +4022,6 @@ def new_count_form(inventory_items):
                 st.session_state.active_count_id = count_id
                 st.session_state.stock_take_menu = "📋 Active Counts"
                 st.info(f"Count ID: {count_id} | Items: {len(selected_items)}")
-                st.rerun()
 
 def active_counts_interface(inventory_items):
     """
@@ -4159,7 +4157,7 @@ def active_counts_interface(inventory_items):
                         if success:
                             st.success(message)
                             st.balloons()
-                            st.rerun()
+                        
                         else:
                             st.error(message)
             
@@ -4282,7 +4280,7 @@ def view_count_detail(count_id):
     
     if st.button("← Back to Counts"):
         st.session_state.stock_take_menu = "📋 Active Counts"
-        st.rerun()
+        
 
 def enter_counts_interface(count_id):
     """
@@ -4382,7 +4380,7 @@ def enter_counts_interface(count_id):
                         )
                         if success:
                             st.success(message)
-                            st.rerun()
+                            
                         else:
                             st.error(message)
             
@@ -4398,13 +4396,13 @@ def enter_counts_interface(count_id):
                 if success:
                     st.success(message)
                     st.balloons()
-                    st.rerun()
+                
                 else:
                     st.error(message)
     
     if st.button("← Back to Counts"):
         st.session_state.stock_take_menu = "📋 Active Counts"
-        st.rerun()
+        
 
 def assign_sheets_interface(count_id):
     """
@@ -4463,14 +4461,14 @@ def assign_sheets_interface(count_id):
             if selected_user != current_assign and selected_user != "Unassigned":
                 if assign_sheet_to_user(sheet_id, selected_user):
                     st.success(f"✅ Assigned to {selected_user}")
-                    st.rerun()
+                    
         
         with col3:
             st.caption(f"Status: {sheet.get('status', 'Pending')}")
     
     if st.button("← Back"):
         st.session_state.stock_take_menu = "📋 Active Counts"
-        st.rerun()
+        
 
 def count_history_interface():
     """
@@ -5259,7 +5257,7 @@ def main():
             st.sidebar.error(alert["message"])
         else:
             st.sidebar.success(f"Usage of {usage} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
-        st.rerun()
+    
 
     # Record Receipt
     receipt_date = st.sidebar.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
@@ -5289,7 +5287,7 @@ def main():
         if st.session_state.selected_period != correct_period:
             st.session_state.selected_period = correct_period
             st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
-        st.rerun()
+
         
     # Mobile Quick Order Entry (only show on mobile devices)
     if mobile_ui.is_mobile_device():
@@ -5329,8 +5327,6 @@ def main():
                     st.session_state.quick_orders = []
                 st.session_state.quick_orders.append(quick_order)
                 
-                # Rerun to refresh the UI
-                st.rerun()
             
     # Enhanced Stock Status Display
     stock_status = inventory_tracker.get_stock_status()
@@ -5788,7 +5784,7 @@ def main():
         with col1:
             if st.button("🔄 Refresh", use_container_width=True):
                 st.cache_data.clear()
-                st.rerun()
+                
 
         with col2:
             st.caption(
@@ -6407,7 +6403,7 @@ def main():
         with col1:
             if st.button("🔄 Refresh Movements", use_container_width=True):
                 st.cache_data.clear()
-                st.rerun()
+                
         with col2:
             st.caption(f"Data source: Google Sheets | Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         
@@ -6533,7 +6529,7 @@ def main():
                 # Option to load sample data
                 if st.button("📥 Load Sample Inventory Data"):
                     inventory_items = get_sample_inventory_data()
-                    st.rerun()
+                    
 
     with tab_analytics:
         st.markdown("## 📈 All Items Analytics")
@@ -8382,7 +8378,7 @@ def main():
         #    if st.button("📤 Import Local CSV to Supabase", type="primary", key="import_to_supabase"):
         #        with st.spinner("Importing transactions to Supabase..."):
         #            import_csv_to_supabase()
-        #            st.rerun()
+        #            
         #with col_import2:
         #    st.caption("Imports transactions from 'transactions_export.csv' to Supabase cloud database")
         
