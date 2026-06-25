@@ -5337,7 +5337,36 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    st.sidebar.header("📦 Real-time Inventory")
+    # Sidebar - Header with Glass Design
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px 20px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 20px;
+        text-align: center;
+    ">
+        <div style="font-size: 20px; font-weight: 700;">❄️ Inventory Control</div>
+        <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 1: REAL-TIME INVENTORY (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #4fc3f7;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(79, 195, 247, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #4fc3f7; margin-bottom: 10px;">
+            📦 Real-time Inventory
+        </div>
+    """, unsafe_allow_html=True)
 
     current_stock_input = st.sidebar.number_input(
         "Current Stock (kg)",
@@ -5352,36 +5381,110 @@ def main():
         inventory_tracker.current_stock = current_stock_input
         update_current_stock_in_db(current_stock_input, datetime.now())
 
-    # Display status (LOW/CRITICAL/OK)
+    # Display status (LOW/CRITICAL/OK) with colored badge
     status = inventory_tracker.get_stock_status()
-    st.sidebar.markdown(
-        f"**Status:** <span style='color:{status['color']};font-weight:bold'>"
-        f"{status['status']}</span>",
-        unsafe_allow_html=True
-    )
-    st.sidebar.subheader("Update Inventory")
+    status_colors = {
+        'Critical': '#dc3545',
+        'Low Stock': '#ffc107',
+        'Healthy': '#28a745'
+    }
+    status_color = status_colors.get(status['status'], '#6c757d')
+
+    st.sidebar.markdown(f"""
+    <div style="
+        background: {status_color}20;
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: 8px 0;
+        border-left: 4px solid {status_color};
+    ">
+        <span style="font-size: 13px; color: #666;">Status:</span>
+        <span style="color: {status_color}; font-weight: 700; font-size: 14px;">
+            {status['status'].upper()}
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Progress bar with container styling
+    max_stock = eoq + safety_stock * 2
+    current_stock_val = inventory_tracker.current_stock
+    progress_value = min(1.0, current_stock_val / max_stock) if max_stock > 0 else 0
+
+    progress_color = '#dc3545' if progress_value < 0.2 else '#ffc107' if progress_value < 0.5 else '#28a745'
+
+    st.sidebar.markdown(f"""
+    <div style="margin: 8px 0;">
+        <div style="font-size: 12px; color: #888; display: flex; justify-content: space-between;">
+            <span>Stock Level</span>
+            <span>{current_stock_val:.1f} / {max_stock:.1f} kg</span>
+        </div>
+        <div style="
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 2px;
+        ">
+            <div style="
+                width: {progress_value * 100:.1f}%;
+                height: 8px;
+                background: {progress_color};
+                border-radius: 4px;
+                transition: width 0.6s ease;
+            "></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if status['status'] in ['Low Stock', 'Critical']:
+        st.sidebar.markdown(f"""
+        <div style="
+            background: rgba(220, 53, 69, 0.08);
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin: 8px 0;
+            border-left: 4px solid #dc3545;
+        ">
+            <span style="font-size: 12px; color: #dc3545;">⚠️ Recommended order: {eoq:.1f} kg</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 2: UPDATE INVENTORY (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #81c784;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(129, 199, 132, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #81c784; margin-bottom: 10px;">
+            📝 Update Inventory
+        </div>
+    """, unsafe_allow_html=True)
 
     # Record Usage
     usage_date = st.sidebar.date_input("Usage Date", value=datetime.today())
     usage = st.sidebar.number_input("Quantity Used (kg)", min_value=0, value=150, step=10)
 
-    if st.sidebar.button("Record Usage"):
+    if st.sidebar.button("📤 Record Usage", use_container_width=True):
         alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date) or None
         add_transaction_to_history("usage", usage, "Daily Consumption", usage_date, st.session_state.selected_period)
         if alert is not None:
             st.sidebar.error(alert["message"])
         else:
-            st.sidebar.success(f"Usage of {usage} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
-    
+            st.sidebar.success(f"✅ Usage of {usage} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
 
     # Record Receipt
     receipt_date = st.sidebar.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
     new_stock = st.sidebar.number_input("New Stock Received (kg)", min_value=0, value=0, step=50)
 
-    if st.sidebar.button("Record Receipt"):
-        
+    if st.sidebar.button("📥 Record Receipt", use_container_width=True, type="primary"):
         correct_period = get_period_from_date(receipt_date)
-
         inventory_tracker.current_stock += new_stock
         update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
         add_transaction_to_history(
@@ -5389,37 +5492,72 @@ def main():
             quantity=new_stock,
             description="Stock Receipt",
             date=receipt_date,
-            period=correct_period  # Use the derived period, not the one from the sidebar
+            period=correct_period
         )
-        # 3. Provide clear feedback to the user about what happened.
         st.sidebar.success(
-            f"Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
+            f"✅ Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
             f"It has been automatically assigned to the {correct_period} period."
         )
-
-        # 4. (Optional but highly recommended UX improvement)
-        # If the order belongs to a different period, switch the dashboard view to that period.
         if st.session_state.selected_period != correct_period:
             st.session_state.selected_period = correct_period
-            st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
+            st.sidebar.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
 
-        
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 3: QUICK ACTIONS (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #ffd54f;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(255, 213, 79, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #ffd54f; margin-bottom: 10px;">
+            ⚡ Quick Actions
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Quick action buttons in a grid
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("📥 Quick Receipt", use_container_width=True, type="primary"):
+            st.session_state.show_quick_receipt = True
+            st.session_state.show_quick_usage = False
+    with col2:
+        if st.button("📤 Quick Usage", use_container_width=True):
+            st.session_state.show_quick_usage = True
+            st.session_state.show_quick_receipt = False
+
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # 📱 MOBILE QUICK ORDER ENTRY (Container Style)
+    # ============================================================
     # Mobile Quick Order Entry (only show on mobile devices)
     if mobile_ui.is_mobile_device():
-        st.sidebar.markdown("---")
+        st.sidebar.markdown("""
+        <div style="
+            border: 2px solid #ce93d8;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: rgba(206, 147, 216, 0.05);
+        ">
+            <div style="font-size: 14px; font-weight: 700; color: #ce93d8; margin-bottom: 10px;">
+                📱 Mobile Quick Order
+            </div>
+        """, unsafe_allow_html=True)
+        
         quick_order = mobile_ui.quick_order_entry()
         
         if quick_order:
-            # Process the quick order
             with st.spinner("Processing your order..."):
-                # Add to database as a receipt
                 correct_period = get_period_from_date(quick_order['delivery_date'])
-                
-                # Update inventory
                 inventory_tracker.current_stock += quick_order['quantity']
                 update_current_stock_in_db(inventory_tracker.current_stock, quick_order['delivery_date'])
-                
-                # Add to transaction history
                 add_transaction_to_history(
                     transaction_type="receipt",
                     quantity=quick_order['quantity'],
@@ -5427,8 +5565,9 @@ def main():
                     date=quick_order['delivery_date'],
                     period=correct_period
                 )
-                
-                # Show success message
+                if st.session_state.selected_period != correct_period:
+                    st.session_state.selected_period = correct_period
+                    st.sidebar.info(f"📊 Dashboard view switched to {correct_period}")
                 st.sidebar.success(f"""
                 ✅ **Order Placed Successfully!**
                 
@@ -5436,47 +5575,41 @@ def main():
                 Quantity: {quick_order['quantity']} kg
                 Delivery: {quick_order['delivery_date'].strftime('%Y-%m-%d')}
                 """)
-                
-                # Optional: Add to session state for tracking
                 if 'quick_orders' not in st.session_state:
                     st.session_state.quick_orders = []
                 st.session_state.quick_orders.append(quick_order)
-                
-            
-    # Enhanced Stock Status Display
-    stock_status = inventory_tracker.get_stock_status()
-    st.sidebar.markdown(
-        f"**Status:** <span style='color:{stock_status['color']};font-weight:bold'>"
-        f"{stock_status['status']}</span>",
-        unsafe_allow_html=True
-    )
+        
+        st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
-    max_stock = eoq + safety_stock * 2
-    current_stock_val = inventory_tracker.current_stock
-    progress_value = min(1.0, current_stock_val / max_stock) if max_stock > 0 else 0
-    st.sidebar.progress(progress_value)
-    st.sidebar.caption(f"Stock Level: {current_stock_val:.1f}/{max_stock:.1f} kg ({progress_value:.1%})")
-
-    if stock_status['status'] in ['Low Stock', 'Critical']:
-        st.sidebar.warning(f"⚠️ Consider reordering. Recommended order: {eoq:.1f} kg")    
-
-    # Sidebar - Report Generator (Enhanced)
-    st.sidebar.header("📄 Report Generation")
+    # ============================================================
+    # SECTION 4: REPORT GENERATOR (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #ff8a65;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(255, 138, 101, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #ff8a65; margin-bottom: 10px;">
+            📄 Report Generator
+        </div>
+    """, unsafe_allow_html=True)
 
     # Report type selection
     report_type = st.sidebar.selectbox(
         "Report Type",
-        ["❄️ Dry Ice Report (Legacy)", "📊 All Inventory Report", "📋 Low Stock Report", "💰 Valuable Items Report"],
+        ["❄️ Dry Ice Report", "📊 All Inventory Report", "📋 Low Stock Report", "💰 Valuable Items Report"],
         key="report_type_sidebar"
     )
 
-    if st.sidebar.button("Generate Report", type="primary"):
+    if st.sidebar.button("📊 Generate Report", use_container_width=True, type="primary"):
         with st.spinner(f"Generating {report_type}..."):
             try:
                 report_path = None
                 
-                if report_type == "❄️ Dry Ice Report (Legacy)":
-                    # Use existing report generator for Dry Ice
+                if report_type == "❄️ Dry Ice Report":
                     if df is not None and not df.empty:
                         report = ReportGenerator(analyzer=analyzer, df=df)
                         report_path = report.generate_pdf()
@@ -5484,7 +5617,6 @@ def main():
                         st.sidebar.error("No Dry Ice data available.")
                 
                 elif report_type == "📊 All Inventory Report":
-                    # Use enhanced report for ALL inventory
                     if inventory_items:
                         report_path = generate_enhanced_pdf_report(
                             inventory_items=inventory_items,
@@ -5495,9 +5627,7 @@ def main():
                         st.sidebar.error("No inventory data available. Please load from Google Sheets.")
                 
                 elif report_type == "📋 Low Stock Report":
-                    # Generate report focused on low stock items
                     if inventory_items:
-                        # Filter only low stock items
                         low_stock_items = {}
                         for item_name, details in inventory_items.items():
                             stock = details.get('stock', 0)
@@ -5517,9 +5647,7 @@ def main():
                         st.sidebar.error("No inventory data available.")
                 
                 elif report_type == "💰 Valuable Items Report":
-                    # Generate report focused on high-value items
                     if inventory_items:
-                        # Filter items with price > 0 and sort by value
                         valuable_items = {}
                         for item_name, details in inventory_items.items():
                             price = details.get('price', 0)
@@ -5538,7 +5666,6 @@ def main():
                     else:
                         st.sidebar.error("No inventory data available.")
                 
-                # Download the report if generated
                 if report_path:
                     with open(report_path, "rb") as f:
                         st.sidebar.download_button(
@@ -5546,6 +5673,7 @@ def main():
                             data=f,
                             file_name=f"inventory_report_{datetime.now().strftime('%Y%m%d')}.pdf",
                             mime="application/pdf",
+                            use_container_width=True
                         )
                     st.sidebar.success(f"✅ {report_type} generated successfully!")
                 else:
@@ -5554,36 +5682,63 @@ def main():
             except Exception as e:
                 st.sidebar.error(f"Error generating report: {str(e)}")
 
-    # 📋 STOCK TAKE MENU            
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📋 Stock Take Menu")
-     
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 5: STOCK TAKE MENU (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #90a4ae;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(144, 164, 174, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #90a4ae; margin-bottom: 10px;">
+            📋 Stock Take Menu
+        </div>
+    """, unsafe_allow_html=True)
+
     menu_options = [
         "📊 Dashboard",
         "📝 New Count",
         "📋 Active Counts",
         "📜 History"
     ]
-    
-    # Store selected menu in session state
+
     if 'stock_take_selected_menu' not in st.session_state:
         st.session_state.stock_take_selected_menu = "📊 Dashboard"
-    
+
     selected_menu = st.sidebar.radio(
         "Select Action",
         menu_options,
         index=menu_options.index(st.session_state.stock_take_selected_menu),
         key="stock_take_menu_main"
     )
-    
-    # Update session state when selection changes
+
     if selected_menu != st.session_state.stock_take_selected_menu:
         st.session_state.stock_take_selected_menu = selected_menu
-    
 
-    # Sidebar - System Parameters (Always Visible)
-    st.sidebar.header("⚙️ System Parameters")
-    with st.sidebar.expander("Inventory Parameters"):
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 6: SYSTEM PARAMETERS (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #b39ddb;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(179, 157, 219, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #b39ddb; margin-bottom: 10px;">
+            ⚙️ System Parameters
+        </div>
+    """, unsafe_allow_html=True)
+
+    with st.sidebar.expander("Inventory Parameters", expanded=False):
         st.write(f"**Price per kg:** KSh {constants.PRICE_PER_KG:.2f}")
         st.write(f"**Container size:** {constants.CONTAINER_SIZE} kg")
         st.write(f"**Transport cost:** KSh {constants.TRANSPORT_COST:,.2f}")
@@ -5592,8 +5747,24 @@ def main():
         st.write(f"**Lead time:** {constants.LEAD_TIME_DAYS} day(s)")
         st.write(f"**Service level:** {constants.SERVICE_LEVEL*100:.0f}%")
 
-    # Sidebar - Data Summary (Always Visible)
-    st.sidebar.header("📊 Data Summary")
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 7: DATA SUMMARY (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #4dd0e1;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(77, 208, 225, 0.05);
+    ">
+        <div style="font-size: 14px; font-weight: 700; color: #4dd0e1; margin-bottom: 10px;">
+            📊 Data Summary
+        </div>
+    """, unsafe_allow_html=True)
+
     sidebar_start_str = display_start_date.strftime('%d/%m/%Y')
     sidebar_end_str = display_end_date.strftime('%d/%m/%Y')
 
@@ -5601,11 +5772,172 @@ def main():
     st.sidebar.write(f"**Total Orders:** {len(df):,}")
     st.sidebar.write(f"**Data Points:** {df.shape[0]:,}")
 
-    # Sidebar - Footer (Always Visible)
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Browns Cheese** 🧀")
-    st.sidebar.markdown("Dry Ice Management System")
-    st.sidebar.markdown("© 2025 - Gathura Chege")    
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+    # ============================================================
+    # SECTION 8: FOOTER (Container Style)
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        background: rgba(0,0,0,0.03);
+    ">
+        <div style="font-size: 14px; font-weight: 600; color: #333;">
+            🧀 Browns Cheese
+        </div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px;">
+            Dry Ice Management System
+        </div>
+        <div style="font-size: 10px; color: #aaa; margin-top: 6px;">
+            © 2025 - Gathura Chege
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============================================================
+    # QUICK RECEIPT MODAL (Pop-up overlay)
+    # ============================================================
+    if st.session_state.get('show_quick_receipt', False):
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 15px;
+        ">
+            <div style="font-size: 18px; font-weight: 600;">📥 Quick Receipt</div>
+            <div style="font-size: 13px; opacity: 0.8;">Record a new stock receipt</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.sidebar.container():
+            col1, col2 = st.columns(2)
+            with col1:
+                qty = st.number_input(
+                    "Quantity (kg)",
+                    min_value=0.0,
+                    value=300.0,
+                    step=50.0,
+                    key="quick_receipt_qty_modal"
+                )
+            with col2:
+                receipt_date_modal = st.date_input(
+                    "Date",
+                    value=datetime.today(),
+                    key="quick_receipt_date_modal"
+                )
+            
+            notes = st.text_input(
+                "Notes (optional)",
+                placeholder="e.g., Supplier: XYZ, Order #123",
+                key="quick_receipt_notes_modal"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Save Receipt", type="primary", use_container_width=True):
+                    correct_period = get_period_from_date(receipt_date_modal)
+                    inventory_tracker.current_stock += qty
+                    update_current_stock_in_db(inventory_tracker.current_stock, receipt_date_modal)
+                    add_transaction_to_history(
+                        transaction_type="receipt",
+                        quantity=qty,
+                        description=f"Quick Receipt: {notes if notes else 'No notes'}",
+                        date=receipt_date_modal,
+                        period=correct_period
+                    )
+                    if st.session_state.selected_period != correct_period:
+                        st.session_state.selected_period = correct_period
+                        st.sidebar.info(f"📊 Dashboard view switched to {correct_period}")
+                    st.session_state.quick_receipt_success = True
+                    st.session_state.show_quick_receipt = False
+                    st.rerun()
+            with col2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_quick_receipt = False
+                    st.rerun()
+            
+            if st.session_state.get('quick_receipt_success', False):
+                st.success(f"✅ Receipt of {qty:.0f} kg recorded successfully!")
+                st.session_state.quick_receipt_success = False
+
+    # ============================================================
+    # QUICK USAGE MODAL (Pop-up overlay)
+    # ============================================================
+    if st.session_state.get('show_quick_usage', False):
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            padding: 15px;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 15px;
+        ">
+            <div style="font-size: 18px; font-weight: 600;">📤 Quick Usage</div>
+            <div style="font-size: 13px; opacity: 0.8;">Record stock usage/consumption</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.sidebar.container():
+            col1, col2 = st.columns(2)
+            with col1:
+                qty = st.number_input(
+                    "Quantity Used (kg)",
+                    min_value=0.0,
+                    value=150.0,
+                    step=25.0,
+                    key="quick_usage_qty_modal"
+                )
+            with col2:
+                usage_date_modal = st.date_input(
+                    "Date",
+                    value=datetime.today(),
+                    key="quick_usage_date_modal"
+                )
+            
+            current_stock_modal = inventory_tracker.current_stock
+            if qty > current_stock_modal:
+                st.warning(f"⚠️ Insufficient stock! Current stock: {current_stock_modal:.0f} kg")
+            
+            notes = st.text_input(
+                "Notes (optional)",
+                placeholder="e.g., Production, Packaging, etc.",
+                key="quick_usage_notes_modal"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Save Usage", type="primary", use_container_width=True):
+                    if qty <= current_stock_modal:
+                        alert = inventory_tracker.update_stock(qty, f"Quick Usage: {notes if notes else 'No notes'}", usage_date_modal)
+                        add_transaction_to_history(
+                            transaction_type="usage",
+                            quantity=qty,
+                            description=f"Quick Usage: {notes if notes else 'No notes'}",
+                            date=usage_date_modal,
+                            period=st.session_state.selected_period
+                        )
+                        if alert is not None:
+                            st.error(alert["message"])
+                        else:
+                            st.session_state.quick_usage_success = True
+                            st.session_state.show_quick_usage = False
+                            st.rerun()
+                    else:
+                        st.error(f"❌ Insufficient stock! Available: {current_stock_modal:.0f} kg")
+            with col2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_quick_usage = False
+                    st.rerun()
+            
+            if st.session_state.get('quick_usage_success', False):
+                st.success(f"✅ Usage of {qty:.0f} kg recorded successfully!")
+                st.session_state.quick_usage_success = False 
 
     monthly_savings = annual_transport_savings / 12
     monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
