@@ -5267,14 +5267,14 @@ def main():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-    # ============================================================
-    # 🎯 LOGO + TITLE + PERIOD IN ONE RECTANGULAR CONTAINER
-    # ============================================================
+        # ============================================================
+        # 🎯 LOGO + TITLE + PERIOD IN ONE RECTANGULAR CONTAINER
+        # ============================================================
         logo_path = "assets/browns_logo.jpg"
         start_date_str = display_start_date.strftime('%B %d, %Y')
         end_date_str = display_end_date.strftime('%B %d, %Y')
         
-    # Container with logo, title, and period
+        # Container with logo, title, and period
         st.markdown("""
         <div style="
             background: white;
@@ -5288,7 +5288,7 @@ def main():
             <div style="margin-bottom: 12px;">
         """, unsafe_allow_html=True)
         
-    # Display the logo inside the container
+        # Display the logo inside the container
         if os.path.exists(logo_path):
             st.image(logo_path, width=120)
         
@@ -5297,10 +5297,7 @@ def main():
             <div style="
                 font-size: 28px;
                 font-weight: 700;
-                background: linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #1565c0 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
+                color: #1a237e;
                 letter-spacing: -0.3px;
                 margin-bottom: 8px;
             ">
@@ -5316,10 +5313,7 @@ def main():
                 display: inline-block;
                 font-size: 28px;
                 font-weight: 700;
-                background: linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #1565c0 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
+                color: #1a237e;
                 letter-spacing: -0.3px;
                 padding: 0;
             ">
