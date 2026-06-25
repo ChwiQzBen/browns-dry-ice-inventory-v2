@@ -5354,7 +5354,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # ANALYSIS PERIOD SELECTOR (Keep this here - ABOVE containers)
+    # ANALYSIS PERIOD SELECTOR
     # ============================================================
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
@@ -5365,7 +5365,8 @@ def main():
     selected_period = st.sidebar.selectbox(
         "Choose a period to analyze or update:",
         analysis_periods,
-        index=analysis_periods.index(st.session_state.selected_period)
+        index=analysis_periods.index(st.session_state.selected_period),
+        key="analysis_period_selector"  # ← ADDED UNIQUE KEY
     )
     st.session_state.selected_period = selected_period
 
@@ -5825,17 +5826,17 @@ def main():
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================================
-    # SECTION 9: FOOTER (Container Style)
+    # SECTION 9: FOOTER (Container Style) - INCREASED FONT SIZES
     # ============================================================
     st.sidebar.markdown("""
     <div style="
         border-radius: 12px;
-        padding: 18px;
+        padding: 18px 15px;
         text-align: center;
         background: rgba(0,0,0,0.03);
         border: 1px solid rgba(0,0,0,0.05);
     ">
-        <div style="font-size: 16px; font-weight: 700; color: #333;">
+        <div style="font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px;">
             🧀 Browns Cheese
         </div>
         <div style="font-size: 14px; color: #666; margin-top: 4px;">
