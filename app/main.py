@@ -5207,12 +5207,17 @@ def main():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        # Try to display the logo
+        logo_path = "assets/browns_logo.jpg"
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        else:
+            # Fallback text logo
+            st.markdown("<h1 style='text-align: center; color: #1f77b4;'>🧊 BROWNS</h1>", unsafe_allow_html=True)
+        
         st.markdown(f"""
-        <div class="glass-header">
-            <img src="../assets/browns_logo.jpg" style="width: 200px; margin-bottom: 10px;">
-            <h3>DRY ICE INVENTORY OPTIMIZER</h3>
-            <div class="period-pill">📅 {start_date_str} - {end_date_str}</div>
-        </div>
+        <h3 style="text-align: center;">DRY ICE INVENTORY OPTIMIZER</h3>
+        <div class="period-pill" style="text-align: center;">📅 {start_date_str} - {end_date_str}</div>
         """, unsafe_allow_html=True)
 
     st.sidebar.header("📦 Real-time Inventory")
