@@ -1284,7 +1284,7 @@ def visual_inventory_grid(items, columns=3):
             }
             cat_color = category_colors.get(details.get('category', 'Default'), '#90a4ae')
             
-            # Build HTML content - REMOVED ALL JAVASCRIPT
+            # Build HTML content
             html_content = f"""
             <div style="
                 border: 1px solid {'#ffcdd2' if is_low_stock else '#e0e0e0'};
@@ -1384,8 +1384,8 @@ def visual_inventory_grid(items, columns=3):
             </div>
             """
             
-            # Use st.markdown with unsafe_allow_html=True
-            st.markdown(html_content, unsafe_allow_html=True)
+            # Use st.html() instead of st.markdown()
+            st.html(html_content)
 
 def get_sample_inventory_data():
     """
@@ -1664,7 +1664,7 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             
             stock_pct = item['Stock_Percentage']
             
-            # Build HTML content - REMOVED ALL JAVASCRIPT
+            # Build HTML content
             html_content = f"""
             <div style="
                 background: {item['Color']};
@@ -1744,8 +1744,8 @@ def inventory_heatmap(inventory_items, title="Inventory Heat Map", columns=6):
             </div>
             """
             
-            # Use st.markdown with unsafe_allow_html=True
-            st.markdown(html_content, unsafe_allow_html=True)
+            # Use st.html() instead of st.markdown()
+            st.html(html_content)
     
     # Display summary statistics
     st.markdown("---")
