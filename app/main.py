@@ -5267,17 +5267,59 @@ def main():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Try to display the logo
+        # ============================================================
+        # 🎯 LOGO, TITLE & PERIOD IN ONE CONTAINER
+        # ============================================================
         logo_path = "assets/browns_logo.jpg"
-        if os.path.exists(logo_path):
-            st.image(logo_path, width=200)
-        else:
-            # Fallback text logo
-            st.markdown("<h1 style='text-align: center; color: #1f77b4;'>🧊 BROWNS</h1>", unsafe_allow_html=True)
+        start_date_str = display_start_date.strftime('%B %d, %Y')
+        end_date_str = display_end_date.strftime('%B %d, %Y')
         
-        st.markdown(f"""
-        <h3 style="text-align: center;">DRY ICE INVENTORY OPTIMIZER</h3>
-        <div class="period-pill" style="text-align: center;">📅 {start_date_str} - {end_date_str}</div>
+        # Container with logo
+        st.markdown("""
+        <div style="
+            background: white;
+            border-radius: 20px;
+            padding: 25px 20px 20px 20px;
+            margin: 10px 0 20px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            text-align: center;
+        ">
+            <div style="margin-bottom: 10px;">
+        """, unsafe_allow_html=True)
+        
+        # Display the logo inside the container
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=120)
+        
+        st.markdown("""
+            </div>
+            <div style="
+                font-size: 26px;
+                font-weight: 700;
+                color: #1a237e;
+                letter-spacing: -0.3px;
+            ">
+                DRY ICE INVENTORY OPTIMIZER
+            </div>
+            <div style="
+                height: 2px;
+                background: linear-gradient(90deg, transparent, #1565c0, transparent);
+                margin: 10px auto 14px auto;
+                width: 60%;
+            "></div>
+            <div style="
+                display: inline-block;
+                background: #f0f4ff;
+                border-radius: 20px;
+                padding: 5px 20px;
+                font-size: 14px;
+                color: #1565c0;
+                font-weight: 500;
+            ">
+                📅 """ + start_date_str + """ – """ + end_date_str + """
+            </div>
+        </div>
         """, unsafe_allow_html=True)
 
     st.sidebar.header("📦 Real-time Inventory")
