@@ -980,129 +980,273 @@ class AdvancedAnalytics:
         return recommendations
 
     # ============================================================
-    # 11. BATCH ANALYSIS - ALL ITEMS
+    # 11. BATCH ANALYSIS - ALL ITEMS (FIXED)
     # ============================================================
     
     def analyze_all_items(
         self,
-        inventory_df: pd.DataFrame,
-        historical_df: pd.DataFrame
+        inventory_items: Dict,
+        historical_df: pd.DataFrame = None
     ) -> Dict:
         """
         Run comprehensive analysis on ALL inventory items
         
         Args:
-            inventory_df: Current inventory data
-            historical_df: Historical demand data
+            inventory_items: Dictionary of inventory items (from Google Sheets)
+            historical_df: Historical demand data (optional)
         
         Returns:
             Dict with analysis results for all items
         """
         results = {
             'items': {},
+            'items_df': None,
             'summary': {},
             'recommendations': [],
             'anomalies': []
         }
         
-        # Group by item
-        for item in inventory_df['ITEM_NAME'].unique():
-            item_data = historical_df[historical_df['Item'] == item]
+        # Convert inventory_items dict to DataFrame
+        if isinstance(inventory_items, dict):
+            inventory_data = []
+            for item_name, details in inventory_items.items():
+                if not item_name or str(item_name).strip() == '':
+                    continue
+                inventory_data.append({
+                    'ITEM_NAME': item_name,
+                    'QUANTITY': details.get('stock', 0),
+                    'REORDER LEVEL': details.get('reorder', 0),
+                    'UNIT PRICE': details.get('price', 0),
+                    'CATEGORY': details.get('category', 'Uncategorized'),
+                    'UNIT': details.get('unit', 'kg'),
+                    'MAX': details.get('max', 0),
+                    'LOCATION': details.get('location', 'Warehouse')
+                })
+            inventory_df = pd.DataFrame(inventory_data)
+        else:
+            # If it's already a DataFrame
+            inventory_df = inventory_items.copy() if isinstance(inventory_items, pd.DataFrame) else pd.DataFrame()
+        
+        # Check if inventory_df is empty
+        if inventory_df.empty:
+            st.warning("⚠️ No inventory data available for analysis")
+            return results
+        
+        # Find the correct item name column
+        item_column = None
+        possible_names = ['ITEM_NAME', 'Item', 'item_name', 'Name', 'name', 'PRODUCT_NAME']
+        for col in possible_names:
+            if col in inventory_df.columns:
+                item_column = col
+                break
+        
+        if item_column is None:
+            # If no matching column found, use the first column
+            item_column = inventory_df.columns[0]
+            st.warning(f"⚠️ No item name column found. Using '{item_column}' as item identifier.")
+        
+        # Create a summary DataFrame for all items
+        all_items = []
+        
+        for idx, row in inventory_df.iterrows():
+            item_name = row[item_column]
             
-            if len(item_data) > 10:
-                # Run full analysis
-                item_analysis = self._analyze_single_item(
-                    item_data,
-                    inventory_df[inventory_df['ITEM_NAME'] == item]
-                )
-                results['items'][item] = item_analysis
+            # Skip empty items
+            if not item_name or str(item_name).strip() == '':
+                continue
+            
+            # Extract item details safely
+            stock = row.get('QUANTITY', 0)
+            if pd.isna(stock) or str(stock).strip() == '':
+                stock = 0
+            else:
+                try:
+                    stock = float(stock)
+                except (ValueError, TypeError):
+                    stock = 0
+            
+            # Skip items with zero stock (but still analyze)
+            # if stock <= 0:
+            #     continue
+            
+            reorder = row.get('REORDER LEVEL', stock * 0.5)
+            if pd.isna(reorder) or str(reorder).strip() == '':
+                reorder = stock * 0.5
+            else:
+                try:
+                    reorder = float(reorder)
+                except (ValueError, TypeError):
+                    reorder = stock * 0.5
+            
+            price = row.get('UNIT PRICE', 0)
+            if pd.isna(price) or str(price).strip() == '':
+                price = 0
+            else:
+                try:
+                    price = float(price)
+                except (ValueError, TypeError):
+                    price = 0
+            
+            category = row.get('CATEGORY', 'Uncategorized')
+            if pd.isna(category) or str(category).strip() == '':
+                category = 'Uncategorized'
+            
+            unit = row.get('UNIT', 'kg')
+            if pd.isna(unit) or str(unit).strip() == '':
+                unit = 'kg'
+            
+            max_stock = row.get('MAX', stock * 2)
+            if pd.isna(max_stock) or str(max_stock).strip() == '':
+                max_stock = stock * 2
+            else:
+                try:
+                    max_stock = float(max_stock)
+                except (ValueError, TypeError):
+                    max_stock = stock * 2
+            
+            # Determine stock status
+            if stock <= 0:
+                status = 'Critical'
+                status_color = '🔴'
+            elif stock < reorder:
+                status = 'Low'
+                status_color = '🟡'
+            elif stock >= reorder and stock < max_stock:
+                status = 'Good'
+                status_color = '🟢'
+            else:
+                status = 'Overstocked'
+                status_color = '🔵'
+            
+            # Calculate stock value
+            stock_value = stock * price if price > 0 else 0
+            
+            # Calculate days of supply (if we have historical data)
+            days_of_supply = None
+            if historical_df is not None and not historical_df.empty:
+                # Try to estimate daily demand for this item
+                item_history = historical_df[historical_df.get('Item', '') == item_name]
+                if not item_history.empty and len(item_history) > 10:
+                    avg_daily_demand = item_history['Order_Quantity_kg'].mean() / 30
+                    if avg_daily_demand > 0:
+                        days_of_supply = stock / avg_daily_demand
+            
+            all_items.append({
+                'ITEM_NAME': item_name,
+                'Category': category,
+                'Current Stock': stock,
+                'Reorder Level': reorder,
+                'Max Stock': max_stock,
+                'Unit': unit,
+                'Price': price,
+                'Stock Value': stock_value,
+                'Status': status,
+                'Status Color': status_color,
+                'Days of Supply': round(days_of_supply, 1) if days_of_supply else None
+            })
         
-        # Generate summary
-        results['summary'] = self._generate_analysis_summary(results['items'])
+        # Create DataFrame for display
+        if all_items:
+            results_df = pd.DataFrame(all_items)
+        else:
+            results_df = pd.DataFrame()
         
-        # Global recommendations
-        results['recommendations'] = self._generate_global_recommendations(
-            results['items'],
-            results['summary']
-        )
+        # Store results
+        results['items_df'] = results_df
+        
+        if not results_df.empty:
+            results['summary'] = {
+                'total_items': len(results_df),
+                'total_value': results_df['Stock Value'].sum(),
+                'critical_items': len(results_df[results_df['Status'] == 'Critical']),
+                'low_stock_items': len(results_df[results_df['Status'] == 'Low']),
+                'overstocked_items': len(results_df[results_df['Status'] == 'Overstocked']),
+                'healthy_items': len(results_df[results_df['Status'] == 'Good']),
+                'categories': results_df['Category'].nunique()
+            }
+            
+            # Generate recommendations
+            results['recommendations'] = self._generate_global_recommendations(results_df)
         
         return results
 
-    def _analyze_single_item(
-        self,
-        historical_data: pd.DataFrame,
-        current_data: pd.DataFrame
-    ) -> Dict:
-        """Analyze a single item"""
-        # Run all analyses
-        demand_pattern = self.recognize_demand_patterns(historical_data)
-        anomalies = self.detect_anomalies(historical_data, 'Order_Quantity_kg')
-        
-        return {
-            'demand_pattern': demand_pattern,
-            'anomalies': anomalies,
-            'forecast': self.multivariate_forecast(historical_data),
-            'current_stock': current_data['QUANTITY'].iloc[0] if not current_data.empty else 0,
-            'reorder_level': current_data['REORDER LEVEL'].iloc[0] if not current_data.empty else 0,
-            'price': current_data['UNIT PRICE'].iloc[0] if not current_data.empty else 0
-        }
-
-    def _generate_analysis_summary(self, items: Dict) -> Dict:
-        """Generate summary of all item analyses"""
-        total_items = len(items)
-        
-        # Count patterns
-        patterns = {}
-        for item, analysis in items.items():
-            pattern = analysis.get('demand_pattern', {}).get('pattern_type', 'unknown')
-            patterns[pattern] = patterns.get(pattern, 0) + 1
-        
-        # Count anomalies
-        anomaly_count = sum(
-            len(analysis.get('anomalies', []))
-            for analysis in items.values()
-        )
-        
-        # Calculate average scores
-        avg_stability = np.mean([
-            analysis.get('demand_pattern', {})
-            .get('characteristics', {})
-            .get('cv', 0)
-            for analysis in items.values()
-            if analysis.get('demand_pattern', {}).get('characteristics', {})
-        ])
-        
-        return {
-            'total_items': total_items,
-            'pattern_distribution': patterns,
-            'anomaly_count': anomaly_count,
-            'avg_stability': avg_stability,
-            'high_risk_items': [
-                item for item, analysis in items.items()
-                if analysis.get('demand_pattern', {}).get('type') == 'volatile'
-            ],
-            'seasonal_items': [
-                item for item, analysis in items.items()
-                if analysis.get('demand_pattern', {}).get('type') == 'seasonal'
-            ]
-        }
-
-    def _generate_global_recommendations(self, items: Dict, summary: Dict) -> List[str]:
-        """Generate global recommendations"""
+    def _generate_global_recommendations(self, df: pd.DataFrame) -> List[str]:
+        """Generate global recommendations from analysis"""
         recommendations = []
         
-        # Based on pattern distribution
-        if summary.get('pattern_distribution', {}).get('volatile', 0) > 5:
-            recommendations.append("Consider increasing safety stock for volatile items")
+        if df.empty:
+            return ["No data available for recommendations"]
         
-        if summary.get('pattern_distribution', {}).get('seasonal', 0) > 3:
-            recommendations.append("Implement seasonal inventory planning")
+        critical_count = len(df[df['Status'] == 'Critical'])
+        low_count = len(df[df['Status'] == 'Low'])
+        overstocked_count = len(df[df['Status'] == 'Overstocked'])
+        healthy_count = len(df[df['Status'] == 'Good'])
+        total_items = len(df)
         
-        if summary.get('anomaly_count', 0) > 10:
-            recommendations.append("Review recent anomalies in demand patterns")
+        # Critical items
+        if critical_count > 0:
+            critical_items = df[df['Status'] == 'Critical']['ITEM_NAME'].head(5).tolist()
+            critical_list = ', '.join(critical_items[:3])
+            if len(critical_items) > 3:
+                critical_list += f' and {len(critical_items) - 3} more'
+            recommendations.append(f"🔴 **{critical_count} items are OUT OF STOCK** - Order immediately: {critical_list}")
         
-        if summary.get('avg_stability', 1) < 0.3:
-            recommendations.append("Overall demand variability is high - review supply chain")
+        # Low stock items
+        if low_count > 0:
+            low_items = df[df['Status'] == 'Low']['ITEM_NAME'].head(5).tolist()
+            low_list = ', '.join(low_items[:3])
+            if len(low_items) > 3:
+                low_list += f' and {len(low_items) - 3} more'
+            recommendations.append(f"🟡 **{low_count} items are below reorder point** - Review and replenish: {low_list}")
+        
+        # Overstocked items
+        if overstocked_count > 0:
+            over_items = df[df['Status'] == 'Overstocked']['ITEM_NAME'].head(5).tolist()
+            over_list = ', '.join(over_items[:3])
+            if len(over_items) > 3:
+                over_list += f' and {len(over_items) - 3} more'
+            recommendations.append(f"🔵 **{overstocked_count} items are overstocked** - Consider reducing orders: {over_list}")
+        
+        # Health check
+        health_score = (healthy_count / total_items * 100) if total_items > 0 else 0
+        if health_score > 80:
+            recommendations.append("✅ Overall inventory health is **excellent** - Continue monitoring")
+        elif health_score > 50:
+            recommendations.append("📊 Overall inventory health is **moderate** - Review low stock items")
+        else:
+            recommendations.append("⚠️ Overall inventory health is **below 50%** - Immediate attention required")
+        
+        # Category breakdown
+        categories = df.groupby('Category').agg({
+            'ITEM_NAME': 'count',
+            'Stock Value': 'sum'
+        }).reset_index()
+        categories.columns = ['Category', 'Items', 'Value']
+        high_value_cats = categories.sort_values('Value', ascending=False).head(3)
+        if not high_value_cats.empty:
+            cat_list = ', '.join([f"{row['Category']} (KSh {row['Value']:,.0f})" for _, row in high_value_cats.iterrows()])
+            recommendations.append(f"💰 **Highest value categories**: {cat_list}")
+        
+        return recommendations
+
+    def _generate_recommendations(self, forecast, feature_importance, anomalies) -> List[str]:
+        """Generate recommendations from multivariate forecast"""
+        recommendations = []
+        
+        if forecast is not None and len(forecast) > 0:
+            avg_forecast = np.mean(forecast)
+            if avg_forecast > 0:
+                recommendations.append(f"📈 Expected average daily demand: {avg_forecast:.0f} units")
+        
+        if feature_importance:
+            top_features = list(feature_importance.keys())[:3]
+            if top_features:
+                recommendations.append(f"🔑 Top demand drivers: {', '.join(top_features)}")
+        
+        if anomalies:
+            anomaly_count = len(anomalies)
+            if anomaly_count > 3:
+                recommendations.append(f"⚠️ {anomaly_count} anomalies detected - Review data quality")
         
         return recommendations
 
@@ -1115,11 +1259,22 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
     st.markdown("## 🤖 Advanced Analytics Dashboard")
     st.markdown("*Enterprise-grade analytics with multivariate prediction, anomaly detection, and more*")
     
-    # Quick stats
+    # Quick stats - handle missing columns gracefully
+    total_items = 0
+    if inventory_items:
+        total_items = len(inventory_items)
+    elif df is not None and not df.empty:
+        # Try to find the item column
+        item_cols = ['ITEM_NAME', 'Item', 'item_name', 'Name', 'name', 'PRODUCT_NAME']
+        for col in item_cols:
+            if col in df.columns:
+                total_items = len(df[col].unique())
+                break
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("📊 Items Analyzed", len(df['ITEM_NAME'].unique()) if 'ITEM_NAME' in df.columns else 0)
+        st.metric("📊 Items Analyzed", total_items)
     with col2:
         st.metric("🎯 Pattern Types", "5", "Stable, Seasonal, Trending, Volatile, Mixed")
     with col3:
@@ -1133,34 +1288,98 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🚀 Run Full Analysis", type="primary"):
-            with st.spinner("Analyzing all items..."):
-                # Run full analysis
-                results = analytics.analyze_all_items(df, inventory_items)
-                
-                # Display results
-                st.success(f"✅ Analysis complete: {results['summary']['total_items']} items analyzed")
-                
-                # Show pattern distribution
-                st.markdown("### 📊 Demand Pattern Distribution")
-                pattern_df = pd.DataFrame({
-                    'Pattern': list(results['summary']['pattern_distribution'].keys()),
-                    'Items': list(results['summary']['pattern_distribution'].values())
-                })
-                st.dataframe(pattern_df)
-                
-                # Show high risk items
-                if results['summary'].get('high_risk_items'):
-                    st.warning(f"⚠️ High Risk Items: {', '.join(results['summary']['high_risk_items'][:5])}")
-                
-                # Show recommendations
-                st.markdown("### 💡 Recommendations")
-                for rec in results['recommendations']:
-                    st.info(f"• {rec}")
+            if not inventory_items:
+                st.warning("⚠️ No inventory data available. Please load inventory from Google Sheets first.")
+            else:
+                with st.spinner("Analyzing all items..."):
+                    # Run full analysis
+                    results = analytics.analyze_all_items(inventory_items)
+                    
+                    # Display results
+                    if results and results.get('items_df') is not None and not results['items_df'].empty:
+                        st.success(f"✅ Analysis complete: {results['summary']['total_items']} items analyzed")
+                        
+                        # Show summary metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("📦 Total Items", results['summary']['total_items'])
+                        with col2:
+                            st.metric("💰 Total Value", f"KSh {results['summary']['total_value']:,.0f}")
+                        with col3:
+                            st.metric("🔴 Critical", results['summary']['critical_items'])
+                        with col4:
+                            st.metric("🟡 Low Stock", results['summary']['low_stock_items'])
+                        
+                        # Show inventory status distribution
+                        st.markdown("### 📊 Inventory Status Distribution")
+                        status_df = results['items_df']['Status'].value_counts().reset_index()
+                        status_df.columns = ['Status', 'Count']
+                        st.dataframe(status_df, use_container_width=True, hide_index=True)
+                        
+                        # Show all items with status
+                        st.markdown("### 📋 All Items Analysis")
+                        st.dataframe(
+                            results['items_df'],
+                            use_container_width=True,
+                            height=400,
+                            column_config={
+                                'Status': st.column_config.TextColumn('Status'),
+                                'Status Color': st.column_config.TextColumn(''),
+                                'Days of Supply': st.column_config.NumberColumn('Days of Supply', format="%.1f"),
+                                'Stock Value': st.column_config.NumberColumn('Stock Value', format="KSh %.0f")
+                            }
+                        )
+                        
+                        # Show recommendations
+                        if results['recommendations']:
+                            st.markdown("### 💡 Recommendations")
+                            for rec in results['recommendations']:
+                                if '✅' in rec:
+                                    st.success(rec)
+                                elif '⚠️' in rec or '🔴' in rec:
+                                    st.error(rec)
+                                elif '🟡' in rec or '🔵' in rec:
+                                    st.warning(rec)
+                                else:
+                                    st.info(rec)
+                    else:
+                        st.warning("⚠️ No results generated. Please check your inventory data.")
     
     with col2:
-        selected_item = st.selectbox(
-            "🔍 Analyze Specific Item",
-            df['ITEM_NAME'].unique().tolist() if 'ITEM_NAME' in df.columns else []
-        )
-        if selected_item:
-            st.info(f"Analyzing: {selected_item}")
+        # Item selector - handle both DataFrame and dict
+        item_list = []
+        if inventory_items:
+            if isinstance(inventory_items, dict):
+                item_list = list(inventory_items.keys())
+            elif isinstance(inventory_items, pd.DataFrame):
+                # Try to find the item column
+                item_cols = ['ITEM_NAME', 'Item', 'item_name', 'Name', 'name', 'PRODUCT_NAME']
+                for col in item_cols:
+                    if col in inventory_items.columns:
+                        item_list = inventory_items[col].unique().tolist()
+                        break
+                if not item_list:
+                    item_list = inventory_items.iloc[:, 0].unique().tolist()
+        
+        if item_list:
+            selected_item = st.selectbox(
+                "🔍 Analyze Specific Item",
+                sorted(item_list)
+            )
+            if selected_item:
+                st.info(f"📊 Analyzing: **{selected_item}**")
+                
+                # Show item details if available
+                if inventory_items and isinstance(inventory_items, dict):
+                    details = inventory_items.get(selected_item, {})
+                    if details:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📦 Stock", f"{details.get('stock', 0)} {details.get('unit', 'kg')}")
+                        with col2:
+                            st.metric("📋 Reorder", f"{details.get('reorder', 0)} {details.get('unit', 'kg')}")
+                        with col3:
+                            st.metric("💰 Price", f"KSh {details.get('price', 0):.2f}")
+        else:
+            st.info("Select an item from the list to analyze")
+
