@@ -26,7 +26,7 @@ from core.smart_alerts import SmartAlerts
 from core.predictive_maintenance import PredictiveMaintenance
 from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
-from app.core.core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
+from core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
 from app.core.google_sheet_reader import GoogleSheetReader
 import warnings
 from supabase import create_client, Client
@@ -5025,7 +5025,8 @@ def main():
     # The rest of your analysis code will now work on the period-specific 'df'
     analyzer = DryIceAnalyzer(df)
     kpis = analyzer.calculate_kpis(period=st.session_state.selected_period)
-
+    # Initialize advanced analytics
+    analytics = AdvancedAnalytics() 
    # Try to load from Google Sheets first
     @st.cache_data(ttl=600)
     def load_inventory_data():
