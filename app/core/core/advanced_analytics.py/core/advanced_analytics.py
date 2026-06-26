@@ -2,7 +2,7 @@
 Advanced Analytics Module - Enterprise-grade forecasting and analytics
 Integrates multivariate prediction, anomaly detection, and automated model selection
 """
-
+import streamlit as st
 import pandas as pd
 import numpy as np
 import warnings
