@@ -5118,12 +5118,6 @@ def main():
     
     inventory_items, stock_df = load_inventory_data()
 
-    # Initialize other components
-    mobile_ui = MobileInterface()
-    #alerts_system = SmartAlerts(inventory_tracker)
-    maintenance_system = PredictiveMaintenance()
-    integration_system = SystemIntegrations()
-
     # Initialize session state for transactions
     if 'last_loaded_period' not in st.session_state or st.session_state.last_loaded_period != st.session_state.selected_period:
         print(f"Period changed. Loading transactions for {st.session_state.selected_period}...")
@@ -5288,71 +5282,14 @@ def main():
         initial_stock=current_stock,
         analyzer=analyzer
     )
-   
-    # Initialize SmartAlerts after inventory_tracker is created
-    alerts_system = SmartAlerts(inventory_tracker)
-    mobile_ui.optimize_for_mobile()
-    mobile_ui.show_mobile_welcome()
 
-    # Header
-    start_date_str = display_start_date.strftime('%B %d, %Y')
-    end_date_str = display_end_date.strftime('%B %d, %Y')
-
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # ============================================================
-        # 🎯 LOGO + TITLE + PERIOD IN ONE RECTANGULAR CONTAINER
-        # ============================================================
-        logo_path = "assets/browns_logo.jpg"
-        start_date_str = display_start_date.strftime('%B %d, %Y')
-        end_date_str = display_end_date.strftime('%B %d, %Y')
-        
-        # Get base64 image
-        logo_src = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
-        
-        # SINGLE HTML BLOCK - everything inside
-        st.markdown(f"""
-        <div style="
-            background: white;
-            border-radius: 20px;
-            padding: 30px 20px 25px 20px;
-            margin: 10px 0 20px 0;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(0, 0, 0, 0.06);
-            text-align: center;
-        ">
-            <div style="margin-bottom: 12px;">
-                <img src="{logo_src}" style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
-            </div>
-            <div style="
-                font-size: 28px;
-                font-weight: 700;
-                color: #1a237e;
-                letter-spacing: -0.3px;
-                margin-bottom: 8px;
-            ">
-                DRY ICE INVENTORY OPTIMIZER
-            </div>
-            <div style="
-                height: 2px;
-                background: linear-gradient(90deg, transparent, #1565c0, transparent);
-                margin: 10px auto 14px auto;
-                width: 60%;
-            "></div>
-            <div style="
-                display: inline-block;
-                font-size: 28px;
-                font-weight: 700;
-                color: #1a237e;
-                letter-spacing: -0.3px;
-                padding: 0;
-            ">
-                {start_date_str} – {end_date_str}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-   # Sidebar - Header with Glass Design (ABOVE Analysis Period)
+    # Initialize other components
+    mobile_ui = MobileInterface()
+    #alerts_system = SmartAlerts(inventory_tracker)
+    maintenance_system = PredictiveMaintenance()
+    integration_system = SystemIntegrations()
+    
+    # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     # ============================================================
     # SECTION 1: REAL-TIME INVENTORY (Container Style)
     # ============================================================
@@ -5560,6 +5497,69 @@ def main():
         st.sidebar.warning(f"⚠️ Consider reordering. Recommended order: {eoq:.1f} kg")
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    
+    # Initialize SmartAlerts after inventory_tracker is created
+    alerts_system = SmartAlerts(inventory_tracker)
+    mobile_ui.optimize_for_mobile()
+    mobile_ui.show_mobile_welcome()
+
+    # Header
+    start_date_str = display_start_date.strftime('%B %d, %Y')
+    end_date_str = display_end_date.strftime('%B %d, %Y')
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # ============================================================
+        # 🎯 LOGO + TITLE + PERIOD IN ONE RECTANGULAR CONTAINER
+        # ============================================================
+        logo_path = "assets/browns_logo.jpg"
+        start_date_str = display_start_date.strftime('%B %d, %Y')
+        end_date_str = display_end_date.strftime('%B %d, %Y')
+        
+        # Get base64 image
+        logo_src = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
+        
+        # SINGLE HTML BLOCK - everything inside
+        st.markdown(f"""
+        <div style="
+            background: white;
+            border-radius: 20px;
+            padding: 30px 20px 25px 20px;
+            margin: 10px 0 20px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            text-align: center;
+        ">
+            <div style="margin-bottom: 12px;">
+                <img src="{logo_src}" style="height: 80px; width: auto; object-fit: contain; border-radius: 8px;">
+            </div>
+            <div style="
+                font-size: 28px;
+                font-weight: 700;
+                color: #1a237e;
+                letter-spacing: -0.3px;
+                margin-bottom: 8px;
+            ">
+                DRY ICE INVENTORY OPTIMIZER
+            </div>
+            <div style="
+                height: 2px;
+                background: linear-gradient(90deg, transparent, #1565c0, transparent);
+                margin: 10px auto 14px auto;
+                width: 60%;
+            "></div>
+            <div style="
+                display: inline-block;
+                font-size: 28px;
+                font-weight: 700;
+                color: #1a237e;
+                letter-spacing: -0.3px;
+                padding: 0;
+            ">
+                {start_date_str} – {end_date_str}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ============================================================
     # SECTION 5: REPORT GENERATOR (Container Style)
