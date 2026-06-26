@@ -1110,7 +1110,7 @@ class AdvancedAnalytics:
 # STREAMLIT INTEGRATION
 # ============================================================
 
-def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame):
+def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame, inventory_items: dict = None):
     """Create a Streamlit tab for advanced analytics"""
     st.markdown("## 🤖 Advanced Analytics Dashboard")
     st.markdown("*Enterprise-grade analytics with multivariate prediction, anomaly detection, and more*")
@@ -1135,7 +1135,7 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
         if st.button("🚀 Run Full Analysis", type="primary"):
             with st.spinner("Analyzing all items..."):
                 # Run full analysis
-                results = analytics.analyze_all_items(df, df)
+                results = analytics.analyze_all_items(df, inventory_items)
                 
                 # Display results
                 st.success(f"✅ Analysis complete: {results['summary']['total_items']} items analyzed")
