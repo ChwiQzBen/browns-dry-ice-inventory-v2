@@ -7573,11 +7573,11 @@ def main():
                 st.info("No inventory items to analyze for replenishment")   
 
     with tab_advanced:
-        if df is not None and not df.empty:
-            create_advanced_analytics_tab(analytics, df)
+        if df is not None and not df.empty and inventory_items:
+            create_advanced_analytics_tab(analytics, df, inventory_items)
         else:
             st.warning("No data available for advanced analytics")
-
+            
     with tab1:
         if not df.empty:
             st.markdown("""
