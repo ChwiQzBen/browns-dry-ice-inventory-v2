@@ -26,6 +26,7 @@ from core.smart_alerts import SmartAlerts
 from core.predictive_maintenance import PredictiveMaintenance
 from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
+from core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
 from app.core.google_sheet_reader import GoogleSheetReader
 import warnings
 from supabase import create_client, Client
@@ -6069,11 +6070,12 @@ def main():
     # ============================================================
     # END OF ENHANCED KPI DASHBOARD
     # ============================================================
-    tab_inventory, tab_movements,tab_analytics,tab_inventory_visual,tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_inventory, tab_movements,tab_analytics,tab_inventory_visual,tab_advanced, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
         "📊 Stock Movements",
         "📈 All Items Analytics",
         "🖼️ Visual Inventory",
+        "🤖 Advanced Analytics",
         "📊 Order Analysis",
         "🔮 Demand Forecast",
         "📦 Inventory Management",
@@ -7566,7 +7568,13 @@ def main():
                 else:
                     st.success("✅ All items are well-stocked. No replenishment needed at this time.")
             else:
-                st.info("No inventory items to analyze for replenishment")     
+                st.info("No inventory items to analyze for replenishment")   
+
+    with tab_advanced:
+        if df is not None and not df.empty:
+            create_advanced_analytics_tab(analytics, df)
+        else:
+            st.warning("No data available for advanced analytics")
 
     with tab1:
         if not df.empty:
