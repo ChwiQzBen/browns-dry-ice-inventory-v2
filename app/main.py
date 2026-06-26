@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from scipy.stats import norm
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pathlib import Path
 import sqlite3
 import math
