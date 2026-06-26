@@ -27,7 +27,7 @@ from core.smart_alerts import SmartAlerts
 from core.predictive_maintenance import PredictiveMaintenance
 from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
-from core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
+from app.core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
 from app.core.google_sheet_reader import GoogleSheetReader
 import warnings
 from supabase import create_client, Client
