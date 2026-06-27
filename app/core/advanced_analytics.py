@@ -1253,34 +1253,103 @@ class AdvancedAnalytics:
 # ============================================================
 # STREAMLIT INTEGRATION
 # ============================================================
-
 def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame, inventory_items: dict = None):
     """Create a Streamlit tab for advanced analytics"""
     st.markdown("## 🤖 Advanced Analytics Dashboard")
-    st.markdown("*Enterprise-grade analytics with multivariate prediction, anomaly detection, and more*")
+    st.markdown("*Analytics with multivariate prediction, anomaly detection, and more*")
     
-    # Quick stats - handle missing columns gracefully
-    total_items = 0
-    if inventory_items:
-        total_items = len(inventory_items)
-    elif df is not None and not df.empty:
-        # Try to find the item column
+    # ============================================================
+    # FIX 1: CORRECT ITEM COUNT
+    # ============================================================
+    total_items = 0  # Total items from DataFrame (1551)
+    active_items = 0  # Active items from inventory_items (170)
+    
+    # Get total items from DataFrame (ALL items = 1551)
+    if df is not None and not df.empty:
         item_cols = ['ITEM_NAME', 'Item', 'item_name', 'Name', 'name', 'PRODUCT_NAME']
         for col in item_cols:
             if col in df.columns:
                 total_items = len(df[col].unique())
                 break
+        if total_items == 0:
+            total_items = len(df)
     
+    # Get active items from inventory_items (170)
+    if inventory_items:
+        active_items = len(inventory_items)
+    
+    # ============================================================
+    # FIX 2: CALCULATE FORECAST ACCURACY
+    # ============================================================
+    forecast_accuracy = 0
+    accuracy_message = "Needs analysis"
+    
+    if df is not None and not df.empty and len(df) >= 5:
+        try:
+            daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
+            daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
+            
+            if not daily_df.empty and daily_df['Order_Quantity_kg'].sum() > 0:
+                from app.main import create_ensemble_forecast
+                
+                fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
+                    daily_df, forecast_days=30
+                )
+                
+                if backtest_accuracy > 0:
+                    forecast_accuracy = (1 - backtest_accuracy) * 100
+                    if forecast_accuracy >= 80:
+                        accuracy_message = "Excellent"
+                    elif forecast_accuracy >= 60:
+                        accuracy_message = "Good"
+                    else:
+                        accuracy_message = "Needs improvement"
+                else:
+                    accuracy_message = "Insufficient data"
+        except Exception as e:
+            forecast_accuracy = 0
+            accuracy_message = "Error calculating"
+    
+    # ============================================================
+    # FIX 3: DETECT ANOMALIES
+    # ============================================================
+    anomaly_count = 0
+    if df is not None and not df.empty and len(df) >= 5:
+        try:
+            anomalies = analytics.detect_anomalies(df, 'Order_Quantity_kg', confidence_threshold=0.90)
+            anomaly_count = len(anomalies)
+        except:
+            anomaly_count = 0
+    
+    # ============================================================
+    # DISPLAY METRICS
+    # ============================================================
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("📊 Items Analyzed", total_items)
+        # Show BOTH counts: 170 active out of 1551 total
+        if active_items > 0 and total_items > 0:
+            st.metric(
+                "📊 Items Analyzed", 
+                f"{active_items} / {total_items}",
+                f"{active_items} active, {total_items - active_items} inactive"
+            )
+        elif total_items > 0:
+            st.metric("📊 Items Analyzed", total_items)
+        else:
+            st.metric("📊 Items Analyzed", active_items if active_items > 0 else 0)
+    
     with col2:
         st.metric("🎯 Pattern Types", "5", "Stable, Seasonal, Trending, Volatile, Mixed")
+    
     with col3:
-        st.metric("⚠️ Anomalies Detected", "0", "Last 30 days")
+        st.metric("⚠️ Anomalies Detected", f"{anomaly_count}", "Last 30 days" if anomaly_count > 0 else "No anomalies")
+    
     with col4:
-        st.metric("📈 Forecast Accuracy", "0%", "Needs analysis")
+        if forecast_accuracy > 0:
+            st.metric("📈 Forecast Accuracy", f"{forecast_accuracy:.1f}%", accuracy_message)
+        else:
+            st.metric("📈 Forecast Accuracy", "0%", accuracy_message)
     
     st.divider()
     
