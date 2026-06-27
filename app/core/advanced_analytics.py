@@ -1257,7 +1257,7 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
                                   inventory_items: dict = None, stock_df: pd.DataFrame = None):
     """Create a Streamlit tab for advanced analytics"""
     st.markdown("## 🤖 Advanced Analytics Dashboard")
-    st.markdown("*Enterprise-grade analytics with multivariate prediction, anomaly detection, and more*")
+    st.markdown("*Analytics with multivariate prediction, anomaly detection, and more*")
     
     # ============================================================
     # FIX 1: CORRECT ITEM COUNT FROM STOCK_DF (1551)
