@@ -7574,7 +7574,8 @@ def main():
 
     with tab_advanced:
         if df is not None and not df.empty and inventory_items:
-            create_advanced_analytics_tab(analytics, df, inventory_items)
+            # Pass stock_df as well
+            create_advanced_analytics_tab(analytics, df, inventory_items, stock_df)
         else:
             st.warning("No data available for advanced analytics")
             

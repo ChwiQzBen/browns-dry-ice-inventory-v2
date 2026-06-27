@@ -1253,26 +1253,27 @@ class AdvancedAnalytics:
 # ============================================================
 # STREAMLIT INTEGRATION
 # ============================================================
-def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame, inventory_items: dict = None):
+def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame, 
+                                  inventory_items: dict = None, stock_df: pd.DataFrame = None):
     """Create a Streamlit tab for advanced analytics"""
     st.markdown("## 🤖 Advanced Analytics Dashboard")
-    st.markdown("*Analytics with multivariate prediction, anomaly detection, and more*")
+    st.markdown("*Enterprise-grade analytics with multivariate prediction, anomaly detection, and more*")
     
     # ============================================================
-    # FIX 1: CORRECT ITEM COUNT
+    # FIX 1: CORRECT ITEM COUNT FROM STOCK_DF (1551)
     # ============================================================
-    total_items = 0  # Total items from DataFrame (1551)
+    total_items = 0  # Total items from stock_df (1551)
     active_items = 0  # Active items from inventory_items (170)
     
-    # Get total items from DataFrame (ALL items = 1551)
-    if df is not None and not df.empty:
+    # Get total items from stock_df (ALL items = 1551)
+    if stock_df is not None and not stock_df.empty:
         item_cols = ['ITEM_NAME', 'Item', 'item_name', 'Name', 'name', 'PRODUCT_NAME']
         for col in item_cols:
-            if col in df.columns:
-                total_items = len(df[col].unique())
+            if col in stock_df.columns:
+                total_items = len(stock_df[col].unique())
                 break
         if total_items == 0:
-            total_items = len(df)
+            total_items = len(stock_df)
     
     # Get active items from inventory_items (170)
     if inventory_items:
