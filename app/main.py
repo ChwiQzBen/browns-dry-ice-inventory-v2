@@ -6124,9 +6124,7 @@ def main():
     # Close the card
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Add a small note at the bottom
-    st.caption(f"📊 Data updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Period: {st.session_state.selected_period}")
-    
+
     tab_inventory, tab_movements,tab_analytics,tab_inventory_visual,tab_advanced, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
         "📊 Stock Movements",
