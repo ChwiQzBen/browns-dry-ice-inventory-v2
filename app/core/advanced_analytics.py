@@ -1367,6 +1367,15 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
             st.metric("⚠️ Anomalies Detected", f"{anomaly_count}", "Last 30 days")
         else:
             st.metric("⚠️ Anomalies Detected", "0", "No anomalies")
+    
+    with col4:
+        if forecast_accuracy > 0:
+            st.metric("📈 Forecast Accuracy", f"{forecast_accuracy:.1f}%", accuracy_message)
+        else:
+            st.metric("📈 Forecast Accuracy", "0%", "Needs analysis")
+    
+    st.divider()
+    
     # ============================================================
     # ANOMALY DETAILS - Show detailed breakdown
     # ============================================================
@@ -1440,14 +1449,6 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
             except Exception as e:
                 st.warning(f"Could not load anomaly details: {e}")        
 
-    with col4:
-        if forecast_accuracy > 0:
-            st.metric("📈 Forecast Accuracy", f"{forecast_accuracy:.1f}%", accuracy_message)
-        else:
-            st.metric("📈 Forecast Accuracy", "0%", "Needs analysis")
-    
-    st.divider()
-    
     # Analysis options
     col1, col2 = st.columns(2)
     with col1:
