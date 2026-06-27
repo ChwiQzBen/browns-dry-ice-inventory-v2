@@ -1280,36 +1280,55 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
         active_items = len(inventory_items)
     
     # ============================================================
-    # FIX 2: CALCULATE FORECAST ACCURACY
-    # ============================================================
+# FIX 2: CALCULATE FORECAST ACCURACY
+# ============================================================
     forecast_accuracy = 0
     accuracy_message = "Needs analysis"
-    
+
     if df is not None and not df.empty and len(df) >= 5:
         try:
-            daily_df = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
-            daily_df = daily_df.rename(columns={'Date': 'Date', 'Order_Quantity_kg': 'Order_Quantity_kg'})
-            
-            if not daily_df.empty and daily_df['Order_Quantity_kg'].sum() > 0:
-                from app.main import create_ensemble_forecast
+            # Check for required columns
+            if 'Order_Quantity_kg' not in df.columns:
+                accuracy_message = "Missing order data"
+            else:
+                # Use simple backtesting
+                values = df['Order_Quantity_kg'].values
+                test_size = max(2, min(7, int(len(values) * 0.2)))  # At least 2 days, max 7
                 
-                fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
-                    daily_df, forecast_days=30
-                )
-                
-                if backtest_accuracy > 0:
-                    forecast_accuracy = (1 - backtest_accuracy) * 100
-                    if forecast_accuracy >= 80:
-                        accuracy_message = "Excellent"
-                    elif forecast_accuracy >= 60:
-                        accuracy_message = "Good"
+                if len(values) > test_size * 2:
+                    train = values[:-test_size]
+                    test = values[-test_size:]
+                    
+                    # Simple naive forecast: use mean of training data
+                    forecast = np.mean(train)
+                    predictions = np.full(len(test), forecast)
+                    
+                    # Calculate MAPE (avoid division by zero)
+                    non_zero_mask = test > 0
+                    if np.any(non_zero_mask):
+                        mape = np.mean(np.abs((test[non_zero_mask] - predictions[non_zero_mask]) / test[non_zero_mask])) * 100
+                        forecast_accuracy = max(0, min(100, 100 - mape))
+                        
+                        if forecast_accuracy >= 80:
+                            accuracy_message = "Excellent"
+                        elif forecast_accuracy >= 60:
+                            accuracy_message = "Good"
+                        else:
+                            accuracy_message = "Needs improvement"
                     else:
-                        accuracy_message = "Needs improvement"
+                        accuracy_message = "No positive demand data"
                 else:
-                    accuracy_message = "Insufficient data"
+                    accuracy_message = f"Need {test_size * 2 + 1} data points (have {len(values)})"
+                    
         except Exception as e:
             forecast_accuracy = 0
             accuracy_message = "Error calculating"
+            print(f"Forecast accuracy error: {e}")
+    else:
+        if df is None or df.empty:
+            accuracy_message = "No data available"
+        else:
+            accuracy_message = f"Need 5 data points (have {len(df)})"
     
     # ============================================================
     # FIX 3: DETECT ANOMALIES
