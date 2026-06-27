@@ -5815,263 +5815,318 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # ============================================================
+    # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
+    # ============================================================
+
+    # Calculate monthly savings and percentage
     monthly_savings = annual_transport_savings / 12
     monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
     percent_savings = (monthly_savings / monthly_transport_cost) * 100 if monthly_transport_cost > 0 else 0
 
     # ============================================================
-    # 🎨 ENHANCED KPI DASHBOARD WITH GLASS DESIGN
+    # SINGLE UNIFIED KPI CARD
     # ============================================================
 
     st.markdown("""
     <div style="
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        border: 2px solid #667eea;
         border-radius: 16px;
         padding: 20px;
         margin: 20px 0;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(102, 126, 234, 0.04);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
     ">
+        <!-- Card Header -->
         <div style="
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-bottom: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid rgba(102, 126, 234, 0.15);
         ">
-            📈 Key Performance Indicators
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Create metrics in a responsive grid with glass design
-    metrics_list = [
-        ("Total Orders", f"{kpis.get('total_orders', 0):,}", None),
-        ("Total Volume", f"{kpis.get('total_volume', 0):,.0f} kg", None),
-        ("Annual Spending", f"KSh {total_annual_spending:,.0f}", None),
-        ("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", None),
-        ("Safety Stock", f"{safety_stock:,.1f} kg", None),
-        ("Economic EOQ", f"{eoq:,.1f} kg", None),
-        ("Container Efficiency", f"{kpis.get('container_utilization', 0.0)*100:.1f}%", None),
-        ("Monthly Savings", f"KSh {monthly_savings:,.0f}", f"{percent_savings:+.1f}%"),
-    ]
-
-    # Display metrics in a 4-column grid with glass design
-    cols = st.columns(4)
-    for idx, (label, value, delta) in enumerate(metrics_list):
-        with cols[idx % 4]:
-            # Glass metric card
-            delta_html = ""
-            if delta:
-                delta_color = "#28a745" if "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0) else "#dc3545"
-                delta_html = f'<div style="font-size:12px;color:{delta_color};margin-top:4px;">{delta}</div>'
-            
-            st.markdown(f"""
             <div style="
-                background: rgba(255, 255, 255, 0.06);
-                backdrop-filter: blur(6px);
-                -webkit-backdrop-filter: blur(6px);
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                border-radius: 12px;
-                padding: 14px 12px;
-                text-align: center;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
-                min-height: 80px;
                 display: flex;
-                flex-direction: column;
-                justify-content: center;
-                margin: 4px 0;
-                cursor: default;
+                align-items: center;
+                gap: 12px;
             ">
-                <div style="
-                    font-size: 11px;
-                    color: #888;
-                    font-weight: 500;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    margin-bottom: 4px;
-                ">{label}</div>
-                <div style="
-                    font-size: 22px;
+                <span style="font-size: 28px;">📈</span>
+                <span style="
+                    font-size: 20px;
                     font-weight: 700;
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     -webkit-background-clip: text;
                     -webkit-text-fill-color: transparent;
                     background-clip: text;
-                    margin: 2px 0;
-                ">{value}</div>
-                {delta_html}
+                ">
+                    Key Performance Indicators
+                </span>
             </div>
-            """, unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # ============================================================
-    # 🎨 ENHANCED STOCK ALERTS WITH GLASS DESIGN
-    # ============================================================
-
-    st.markdown("""
-    <div style="margin-top: 20px;">
+            <div style="
+                background: rgba(102, 126, 234, 0.1);
+                padding: 4px 14px;
+                border-radius: 20px;
+                font-size: 11px;
+                color: #667eea;
+                font-weight: 600;
+            ">
+                Real-time
+            </div>
+        </div>
     """, unsafe_allow_html=True)
 
-    # Display stock alerts with glass design
-    stock_status = inventory_tracker.get_stock_status()
+    # ============================================================
+    # KPI GRID - 4 Columns Inside Single Card
+    # ============================================================
 
-    # Create glass alert cards
-    if stock_status['status'] in ['Low Stock', 'Critical']:
-        alert_color = "#dc3545" if stock_status['status'] == 'Critical' else "#ffc107"
-        alert_icon = "🔴" if stock_status['status'] == 'Critical' else "🟡"
-        
+    # Row 1: Main KPIs (4 columns)
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        # Current Stock - Color coded based on status
+        stock_status = inventory_tracker.get_stock_status()
         st.markdown(f"""
         <div style="
-            background: rgba(220, 53, 69, 0.06);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(220, 53, 69, 0.15);
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin: 10px 0;
-            display: flex;
-            align-items: center;
-            gap: 15px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid {stock_status['color']};
         ">
-            <div style="font-size: 28px;">{alert_icon}</div>
-            <div style="flex: 1;">
-                <div style="font-weight: 600; color: #333;">{stock_status['status'].upper()}</div>
-                <div style="font-size: 14px; color: #666;">
-                    Current stock: {inventory_tracker.current_stock:.0f} kg | 
-                    Reorder point: {reorder_point:.0f} kg | 
-                    Safety stock: {safety_stock:.0f} kg
-                </div>
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                📦 Current Stock
             </div>
-            <div style="
-                background: rgba(255,255,255,0.05);
-                border-radius: 20px;
-                padding: 6px 16px;
-                font-size: 13px;
-                border: 1px solid rgba(255,255,255,0.05);
-            ">
-                📦 {eoq:.0f} kg recommended
+            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
+                {inventory_tracker.current_stock:,.0f}
             </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div style="
-            background: rgba(40, 167, 69, 0.06);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(40, 167, 69, 0.15);
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin: 10px 0;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        ">
-            <div style="font-size: 28px;">✅</div>
-            <div style="flex: 1;">
-                <div style="font-weight: 600; color: #333;">STOCK LEVEL HEALTHY</div>
-                <div style="font-size: 14px; color: #666;">
-                    Current stock: {inventory_tracker.current_stock:.0f} kg | 
-                    Reorder point: {reorder_point:.0f} kg
-                </div>
-            </div>
-            <div style="
-                background: rgba(255,255,255,0.05);
-                border-radius: 20px;
-                padding: 6px 16px;
-                font-size: 13px;
-                border: 1px solid rgba(255,255,255,0.05);
-            ">
-                📊 {((inventory_tracker.current_stock / (eoq + safety_stock)) * 100):.0f}% capacity
+            <div style="font-size: 11px; color: {stock_status['color']}; font-weight: 600;">
+                {stock_status['status']}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ============================================================
-    # 🎨 ACTIVE ALERTS WITH GLASS DESIGN
-    # ============================================================
-
-    alerts = alerts_system.check_conditions(
-        current_demand=usage,
-        avg_demand=kpis.get('avg_order_size', 0),
-        std_demand=kpis.get('std_order_size', 0),
-        current_cost=analyzer.constants['transport_cost'],
-        avg_cost=analyzer.constants['transport_cost']
-    )
-
-    if alerts or alerts_system.get_active_alerts():
-        st.markdown("""
+    with col2:
+        st.markdown(f"""
         <div style="
-            background: rgba(255, 193, 7, 0.04);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 193, 7, 0.10);
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin: 15px 0;
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #4fc3f7;
         ">
-            <div style="
-                font-size: 1.1rem;
-                font-weight: 600;
-                margin-bottom: 10px;
-                color: #856404;
-            ">
-                ⚠️ Active Alerts
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                📋 Total Orders
             </div>
+            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
+                {kpis.get('total_orders', 0):,}
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                {kpis.get('total_volume', 0):,.0f} kg total
+            </div>
+        </div>
         """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #ff9800;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                🛡️ Safety Stock
+            </div>
+            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
+                {safety_stock:,.1f}
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                {kpis.get('order_frequency', 0):.1f} orders/mo
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #9c27b0;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                📦 Economic EOQ
+            </div>
+            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
+                {eoq:,.1f}
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                Optimal order size
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Divider inside card
+    st.markdown("""
+    <div style="
+        margin: 12px 0;
+        border-top: 1px solid rgba(255,255,255,0.08);
+    "></div>
+    """, unsafe_allow_html=True)
+
+    # Row 2: Financial KPIs (4 columns)
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #e74c3c;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                💰 Annual Spending
+            </div>
+            <div style="font-size: 18px; font-weight: 700; color: #333; margin: 4px 0;">
+                KSh {total_annual_spending:,.0f}
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                Total cost
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #28a745;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                🚀 Annual Transport Savings
+            </div>
+            <div style="font-size: 18px; font-weight: 700; color: #28a745; margin: 4px 0;">
+                KSh {annual_transport_savings:,.0f}
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                From EOQ optimization
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        delta_color = "#28a745" if percent_savings > 0 else "#dc3545"
+        delta_arrow = "▲" if percent_savings > 0 else "▼"
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #ff6f00;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                📈 Monthly Savings
+            </div>
+            <div style="font-size: 18px; font-weight: 700; color: #333; margin: 4px 0;">
+                KSh {monthly_savings:,.0f}
+            </div>
+            <div style="font-size: 12px; color: {delta_color}; font-weight: 600;">
+                {delta_arrow} {percent_savings:+.1f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        container_eff = kpis.get('container_utilization', 0) * 100
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            border-left: 3px solid #00bcd4;
+        ">
+            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
+                📊 Container Efficiency
+            </div>
+            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
+                {container_eff:.1f}%
+            </div>
+            <div style="font-size: 11px; color: #888;">
+                Fill rate
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Optional: Add a progress bar for stock level at the bottom
+    if eoq > 0 and safety_stock > 0:
+        max_stock = eoq + safety_stock
+        current_pct = min(100, (inventory_tracker.current_stock / max_stock) * 100) if max_stock > 0 else 0
         
-        for alert in alerts_system.get_active_alerts():
-            is_critical = "CRITICAL" in alert['message']
-            alert_color = "#dc3545" if is_critical else "#ffc107"
-            bg_color = "rgba(220, 53, 69, 0.04)" if is_critical else "rgba(255, 193, 7, 0.04)"
-            
-            st.markdown(f"""
-            <div style="
-                background: {bg_color};
-                backdrop-filter: blur(4px);
-                -webkit-backdrop-filter: blur(4px);
-                border-left: 4px solid {alert_color};
-                border-radius: 8px;
-                padding: 12px 16px;
-                margin: 8px 0;
-                display: flex;
-                align-items: center;
-                gap: 12px;
-            ">
-                <div style="font-size: 20px;">{'🔴' if is_critical else '🟡'}</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 13px; color: #666;">
-                        {alert['timestamp'].strftime('%H:%M')}
-                    </div>
-                    <div style="font-size: 14px; color: #333;">
-                        {alert['message']}
-                    </div>
+        # Determine color
+        if current_pct < 30:
+            gauge_color = "#dc3545"
+            gauge_text = "Critical"
+        elif current_pct < 50:
+            gauge_color = "#ffc107"
+            gauge_text = "Low"
+        else:
+            gauge_color = "#28a745"
+            gauge_text = "Healthy"
+        
+        st.markdown(f"""
+        <div style="
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <div style="font-size: 11px; color: #888; font-weight: 500;">
+                    📊 Stock Level Indicator
                 </div>
+                <div style="font-size: 12px; font-weight: 600; color: {gauge_color};">
+                    {current_pct:.0f}% - {gauge_text}
+                </div>
+            </div>
+            <div style="
+                height: 6px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 4px;
+                overflow: hidden;
+            ">
                 <div style="
-                    background: rgba(255,255,255,0.05);
-                    border-radius: 12px;
-                    padding: 2px 10px;
-                    font-size: 11px;
-                    border: 1px solid rgba(255,255,255,0.05);
-                    color: #888;
-                ">
-                    {'CRITICAL' if is_critical else 'WARNING'}
-                </div>
+                    width: {current_pct:.1f}%;
+                    height: 6px;
+                    background: linear-gradient(90deg, {gauge_color}, {gauge_color});
+                    border-radius: 4px;
+                    transition: width 0.8s ease;
+                "></div>
             </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+            <div style="display: flex; justify-content: space-between; margin-top: 2px;">
+                <span style="font-size: 8px; color: #999;">0%</span>
+                <span style="font-size: 8px; color: #999;">EOQ + Safety Stock</span>
+                <span style="font-size: 8px; color: #999;">100%</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
+    # Close the card
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ============================================================
-    # END OF ENHANCED KPI DASHBOARD
-    # ============================================================
+    # Add a small note at the bottom
+    st.caption(f"📊 Data updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Period: {st.session_state.selected_period}")
+    
     tab_inventory, tab_movements,tab_analytics,tab_inventory_visual,tab_advanced, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📦 Inventory",
         "📊 Stock Movements",
