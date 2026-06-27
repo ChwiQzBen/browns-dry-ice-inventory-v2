@@ -1443,7 +1443,7 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
                 if inventory_items and isinstance(inventory_items, dict):
                     details = inventory_items.get(selected_item, {})
                     if details:
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2, col3 = st.columns([1, 1, 1])
                         with col1:
                             st.metric("📦 Stock", f"{details.get('stock', 0)} {details.get('unit', 'kg')}")
                         with col2:
