@@ -1367,6 +1367,78 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
             st.metric("⚠️ Anomalies Detected", f"{anomaly_count}", "Last 30 days")
         else:
             st.metric("⚠️ Anomalies Detected", "0", "No anomalies")
+    # ============================================================
+    # ANOMALY DETAILS - Show detailed breakdown
+    # ============================================================
+    if anomaly_count > 0:
+        with st.expander(f"🔍 View {anomaly_count} Anomaly Details", expanded=False):
+            # Get anomalies again to display details
+            try:
+                anomalies = analytics.detect_anomalies(df, 'Order_Quantity_kg', confidence_threshold=0.90)
+                
+                # Count by type
+                type_counts = {}
+                for anomaly in anomalies:
+                    type_counts[anomaly.anomaly_type] = type_counts.get(anomaly.anomaly_type, 0) + 1
+                
+                # Show summary by type
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("📈 Spikes", type_counts.get('spike', 0))
+                with col2:
+                    st.metric("📉 Drops", type_counts.get('drop', 0))
+                with col3:
+                    st.metric("🔄 Pattern Breaks", type_counts.get('pattern_break', 0))
+                with col4:
+                    st.metric("⚠️ Outliers", type_counts.get('outlier', 0))
+                
+                st.markdown("---")
+                
+                # Show each anomaly with details
+                for i, anomaly in enumerate(anomalies, 1):
+                    # Determine color based on type
+                    color_map = {
+                        'spike': '#28a745',      # Green
+                        'drop': '#dc3545',       # Red
+                        'pattern_break': '#ffc107', # Yellow
+                        'outlier': '#17a2b8'     # Blue
+                    }
+                    color = color_map.get(anomaly.anomaly_type, '#6c757d')
+                    
+                    # Get confidence percentage
+                    confidence_pct = anomaly.confidence * 100 if anomaly.confidence <= 1 else anomaly.confidence
+                    
+                    st.markdown(f"""
+                    <div style="
+                        border-left: 4px solid {color};
+                        padding: 10px 15px;
+                        margin: 5px 0;
+                        background: rgba(255,255,255,0.03);
+                        border-radius: 4px;
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                            <div>
+                                <span style="font-weight: 600;">#{i}</span>
+                                <span style="color: {color}; font-weight: 600; text-transform: uppercase;">
+                                    {anomaly.anomaly_type}
+                                </span>
+                                <span style="color: #888; font-size: 13px; margin-left: 8px;">
+                                    Confidence: {confidence_pct:.0f}%
+                                </span>
+                            </div>
+                            <span style="font-size: 12px; color: #888;">
+                                Score: {anomaly.anomaly_score:.2f}
+                            </span>
+                        </div>
+                        <div style="font-size: 14px; color: #333; margin-top: 4px;">
+                            {anomaly.explanation}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            except Exception as e:
+                st.warning(f"Could not load anomaly details: {e}")        
 
     with col4:
         if forecast_accuracy > 0:
