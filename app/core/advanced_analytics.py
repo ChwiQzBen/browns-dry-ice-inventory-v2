@@ -1347,35 +1347,20 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        # Show BOTH counts: 170 active out of 1551 total
         if active_items > 0 and total_items > 0:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 5px 0;">
-                <div style="font-size: 13px; color: #888; font-weight: 500;">📊 Items Analyzed</div>
-                <div style="font-size: 22px; font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; white-space: nowrap;">
-                    {active_items} / {total_items}
-                </div>
-                <div style="font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap;">
-                    {active_items} active, {total_items - active_items} inactive
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric(
+                "📊 Items Analyzed", 
+                f"{active_items} / {total_items}",
+                f"{active_items} active, {total_items - active_items} inactive"
+            )
         elif total_items > 0:
             st.metric("📊 Items Analyzed", total_items)
         else:
             st.metric("📊 Items Analyzed", active_items if active_items > 0 else 0)
 
     with col2:
-        st.markdown("""
-        <div style="text-align: center; padding: 5px 0;">
-            <div style="font-size: 13px; color: #888; font-weight: 500;">🎯 Pattern Types</div>
-            <div style="font-size: 22px; font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                5
-            </div>
-            <div style="font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap;">
-                Stable, Seasonal, Trending, Volatile, Mixed
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("🎯 Pattern Types", "5", "Stable, Seasonal, Trending, Volatile, Mixed")
 
     with col3:
         if anomaly_count > 0:
@@ -1387,7 +1372,7 @@ def create_advanced_analytics_tab(analytics: AdvancedAnalytics, df: pd.DataFrame
         if forecast_accuracy > 0:
             st.metric("📈 Forecast Accuracy", f"{forecast_accuracy:.1f}%", accuracy_message)
         else:
-            st.metric("📈 Forecast Accuracy", "0%", accuracy_message)
+            st.metric("📈 Forecast Accuracy", "0%", "Needs analysis")
     
     st.divider()
     
