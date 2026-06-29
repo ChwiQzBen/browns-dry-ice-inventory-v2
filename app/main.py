@@ -4950,6 +4950,7 @@ def main():
         get_historical_orders_from_db.clear()
         st.session_state.db_initialized = True
         print("✅ Database initialized")
+
     # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     st.sidebar.markdown("""
     <div style="
@@ -4966,6 +4967,39 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # ============================================================
+    # VIEW MODE SELECTOR 
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #667eea;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: rgba(102, 126, 234, 0.05);
+    ">
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+        ">
+            🔄 View Mode
+        </div>
+    """, unsafe_allow_html=True)
+
+    inventory_mode = st.sidebar.radio(
+        "Select inventory view:",
+        ["📦 All Items Mode", "❄️ Dry Ice Mode"],
+        help="Switch between general inventory management and Dry Ice analysis",
+        key="inventory_mode"
+    )
+
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    
     st.sidebar.header("🗓️ Analysis Period")
     analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
 
@@ -5292,7 +5326,6 @@ def main():
     maintenance_system = PredictiveMaintenance()
     integration_system = SystemIntegrations()
     
-    # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     # ============================================================
     # SECTION 1: REAL-TIME INVENTORY (Container Style)
     # ============================================================
