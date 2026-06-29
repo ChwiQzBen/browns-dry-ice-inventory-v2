@@ -31,6 +31,24 @@ from app.core.advanced_analytics import AdvancedAnalytics, create_advanced_analy
 from app.core.google_sheet_reader import GoogleSheetReader
 import warnings
 from supabase import create_client, Client
+from core.error_handling import (
+    logger,
+    safe_operation,
+    safe_db_operation,
+    validate_quantity,
+    validate_date,
+    validate_stock_sufficient,
+    ServiceStatusManager,
+    safe_number_input,
+    safe_text_input,
+    retry_on_failure,
+    log_performance,
+    DatabaseError,
+    ValidationError,
+    ServiceUnavailableError
+)
+# External imports for error handling
+from requests.exceptions import Timeout, ConnectionError
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
@@ -680,14 +698,51 @@ def clear_transactions_from_db():
         finally:
             conn.close()
 
+@safe_operation(error_message="Failed to add transaction")
 def add_transaction_to_db(transaction_type, quantity, description, date, period):
-    """Add transaction to Supabase or SQLite database"""
+    """
+    Add transaction to Supabase or SQLite database with comprehensive error handling.
     
-    # Try Supabase first if enabled
+    Args:
+        transaction_type: 'usage' or 'receipt'
+        quantity: Quantity in kg
+        description: Transaction description
+        date: Transaction date
+        period: Analysis period (e.g., '2024/2025')
+    
+    Returns:
+        transaction_id: ID of the created transaction
+    
+    Raises:
+        ValidationError: If input validation fails
+        DatabaseError: If database operation fails
+    """
+    
+    # STEP 1: VALIDATE INPUTS
+    # Validate quantity
+    is_valid, msg = validate_quantity(quantity, min_qty=0, max_qty=100000, allow_zero=False)
+    if not is_valid:
+        raise ValidationError(msg)
+    
+    # Validate date
+    is_valid, msg = validate_date(date, allow_future=False)
+    if not is_valid:
+        raise ValidationError(msg)
+    
+    # Validate transaction type
+    if transaction_type not in ['usage', 'receipt']:
+        raise ValidationError(f"Invalid transaction type: {transaction_type}")
+    
+    logger.info(f"Processing {transaction_type} transaction: {quantity} kg on {date}")
+    
+    
+    # STEP 2: TRY SUPABASE FIRST (if enabled)  
     if USE_SUPABASE:
-        supabase = init_supabase()
-        if supabase:
-            try:
+        try:
+            supabase = init_supabase()
+            if supabase:
+                logger.info("Attempting Supabase transaction...")
+                
                 # Get current stock from Supabase
                 current_stock_response = supabase.table('inventory')\
                     .select('stock_level')\
@@ -696,10 +751,15 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                     .execute()
                 
                 current_stock = current_stock_response.data[0]['stock_level'] if current_stock_response.data else 0
+                logger.debug(f"Current stock (Supabase): {current_stock} kg")
                 
                 # Calculate new stock
                 if transaction_type == 'usage':
                     new_stock = current_stock - quantity
+                    # Validate stock sufficiency
+                    is_valid, msg = validate_stock_sufficient(quantity, current_stock)
+                    if not is_valid:
+                        raise ValidationError(msg)
                 else:  # receipt
                     new_stock = current_stock + quantity
                 
@@ -716,6 +776,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                 
                 transaction_result = supabase.table('transactions').insert(transaction_data).execute()
                 transaction_id = transaction_result.data[0]['id']
+                logger.info(f"Supabase transaction created: {transaction_id}")
                 
                 # Insert inventory record
                 inventory_data = {
@@ -724,6 +785,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                     'transaction_id': transaction_id
                 }
                 supabase.table('inventory').insert(inventory_data).execute()
+                logger.debug(f"Inventory updated (Supabase): {new_stock} kg")
                 
                 # If receipt, add to historical orders
                 if transaction_type == 'receipt':
@@ -733,50 +795,113 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                         'analysis_period': period
                     }
                     supabase.table('historical_orders').insert(order_data).execute()
+                    logger.info(f"Historical order recorded (Supabase): {quantity} kg")
                 
                 return transaction_id
                 
-            except Exception as e:
-                st.error(f"Supabase error: {e}. Falling back to SQLite.")
-                # Fall through to SQLite
+        except ValidationError:
+            # Re-raise validation errors
+            raise
+            
+        except Exception as e:
+            logger.warning(f"Supabase transaction failed: {e}. Falling back to SQLite.")
+            # Fall through to SQLite
     
-    # Fallback to SQLite
-    conn = sqlite3.connect('dry_ice.db')
-    c = conn.cursor()
 
-    transaction = {
-        'date': date.isoformat(),
-        'type': transaction_type,
-        'quantity': quantity,
-        'item': 'Dry Ice',
-        'description': description,
-        'notes': f"{description} - {quantity} kg",
-        'analysis_period': period
-    }
-
-    c.execute('''INSERT INTO transactions
-                 (date, type, quantity, item, description, notes, analysis_period)
-                 VALUES (:date, :type, :quantity, :item, :description, :notes, :analysis_period)''',
-              transaction)
-
-    transaction_id = c.lastrowid
-
-    if transaction_type == 'usage':
-        c.execute('''INSERT INTO inventory (date, stock_level, transaction_id)
-                     VALUES (?, (SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1) - ?, ?)''',
-                  (date.isoformat(), quantity, transaction_id))
-    elif transaction_type == 'receipt':
-        c.execute('''INSERT INTO inventory (date, stock_level, transaction_id)
-                     VALUES (?, (SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1) + ?, ?)''',
-                  (date.isoformat(), quantity, transaction_id))
-
-        c.execute('''INSERT INTO historical_orders (date, order_quantity, analysis_period)
-                     VALUES (?, ?, ?)''',
-                  (date.isoformat(), quantity, period))
-
-    conn.commit()
-    conn.close()
-    return transaction_id
+    # STEP 3: FALLBACK TO SQLITE (with safe operation) 
+    def sqlite_operation():
+        """Execute SQLite transaction with proper error handling."""
+        conn = None
+        try:
+            conn = sqlite3.connect('dry_ice.db')
+            c = conn.cursor()
+            logger.debug("SQLite connection established")
+            
+            # Get current stock from SQLite
+            c.execute('''SELECT stock_level FROM inventory ORDER BY date DESC LIMIT 1''')
+            result = c.fetchone()
+            current_stock = result[0] if result else 0
+            logger.debug(f"Current stock (SQLite): {current_stock} kg")
+            
+            # Calculate new stock
+            if transaction_type == 'usage':
+                new_stock = current_stock - quantity
+                # Validate stock sufficiency
+                is_valid, msg = validate_stock_sufficient(quantity, current_stock)
+                if not is_valid:
+                    raise ValidationError(msg)
+            else:  # receipt
+                new_stock = current_stock + quantity
+            
+            # Insert transaction
+            transaction = {
+                'date': date.isoformat(),
+                'type': transaction_type,
+                'quantity': quantity,
+                'item': 'Dry Ice',
+                'description': description,
+                'notes': f"{description} - {quantity} kg",
+                'analysis_period': period
+            }
+            
+            c.execute('''INSERT INTO transactions
+                         (date, type, quantity, item, description, notes, analysis_period)
+                         VALUES (:date, :type, :quantity, :item, :description, :notes, :analysis_period)''',
+                      transaction)
+            
+            transaction_id = c.lastrowid
+            logger.debug(f"SQLite transaction created: {transaction_id}")
+            
+            # Insert inventory record
+            if transaction_type == 'usage':
+                c.execute('''INSERT INTO inventory (date, stock_level, transaction_id)
+                             VALUES (?, ?, ?)''',
+                          (date.isoformat(), new_stock, transaction_id))
+            elif transaction_type == 'receipt':
+                c.execute('''INSERT INTO inventory (date, stock_level, transaction_id)
+                             VALUES (?, ?, ?)''',
+                          (date.isoformat(), new_stock, transaction_id))
+                
+                # Add to historical orders for receipts
+                c.execute('''INSERT INTO historical_orders (date, order_quantity, analysis_period)
+                             VALUES (?, ?, ?)''',
+                          (date.isoformat(), quantity, period))
+                logger.debug(f"Historical order recorded (SQLite): {quantity} kg")
+            
+            conn.commit()
+            logger.info(f"SQLite transaction completed: {transaction_id}")
+            return transaction_id
+            
+        except sqlite3.IntegrityError as e:
+            logger.error(f"SQLite integrity error: {e}")
+            if conn:
+                conn.rollback()
+            raise DatabaseError(f"Data integrity error: {e}")
+            
+        except sqlite3.OperationalError as e:
+            logger.error(f"SQLite operational error: {e}")
+            if conn:
+                conn.rollback()
+            raise DatabaseError(f"Database operation error: {e}")
+            
+        except Exception as e:
+            logger.error(f"SQLite transaction error: {e}")
+            if conn:
+                conn.rollback()
+            raise
+            
+        finally:
+            if conn:
+                conn.close()
+                logger.debug("SQLite connection closed")
+    
+    # Execute with safe database operation
+    return safe_db_operation(
+        sqlite_operation,
+        fallback_value=None,
+        show_error=True,
+        error_title="Transaction Failed"
+    )
 
 @st.cache_data(ttl=300)
 def get_transactions_from_db(period):
@@ -4570,6 +4695,7 @@ def count_history_interface():
             mime='text/csv'
         )
 
+@log_performance
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_ensemble_forecast(df, forecast_days=30):
     """
@@ -5064,97 +5190,162 @@ def main():
     analytics = AdvancedAnalytics() 
    # Try to load from Google Sheets first
     @st.cache_data(ttl=600)
+    @safe_operation(error_message="Failed to load inventory data")
     def load_inventory_data():
-        """Load inventory data from Google Sheets with caching"""
+        """
+        Load inventory data from Google Sheets with comprehensive error handling.
+        
+        Returns:
+            tuple: (inventory_items dict, stock_df DataFrame)
+            
+        Raises:
+            Timeout: If Google Sheets request times out
+            ConnectionError: If network connection fails
+            Exception: For any other unexpected errors
+        """
         inventory_items = {}
         stock_df = None
+        
         try:
+            logger.info("Loading inventory data from Google Sheets...")
             gsheet = GoogleSheetReader()
-            if gsheet.authenticate():
-                stock_df = gsheet.get_stock_with_pricing()
-                if not stock_df.empty:
-                    for _, row in stock_df.iterrows():
-                        try:
-                            item_name = row.get('ITEM_NAME', 'Unknown')
-                            if not item_name or str(item_name).strip() == '':
-                                continue
-                            
-                            # Safe conversion for stock
-                            stock_val = row.get('QUANTITY', 0)
-                            if pd.isna(stock_val) or str(stock_val).strip() == '':
-                                stock = 0
-                            else:
-                                try:
-                                    stock = float(stock_val)
-                                except (ValueError, TypeError):
-                                    stock = 0
-                            
-                            # Safe conversion for reorder
-                            reorder_val = row.get('REORDER LEVEL', 0)
-                            if pd.isna(reorder_val) or str(reorder_val).strip() == '':
-                                reorder = stock * 0.5
-                            else:
-                                try:
-                                    reorder = float(reorder_val)
-                                except (ValueError, TypeError):
-                                    reorder = stock * 0.5
-                            
-                            # Safe conversion for price
-                            price_val = row.get('UNIT PRICE', 0)
-                            if pd.isna(price_val) or str(price_val).strip() == '':
-                                price = 0
-                            else:
-                                try:
-                                    price = float(price_val)
-                                except (ValueError, TypeError):
-                                    price = 0
-                            
-                            # Skip items with zero or negative stock
-                            if stock <= 0:
-                                continue
-                            
-                            # Map icons based on category
-                            icon_map = {
-                                'Dry Ice': '🧊',
-                                'Chemicals': '🧪',
-                                'Packaging': '📦',
-                                'Equipment': '⚙️',
-                                'Safety': '🛡️',
-                                'Default': '📦'
-                            }
-                            category = row.get('ITEM_CATEGORY', 'Default')
-                            if pd.isna(category) or str(category).strip() == '':
-                                category = 'Default'
-                            icon = icon_map.get(category, icon_map['Default'])
-                            
-                            inventory_items[item_name] = {
-                                'icon': icon,
-                                'stock': stock,
-                                'reorder': reorder,
-                                'max': max(stock * 2, reorder * 3, 100),
-                                'unit': row.get('UNIT_OF_MEASURE', 'kg') if not pd.isna(row.get('UNIT_OF_MEASURE', 'kg')) else 'kg',
-                                'category': category if category else 'Uncategorized',
-                                'location': 'Warehouse',
-                                'price': price
-                            }
-                        except Exception as e:
-                            # Skip problematic rows
-                            continue
-                else:
-                    inventory_items = get_sample_inventory_data()
-            else:
-                inventory_items = get_sample_inventory_data()
+            
+            # Check authentication
+            if not gsheet.authenticate():
+                logger.warning("Google Sheets authentication failed. Using sample data.")
+                st.info("📊 Could not connect to Google Sheets. Using sample data for demonstration.")
+                return get_sample_inventory_data(), None
+            
+            logger.info("Google Sheets authentication successful. Fetching data...")
+            stock_df = gsheet.get_stock_with_pricing()
+            
+            # Check if data is empty
+            if stock_df.empty:
+                logger.warning("Google Sheets returned empty data. Using sample data.")
+                st.info("📊 No data found in Google Sheets. Using sample data for demonstration.")
+                return get_sample_inventory_data(), None
+            
+            logger.info(f"Retrieved {len(stock_df)} rows from Google Sheets")
+            
+            # Process the data with error handling for each row
+            processed_count = 0
+            skipped_count = 0
+            
+            for _, row in stock_df.iterrows():
+                try:
+                    # Get item name
+                    item_name = row.get('ITEM_NAME', 'Unknown')
+                    if not item_name or str(item_name).strip() == '':
+                        skipped_count += 1
+                        continue
+                    
+                    # Safe conversion for stock
+                    try:
+                        stock_val = row.get('QUANTITY', 0)
+                        if pd.isna(stock_val) or str(stock_val).strip() == '':
+                            stock = 0
+                        else:
+                            stock = float(stock_val)
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Error converting stock for {item_name}: {e}")
+                        stock = 0
+                    
+                    # Skip items with zero or negative stock
+                    if stock <= 0:
+                        skipped_count += 1
+                        continue
+                    
+                    # Safe conversion for reorder level
+                    try:
+                        reorder_val = row.get('REORDER LEVEL', 0)
+                        if pd.isna(reorder_val) or str(reorder_val).strip() == '':
+                            reorder = stock * 0.5
+                        else:
+                            reorder = float(reorder_val)
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Error converting reorder for {item_name}: {e}")
+                        reorder = stock * 0.5
+                    
+                    # Safe conversion for price
+                    try:
+                        price_val = row.get('UNIT PRICE', 0)
+                        if pd.isna(price_val) or str(price_val).strip() == '':
+                            price = 0
+                        else:
+                            price = float(price_val)
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Error converting price for {item_name}: {e}")
+                        price = 0
+                    
+                    # Map icons based on category
+                    icon_map = {
+                        'Dry Ice': '🧊',
+                        'Chemicals': '🧪',
+                        'Packaging': '📦',
+                        'Equipment': '⚙️',
+                        'Safety': '🛡️',
+                        'Default': '📦'
+                    }
+                    
+                    category = row.get('ITEM_CATEGORY', 'Default')
+                    if pd.isna(category) or str(category).strip() == '':
+                        category = 'Default'
+                    icon = icon_map.get(category, icon_map['Default'])
+                    
+                    # Get unit of measure
+                    unit = row.get('UNIT_OF_MEASURE', 'kg')
+                    if pd.isna(unit) or str(unit).strip() == '':
+                        unit = 'kg'
+                    
+                    # Create inventory item
+                    inventory_items[item_name] = {
+                        'icon': icon,
+                        'stock': stock,
+                        'reorder': reorder,
+                        'max': max(stock * 2, reorder * 3, 100),
+                        'unit': unit,
+                        'category': category if category else 'Uncategorized',
+                        'location': 'Warehouse',
+                        'price': price
+                    }
+                    processed_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing row for {row.get('ITEM_NAME', 'Unknown')}: {e}")
+                    skipped_count += 1
+                    continue
+            
+            logger.info(f"Processed {processed_count} items, skipped {skipped_count} items")
+            
+            # Check if we have any valid items
+            if not inventory_items:
+                logger.warning("No valid inventory items found after processing. Using sample data.")
+                st.warning("⚠️ No valid inventory items found in Google Sheets. Using sample data.")
+                return get_sample_inventory_data(), None
+            
+            logger.info(f"Successfully loaded {len(inventory_items)} inventory items")
+            return inventory_items, stock_df
+            
+        except Timeout as e:
+            logger.error(f"Timeout loading inventory: {e}")
+            st.warning("⏰ Request timed out. Using sample data for now.")
+            st.info("💡 Please check your internet connection and try again.")
+            return get_sample_inventory_data(), None
+            
+        except ConnectionError as e:
+            logger.error(f"Connection error loading inventory: {e}")
+            st.warning("🌐 Network error. Using sample data for now.")
+            st.info("💡 Please check your internet connection and try again.")
+            return get_sample_inventory_data(), None
+            
         except Exception as e:
-            st.warning(f"Could not load from Google Sheets: {e}. Using sample data.")
-            inventory_items = get_sample_inventory_data()
-        
-        if not inventory_items:
-            inventory_items = get_sample_inventory_data()
-        
-        return inventory_items, stock_df
-    
-    inventory_items, stock_df = load_inventory_data()
+            logger.error(f"Unexpected error loading inventory: {e}", exc_info=True)
+            st.warning("⚠️ Could not load from Google Sheets. Using sample data.")
+            st.info("💡 Please check your Google Sheets configuration and try again.")
+            return get_sample_inventory_data(), None
 
+    inventory_items, stock_df = load_inventory_data()
+    
     # Initialize session state for transactions
     if 'last_loaded_period' not in st.session_state or st.session_state.last_loaded_period != st.session_state.selected_period:
         print(f"Period changed. Loading transactions for {st.session_state.selected_period}...")
@@ -5319,6 +5510,9 @@ def main():
         initial_stock=current_stock,
         analyzer=analyzer
     )
+    # Initialize Service Status Manager
+    service_manager = ServiceStatusManager()
+    service_manager.show_service_status()
 
     # Initialize other components
     mobile_ui = MobileInterface()
@@ -5376,7 +5570,6 @@ def main():
 
     # ============================================================
     # SECTION 2: UPDATE INVENTORY (Container Style)
-    # ============================================================
     st.sidebar.markdown("""
     <div style="
         border: 2px solid #81c784;
@@ -5399,40 +5592,203 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
-    # Record Usage
+    # ============================================================
+    # RECORD USAGE - ENHANCED WITH VALIDATION
+    # ============================================================
+    st.sidebar.markdown("#### 📤 Record Usage")
+
+    # Date input with validation
     usage_date = st.sidebar.date_input("Usage Date", value=datetime.today())
-    usage = st.sidebar.number_input("Quantity Used (kg)", min_value=0, value=150, step=10)
 
-    if st.sidebar.button("Record Usage"):
-        alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date) or None
-        add_transaction_to_history("usage", usage, "Daily Consumption", usage_date, st.session_state.selected_period)
-        if alert is not None:
-            st.sidebar.error(alert["message"])
+    # Use safe number input with validation
+    usage = safe_number_input(
+        "Quantity Used (kg)",
+        min_value=0.0,
+        max_value=10000.0,
+        value=150.0,
+        step=10.0,
+        validate=True,
+        key="usage_qty"
+    )
+
+    # Show current stock
+    current_stock_val = inventory_tracker.current_stock
+    st.sidebar.caption(f"📊 Available: {current_stock_val:,.0f} kg")
+
+    # Validate stock sufficiency in real-time
+    if usage is not None and usage > 0:
+        is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+        if not is_valid:
+            st.sidebar.error(msg)
+        elif "Warning" in msg:
+            st.sidebar.warning(msg)
         else:
-            st.sidebar.success(f"Usage of {usage} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
+            st.sidebar.success(msg)
 
-    # Record Receipt
+    # Record Usage button with comprehensive validation
+    if st.sidebar.button("Record Usage", type="primary"):
+        # Validate quantity
+        if usage is None or usage <= 0:
+            st.sidebar.error("❌ Please enter a valid quantity")
+            return
+        
+        # Re-validate stock sufficiency
+        is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+        if not is_valid:
+            st.sidebar.error(msg)
+            return
+        
+        # Confirm large usage (>500kg)
+        if usage > 500:
+            if not st.sidebar.checkbox("☑️ Confirm large usage (>500kg)", key="confirm_large_usage"):
+                st.sidebar.warning("⚠️ Please confirm large usage before proceeding")
+                return
+        
+        # Process the usage with comprehensive error handling
+        try:
+            alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
+            add_transaction_to_history(
+                "usage", 
+                usage, 
+                "Daily Consumption", 
+                usage_date, 
+                st.session_state.selected_period
+            )
+            
+            if alert is not None:
+                st.sidebar.error(alert["message"])
+            else:
+                st.sidebar.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
+                
+                # Show new stock level
+                new_stock = inventory_tracker.current_stock
+                st.sidebar.info(f"📊 New stock level: {new_stock:,.0f} kg")
+                
+                # Suggest reorder if low
+                if new_stock < safety_stock:
+                    st.sidebar.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
+                    
+        except Exception as e:
+            logger.error(f"Failed to record usage: {e}", exc_info=True)
+            st.sidebar.error("❌ Failed to record usage. Please try again.")
+
+    st.sidebar.markdown("---")
+
+    # ============================================================
+    # RECORD RECEIPT - ENHANCED WITH VALIDATION
+    st.sidebar.markdown("#### 📥 Record Receipt")
+
+    # Date input with validation
     receipt_date = st.sidebar.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
-    new_stock = st.sidebar.number_input("New Stock Received (kg)", min_value=0, value=0, step=50)
 
-    if st.sidebar.button("Record Receipt"):
-        correct_period = get_period_from_date(receipt_date)
-        inventory_tracker.current_stock += new_stock
-        update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
-        add_transaction_to_history(
-            transaction_type="receipt",
-            quantity=new_stock,
-            description="Stock Receipt",
-            date=receipt_date,
-            period=correct_period
-        )
-        st.sidebar.success(
-            f"Order for {new_stock} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
-            f"It has been automatically assigned to the {correct_period} period."
-        )
-        if st.session_state.selected_period != correct_period:
-            st.session_state.selected_period = correct_period
-            st.sidebar.info(f"Dashboard view switched to {correct_period} to show your new entry.")
+    # Show current stock for context
+    current_stock_val = inventory_tracker.current_stock
+    st.sidebar.caption(f"📊 Current stock: {current_stock_val:,.0f} kg")
+
+    # Use safe number input with validation
+    new_stock = safe_number_input(
+        "New Stock Received (kg)",
+        min_value=0.0,
+        max_value=100000.0,
+        value=0.0,
+        step=50.0,
+        validate=True,
+        key="receipt_qty"
+    )
+
+    # Real-time validation feedback
+    if new_stock is not None and new_stock > 0:
+        # Calculate what new stock will be
+        new_total = current_stock_val + new_stock
+        st.sidebar.info(f"📊 New stock after receipt: {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+        
+        # Warn about very large receipts
+        if new_stock > 1000:
+            st.sidebar.warning(f"⚠️ Large receipt: {new_stock:.0f} kg. Please confirm below.")
+        
+        # Show if stock will exceed max recommended
+        max_recommended = safety_stock * 3  # Assuming safety_stock is defined
+        if new_total > max_recommended:
+            st.sidebar.warning(f"⚠️ New stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+
+    # Validate date
+    if receipt_date:
+        is_valid, msg = validate_date(receipt_date, allow_future=False)
+        if not is_valid:
+            st.sidebar.error(msg)
+
+    # Record Receipt button with comprehensive validation
+    if st.sidebar.button("Record Receipt", type="primary"):
+        # Validate quantity
+        if new_stock is None or new_stock <= 0:
+            st.sidebar.error("❌ Please enter a valid quantity greater than 0")
+            return
+        
+        # Validate date
+        is_valid, msg = validate_date(receipt_date, allow_future=False)
+        if not is_valid:
+            st.sidebar.error(msg)
+            return
+        
+        # Confirm large receipt (>1000kg)
+        if new_stock > 1000:
+            if not st.sidebar.checkbox("☑️ Confirm large receipt (>1000kg)", key="confirm_large_receipt"):
+                st.sidebar.warning("⚠️ Please confirm large receipt before proceeding")
+                return
+        
+        # Process the receipt with comprehensive error handling
+        try:
+            # Get the correct period for the receipt date
+            correct_period = get_period_from_date(receipt_date)
+            
+            # Store old stock for reference
+            old_stock = inventory_tracker.current_stock
+            
+            # Update stock
+            inventory_tracker.current_stock += new_stock
+            update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
+            
+            # Add to transaction history
+            add_transaction_to_history(
+                transaction_type="receipt",
+                quantity=new_stock,
+                description="Stock Receipt",
+                date=receipt_date,
+                period=correct_period
+            )
+            
+            # Show success message with details
+            st.sidebar.success(
+                f"✅ Order for {new_stock:.0f} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
+                f"It has been automatically assigned to the {correct_period} period."
+            )
+            
+            # Show new stock level with change
+            new_total = inventory_tracker.current_stock
+            st.sidebar.info(f"📊 Stock updated: {old_stock:,.0f} → {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+            
+            # Check if stock is now too high
+            max_recommended = safety_stock * 3
+            if new_total > max_recommended:
+                st.sidebar.warning(f"⚠️ Stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+                st.sidebar.info("💡 Consider reducing future orders or increasing usage")
+            
+            # Switch period if needed
+            if st.session_state.selected_period != correct_period:
+                st.session_state.selected_period = correct_period
+                st.sidebar.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
+                
+        except ValidationError as e:
+            st.sidebar.error(f"❌ Validation Error: {e}")
+            
+        except DatabaseError as e:
+            st.sidebar.error(f"⚠️ Database Error: {e}")
+            st.sidebar.info("💡 Your data was saved locally. It will sync when the cloud is available.")
+            
+        except Exception as e:
+            logger.error(f"Failed to record receipt: {e}", exc_info=True)
+            st.sidebar.error("❌ Failed to record receipt. Please try again.")
+            st.sidebar.info("💡 If the problem persists, please contact support.")
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
