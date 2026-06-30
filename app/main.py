@@ -59,6 +59,20 @@ from core.performance import (
     free_memory,
     get_memory_usage
 )
+# Add these to your existing imports
+from core.security import (
+    AuthManager,
+    AuditLogger,
+    DataEncryption,
+    SessionManager,
+    ApiKeyManager,
+    require_auth,
+    require_permission,
+    require_role,
+    secure_endpoint,
+    render_security_dashboard
+)
+from core.security import require_auth, require_permission, AuditLogger, AuthManager
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
@@ -681,33 +695,74 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ============================================================
+# CLEAR TRANSACTIONS - ADMIN ONLY WITH AUDIT LOGGING
+@require_role('admin')
 def clear_transactions_from_db():
-        """
-        Permanently delete all records from the transactions, inventory,
-        AND historical_orders tables to perform a full reset.
-        """
-        conn = sqlite3.connect('dry_ice.db')
-        c = conn.cursor()
+    """
+    Permanently delete all records from the transactions, inventory,
+    AND historical_orders tables to perform a full reset.
+    
+    🔐 This function is restricted to ADMIN users only.
+    """
+    # ============================================================
+    # 🔐 AUDIT LOGGING
+    # ============================================================
+    from core.security import AuditLogger, AuthManager
+    
+    audit = AuditLogger()
+    auth = AuthManager()
+    
+    audit.log(
+        action='CLEAR_ALL_TRANSACTIONS',
+        details="User initiated full data deletion",
+        user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+    )
+    
+    conn = sqlite3.connect('dry_ice.db')
+    c = conn.cursor()
 
-        try:
-            # Use DELETE to empty the tables. This is a permanent action.
-            c.execute('DELETE FROM transactions')
-            c.execute('DELETE FROM inventory')
-            c.execute('DELETE FROM historical_orders') # --- ADD THIS LINE ---
+    try:
+        # Use DELETE to empty the tables. This is a permanent action.
+        c.execute('DELETE FROM transactions')
+        c.execute('DELETE FROM inventory')
+        c.execute('DELETE FROM historical_orders') # --- ADD THIS LINE ---
 
-            # Good practice: Reset the auto-increment counter for the primary keys
-            c.execute('DELETE FROM sqlite_sequence WHERE name="transactions"')
-            c.execute('DELETE FROM sqlite_sequence WHERE name="inventory"')
-            c.execute('DELETE FROM sqlite_sequence WHERE name="historical_orders"') # --- AND THIS LINE ---
+        # Good practice: Reset the auto-increment counter for the primary keys
+        c.execute('DELETE FROM sqlite_sequence WHERE name="transactions"')
+        c.execute('DELETE FROM sqlite_sequence WHERE name="inventory"')
+        c.execute('DELETE FROM sqlite_sequence WHERE name="historical_orders"') # --- AND THIS LINE ---
 
-            conn.commit()
-            # The success message is now part of the button logic, so it's okay to remove it here
+        conn.commit()
+        
+        # ============================================================
+        # 🔐 AUDIT LOGGING - SUCCESS
+        # ============================================================
+        audit.log(
+            action='CLEAR_ALL_TRANSACTIONS_SUCCESS',
+            details="All transactions, inventory, and historical orders cleared successfully",
+            user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+        )
+        
+        # The success message is now part of the button logic, so it's okay to remove it here
 
-        except sqlite3.Error as e:
-            st.error(f"Database error while clearing transactions: {e}")
-        finally:
-            conn.close()
+    except sqlite3.Error as e:
+        # ============================================================
+        # 🔐 AUDIT LOGGING - ERROR
+        # ============================================================
+        audit.log(
+            action='CLEAR_ALL_TRANSACTIONS_ERROR',
+            details=f"Error: {str(e)}",
+            user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+        )
+        st.error(f"Database error while clearing transactions: {e}")
+    finally:
+        conn.close()
+# COMPLETE FUNCTION WITH SECURITY DECORATORS
+# ============================================================
 
+@require_auth
+@require_permission('record_receipt')
 @safe_operation(error_message="Failed to add transaction")
 def add_transaction_to_db(transaction_type, quantity, description, date, period):
     """
@@ -726,9 +781,25 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
     Raises:
         ValidationError: If input validation fails
         DatabaseError: If database operation fails
+    
+    🔐 This function requires authentication and 'record_receipt' permission.
     """
     
+    # ============================================================
+    # 🔐 AUDIT LOGGING
+    # ============================================================
+    audit = AuditLogger()
+    auth = AuthManager()
+    
+    audit.log(
+        action='RECORD_RECEIPT',
+        details=f"Transaction: {transaction_type}, Quantity: {quantity}kg, Date: {date}, Period: {period}",
+        user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+    )
+    
+    # ============================================================
     # STEP 1: VALIDATE INPUTS
+    # ============================================================
     # Validate quantity
     is_valid, msg = validate_quantity(quantity, min_qty=0, max_qty=100000, allow_zero=False)
     if not is_valid:
@@ -746,7 +817,9 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
     logger.info(f"Processing {transaction_type} transaction: {quantity} kg on {date}")
     
     
-    # STEP 2: TRY SUPABASE FIRST (if enabled)  
+    # ============================================================
+    # STEP 2: TRY SUPABASE FIRST (if enabled)
+    # ============================================================
     if USE_SUPABASE:
         try:
             supabase = init_supabase()
@@ -807,6 +880,15 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
                     supabase.table('historical_orders').insert(order_data).execute()
                     logger.info(f"Historical order recorded (Supabase): {quantity} kg")
                 
+                # ============================================================
+                # 🔐 AUDIT LOGGING - SUCCESS
+                # ============================================================
+                audit.log(
+                    action='RECORD_RECEIPT_SUCCESS',
+                    details=f"Transaction ID: {transaction_id}, New stock: {new_stock}kg",
+                    user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                )
+                
                 return transaction_id
                 
         except ValidationError:
@@ -818,7 +900,9 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
             # Fall through to SQLite
     
 
-    # STEP 3: FALLBACK TO SQLITE (with safe operation) 
+    # ============================================================
+    # STEP 3: FALLBACK TO SQLITE (with safe operation)
+    # ============================================================
     def sqlite_operation():
         """Execute SQLite transaction with proper error handling."""
         conn = None
@@ -880,6 +964,16 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
             
             conn.commit()
             logger.info(f"SQLite transaction completed: {transaction_id}")
+            
+            # ============================================================
+            # 🔐 AUDIT LOGGING - SQLITE SUCCESS
+            # ============================================================
+            audit.log(
+                action='RECORD_RECEIPT_SQLITE',
+                details=f"Transaction ID: {transaction_id}, New stock: {new_stock}kg",
+                user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+            )
+            
             return transaction_id
             
         except sqlite3.IntegrityError as e:
@@ -5102,6 +5196,18 @@ def main():
         st.session_state.db_initialized = True
         print("✅ Database initialized")
 
+    # 🔐 INITIALIZE AUTHENTICATION 
+    # ============================================================
+    from core.security import AuthManager, SessionManager
+    
+    auth = AuthManager()
+    session = SessionManager()
+    
+    # Check session validity
+    if not session.validate_session():
+        # Session expired, force logout
+        auth.logout()
+
     # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     st.sidebar.markdown("""
     <div style="
@@ -5117,6 +5223,21 @@ def main():
         <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
     </div>
     """, unsafe_allow_html=True)
+
+    # 🔐 AUTHENTICATION SECTION
+    # ============================================================
+    from core.security import AuthManager
+
+    auth = AuthManager()
+
+    # Show login form or user info
+    auth.render_login_form()
+
+    # ============================================================
+    # 🔐 SECURITY DASHBOARD (Admin Only)
+    if auth.is_authenticated and auth.current_role == 'admin':
+        if st.sidebar.button("🛡️ Security Dashboard", use_container_width=True):
+            st.session_state.show_security_dashboard = True
 
     # ============================================================
     # VIEW MODE SELECTOR 
@@ -5627,7 +5748,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # RECORD USAGE - ENHANCED WITH VALIDATION
+    # RECORD USAGE - ENHANCED WITH VALIDATION & SECURITY
     # ============================================================
     st.sidebar.markdown("#### 📤 Record Usage")
 
@@ -5643,7 +5764,7 @@ def main():
         step=10.0,
         validate=True,
         key="usage_qty",
-        container=st.sidebar  # ← ADD THIS LINE
+        container=st.sidebar
     )
 
     # Show current stock
@@ -5660,8 +5781,23 @@ def main():
         else:
             st.sidebar.success(msg)
 
-    # Record Usage button with comprehensive validation
+    # ============================================================
+    # RECORD USAGE BUTTON WITH SECURITY & VALIDATION
+    # ============================================================
     if st.sidebar.button("Record Usage", type="primary"):
+        # ============================================================
+        # 🔐 AUTHENTICATION CHECK
+        # ============================================================
+        from core.security import AuthManager, AuditLogger
+        
+        auth = AuthManager()
+        if not auth.is_authenticated:
+            st.sidebar.error("🔒 Please login to record usage")
+            return
+        if not auth.check_permission('record_usage'):
+            st.sidebar.error("⛔ You don't have permission to record usage")
+            return
+        
         # Validate quantity
         if usage is None or usage <= 0:
             st.sidebar.error("❌ Please enter a valid quantity")
@@ -5681,6 +5817,16 @@ def main():
         
         # Process the usage with comprehensive error handling
         try:
+            # ============================================================
+            # 🔐 AUDIT LOGGING
+            # ============================================================
+            audit = AuditLogger()
+            audit.log(
+                action='RECORD_USAGE',
+                details=f"Usage: {usage}kg, Date: {usage_date}",
+                user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+            )
+            
             alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
             add_transaction_to_history(
                 "usage", 
@@ -5693,6 +5839,15 @@ def main():
             if alert is not None:
                 st.sidebar.error(alert["message"])
             else:
+                # ============================================================
+                # 🔐 AUDIT LOGGING - SUCCESS
+                # ============================================================
+                audit.log(
+                    action='RECORD_USAGE_SUCCESS',
+                    details=f"Usage: {usage}kg recorded successfully, New stock: {inventory_tracker.current_stock}kg",
+                    user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                )
+                
                 st.sidebar.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
                 
                 # Show new stock level
@@ -5702,7 +5857,7 @@ def main():
                 # Suggest reorder if low
                 if new_stock < safety_stock:
                     st.sidebar.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
-                        
+                    
         except Exception as e:
             logger.error(f"Failed to record usage: {e}", exc_info=True)
             st.sidebar.error("❌ Failed to record usage. Please try again.")
@@ -6021,9 +6176,35 @@ def main():
         key="report_type_sidebar"
     )
 
+    # ============================================================
+    # GENERATE REPORT BUTTON WITH SECURITY & VALIDATION
+    # ============================================================
     if st.sidebar.button("Generate Report", type="primary"):
+        # ============================================================
+        # 🔐 AUTHENTICATION CHECK
+        # ============================================================
+        from core.security import AuthManager, AuditLogger
+        
+        auth = AuthManager()
+        if not auth.is_authenticated:
+            st.sidebar.error("🔒 Please login to generate reports")
+            return
+        if not auth.check_permission('view_reports'):
+            st.sidebar.error("⛔ You don't have permission to view reports")
+            return
+        
         with st.spinner(f"Generating {report_type}..."):
             try:
+                # ============================================================
+                # 🔐 AUDIT LOGGING
+                # ============================================================
+                audit = AuditLogger()
+                audit.log(
+                    action='GENERATE_REPORT',
+                    details=f"Report type: {report_type}",
+                    user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                )
+                
                 report_path = None
                 
                 if report_type == "❄️ Dry Ice Report (Legacy)":
@@ -6084,6 +6265,15 @@ def main():
                         st.sidebar.error("No inventory data available.")
                 
                 if report_path:
+                    # ============================================================
+                    # 🔐 AUDIT LOGGING - SUCCESS
+                    # ============================================================
+                    audit.log(
+                        action='GENERATE_REPORT_SUCCESS',
+                        details=f"Report type: {report_type} generated successfully",
+                        user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                    )
+                    
                     with open(report_path, "rb") as f:
                         st.sidebar.download_button(
                             label="📥 Download Report",
@@ -6096,6 +6286,14 @@ def main():
                     st.sidebar.error("Failed to generate report.")
                     
             except Exception as e:
+                # ============================================================
+                # 🔐 AUDIT LOGGING - ERROR
+                # ============================================================
+                audit.log(
+                    action='GENERATE_REPORT_ERROR',
+                    details=f"Report type: {report_type}, Error: {str(e)}",
+                    user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                )
                 st.sidebar.error(f"Error generating report: {str(e)}")
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
