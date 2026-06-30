@@ -415,10 +415,21 @@ def safe_number_input(
     default: float = None,
     step: float = 10.0,
     validate: bool = True,
+    allow_zero: bool = True,
     **kwargs
 ) -> Optional[float]:
     """
     Safe number input with validation.
+    
+    Args:
+        label: Input label
+        min_value: Minimum allowed value
+        max_value: Maximum allowed value
+        default: Default value
+        step: Step increment
+        validate: Whether to validate input
+        allow_zero: Whether zero is allowed (default: True)
+        **kwargs: Additional arguments passed to st.number_input
     
     Returns:
         Validated number or None if invalid
@@ -436,12 +447,12 @@ def safe_number_input(
     )
     
     if validate:
-        is_valid, message = validate_quantity(value, min_value, max_value)
+        is_valid, msg = validate_quantity(value, min_value, max_value, allow_zero=allow_zero)
         if not is_valid:
-            st.error(message)
+            st.error(msg)
             return None
-        elif "Warning" in message:
-            st.warning(message)
+        elif "Warning" in msg:
+            st.warning(msg)
     
     return value
 
