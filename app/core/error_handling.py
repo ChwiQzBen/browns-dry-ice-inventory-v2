@@ -362,14 +362,14 @@ class ServiceStatusManager:
             st.sidebar.caption(f"🕐 Last check: {self.last_check_time.strftime('%H:%M:%S')}")
 
 # ============================================================
-# SAFE INPUT FUNCTIONS - FIXED
+# SAFE INPUT FUNCTIONS - FIXED WITH CONTAINER SUPPORT
 # ============================================================
 
 def safe_number_input(
     label: str,
     min_value: float = 0.0,
     max_value: float = 10000.0,
-    value: float = None,  # ← FIXED: Changed from 'default' to 'value'
+    value: float = None,
     step: float = 10.0,
     validate: bool = True,
     allow_zero: bool = True,
@@ -377,6 +377,7 @@ def safe_number_input(
     help: str = None,
     disabled: bool = False,
     placeholder: str = None,
+    container=None,  # ← ADDED CONTAINER PARAMETER
     **kwargs
 ) -> Optional[float]:
     """
@@ -394,6 +395,7 @@ def safe_number_input(
         help: Help text
         disabled: Whether the widget is disabled
         placeholder: Placeholder text
+        container: Streamlit container (e.g., st.sidebar, st.columns[0])
         **kwargs: Additional arguments
     
     Returns:
@@ -408,27 +410,50 @@ def safe_number_input(
     kwargs.pop('help', None)
     kwargs.pop('disabled', None)
     kwargs.pop('placeholder', None)
+    kwargs.pop('container', None)  # ← Remove container from kwargs
     
-    result = st.number_input(
-        label=label,
-        min_value=min_value,
-        max_value=max_value,
-        value=value,
-        step=step,
-        key=key,
-        help=help,
-        disabled=disabled,
-        placeholder=placeholder,
-        **kwargs
-    )
+    # Use container if provided, otherwise use st
+    if container is not None:
+        result = container.number_input(
+            label=label,
+            min_value=min_value,
+            max_value=max_value,
+            value=value,
+            step=step,
+            key=key,
+            help=help,
+            disabled=disabled,
+            placeholder=placeholder,
+            **kwargs
+        )
+    else:
+        result = st.number_input(
+            label=label,
+            min_value=min_value,
+            max_value=max_value,
+            value=value,
+            step=step,
+            key=key,
+            help=help,
+            disabled=disabled,
+            placeholder=placeholder,
+            **kwargs
+        )
     
     if validate:
         is_valid, msg = validate_quantity(result, min_value, max_value, allow_zero=allow_zero)
         if not is_valid:
-            st.error(msg)
+            # Use appropriate container for error messages
+            if container is not None:
+                container.error(msg)
+            else:
+                st.error(msg)
             return None
         elif "Warning" in msg:
-            st.warning(msg)
+            if container is not None:
+                container.warning(msg)
+            else:
+                st.warning(msg)
     
     return result
 

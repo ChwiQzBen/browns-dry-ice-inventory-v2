@@ -5608,7 +5608,8 @@ def main():
         value=150.0,
         step=10.0,
         validate=True,
-        key="usage_qty"
+        key="usage_qty",
+        container=st.sidebar  # ← ADD THIS LINE
     )
 
     # Show current stock
@@ -5667,7 +5668,7 @@ def main():
                 # Suggest reorder if low
                 if new_stock < safety_stock:
                     st.sidebar.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
-                    
+                        
         except Exception as e:
             logger.error(f"Failed to record usage: {e}", exc_info=True)
             st.sidebar.error("❌ Failed to record usage. Please try again.")
@@ -5693,7 +5694,8 @@ def main():
         value=0.0,
         step=50.0,
         validate=True,
-        key="receipt_qty"
+        key="receipt_qty",
+        container=st.sidebar  # ← ADD THIS LINE
     )
 
     # Real-time validation feedback
