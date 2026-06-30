@@ -60,12 +60,6 @@ def retry_on_failure(
 ):
     """
     Decorator to retry a function on failure with exponential backoff.
-    
-    Args:
-        max_attempts: Maximum number of retry attempts
-        delay: Initial delay in seconds
-        backoff: Multiplier for delay (exponential backoff)
-        exceptions: Tuple of exceptions to catch and retry
     """
     def decorator(func):
         @wraps(func)
@@ -139,15 +133,6 @@ def validate_date(
 ) -> Tuple[bool, str]:
     """
     Validate a date value.
-    
-    Args:
-        date_val: Date to validate
-        min_date: Minimum allowed date
-        max_date: Maximum allowed date
-        allow_future: Whether future dates are allowed
-    
-    Returns:
-        Tuple of (is_valid, error_message)
     """
     from datetime import datetime
     
@@ -171,13 +156,6 @@ def validate_stock_sufficient(
 ) -> Tuple[bool, str]:
     """
     Validate that sufficient stock is available.
-    
-    Args:
-        requested: Quantity requested
-        available: Quantity available
-    
-    Returns:
-        Tuple of (is_valid, error_message)
     """
     if requested > available:
         return False, f"❌ Insufficient stock! Available: {available:,.0f} kg"
@@ -199,15 +177,6 @@ def safe_db_operation(
 ) -> Any:
     """
     Execute a database operation with comprehensive error handling.
-    
-    Args:
-        operation: Function to execute
-        fallback_value: Value to return on failure
-        show_error: Whether to show error to user
-        error_title: Title for error message
-    
-    Returns:
-        Result of operation or fallback_value
     """
     try:
         return operation()
@@ -270,7 +239,6 @@ class ServiceStatusManager:
         """Check if Supabase is available."""
         try:
             from supabase import create_client
-            import streamlit as st
             
             url = st.secrets.get("SUPABASE_URL")
             key = st.secrets.get("SUPABASE_KEY")
@@ -280,7 +248,6 @@ class ServiceStatusManager:
                 return False
             
             client = create_client(url, key)
-            # Test with a simple query
             client.table('transactions').select('id').limit(1).execute()
             
             self.services['supabase']['status'] = 'healthy'
@@ -297,12 +264,8 @@ class ServiceStatusManager:
         """Check if SQLite is available."""
         try:
             import sqlite3
-            import os
             
-            db_file = 'dry_ice.db'
-            
-            # Try to connect
-            conn = sqlite3.connect(db_file)
+            conn = sqlite3.connect('dry_ice.db')
             cursor = conn.cursor()
             cursor.execute('SELECT 1')
             conn.close()
@@ -346,7 +309,6 @@ class ServiceStatusManager:
         
         self.last_check_time = datetime.now()
         
-        # Determine current mode
         if supabase_ok:
             self.current_mode = 'cloud'
         elif sqlite_ok:
@@ -368,7 +330,6 @@ class ServiceStatusManager:
         st.sidebar.markdown("---")
         st.sidebar.markdown("### 🔗 Service Status")
         
-        # Supabase status
         if self.services['supabase']['status'] == 'healthy':
             st.sidebar.success("☁️ Supabase: Connected")
         else:
@@ -376,19 +337,16 @@ class ServiceStatusManager:
             if self.services['supabase']['error']:
                 st.sidebar.caption(f"Error: {self.services['supabase']['error'][:50]}...")
         
-        # SQLite status
         if self.services['sqlite']['status'] == 'healthy':
             st.sidebar.success("💾 SQLite: Connected")
         else:
             st.sidebar.error("💾 SQLite: Disconnected (Critical!)")
         
-        # Google Sheets status
         if self.services['google_sheets']['status'] == 'healthy':
             st.sidebar.success("📊 Google Sheets: Connected")
         else:
             st.sidebar.warning("📊 Google Sheets: Not connected")
         
-        # Mode indicator
         st.sidebar.markdown("---")
         if self.current_mode == 'cloud':
             st.sidebar.info("🌐 Mode: Cloud Connected")
@@ -400,22 +358,25 @@ class ServiceStatusManager:
             st.sidebar.error("❌ Mode: Offline")
             st.sidebar.caption("⚠️ Limited functionality available")
         
-        # Last check time
         if self.last_check_time:
             st.sidebar.caption(f"🕐 Last check: {self.last_check_time.strftime('%H:%M:%S')}")
 
 # ============================================================
-# SAFE INPUT FUNCTIONS
+# SAFE INPUT FUNCTIONS - FIXED
 # ============================================================
 
 def safe_number_input(
     label: str,
     min_value: float = 0.0,
     max_value: float = 10000.0,
-    default: float = None,
+    value: float = None,  # ← FIXED: Changed from 'default' to 'value'
     step: float = 10.0,
     validate: bool = True,
     allow_zero: bool = True,
+    key: str = None,
+    help: str = None,
+    disabled: bool = False,
+    placeholder: str = None,
     **kwargs
 ) -> Optional[float]:
     """
@@ -425,36 +386,51 @@ def safe_number_input(
         label: Input label
         min_value: Minimum allowed value
         max_value: Maximum allowed value
-        default: Default value
+        value: Default value (Streamlit standard parameter name)
         step: Step increment
         validate: Whether to validate input
         allow_zero: Whether zero is allowed (default: True)
-        **kwargs: Additional arguments passed to st.number_input
+        key: Unique key for the widget
+        help: Help text
+        disabled: Whether the widget is disabled
+        placeholder: Placeholder text
+        **kwargs: Additional arguments
     
     Returns:
         Validated number or None if invalid
     """
-    if default is None:
-        default = min_value
+    if value is None:
+        value = min_value
     
-    value = st.number_input(
-        label,
+    # Remove any conflicting kwargs
+    kwargs.pop('value', None)
+    kwargs.pop('key', None)
+    kwargs.pop('help', None)
+    kwargs.pop('disabled', None)
+    kwargs.pop('placeholder', None)
+    
+    result = st.number_input(
+        label=label,
         min_value=min_value,
         max_value=max_value,
-        value=default,
+        value=value,
         step=step,
+        key=key,
+        help=help,
+        disabled=disabled,
+        placeholder=placeholder,
         **kwargs
     )
     
     if validate:
-        is_valid, msg = validate_quantity(value, min_value, max_value, allow_zero=allow_zero)
+        is_valid, msg = validate_quantity(result, min_value, max_value, allow_zero=allow_zero)
         if not is_valid:
             st.error(msg)
             return None
         elif "Warning" in msg:
             st.warning(msg)
     
-    return value
+    return result
 
 def safe_text_input(
     label: str,
