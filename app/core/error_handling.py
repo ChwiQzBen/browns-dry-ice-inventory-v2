@@ -327,9 +327,6 @@ class ServiceStatusManager:
         """Display service status in the UI."""
         self.check_all_services()
         
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 🔗 Service Status")
-        
         if self.services['supabase']['status'] == 'healthy':
             st.sidebar.success("☁️ Supabase: Connected")
         else:
