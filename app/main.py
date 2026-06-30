@@ -5510,10 +5510,7 @@ def main():
         initial_stock=current_stock,
         analyzer=analyzer
     )
-    # Initialize Service Status Manager
-    service_manager = ServiceStatusManager()
-    service_manager.show_service_status()
-
+    
     # Initialize other components
     mobile_ui = MobileInterface()
     #alerts_system = SmartAlerts(inventory_tracker)
@@ -6206,10 +6203,38 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # 🔗 SERVICE STATUS - COMPACT TEAL CONTAINER
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border: 2px solid #26a69a;
+        border-radius: 12px;
+        padding: 10px 15px;
+        margin-bottom: 10px;
+        background: rgba(38, 166, 154, 0.05);
+    ">
+        <div style="
+            background: #26a69a;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+        ">
+            🔗 Service Status
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Initialize Service Status Manager and show status
+    service_manager = ServiceStatusManager()
+    service_manager.show_service_status()
+
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
     # ============================================================
     # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
-    # ============================================================
-
     # Calculate monthly savings and percentage
     monthly_savings = annual_transport_savings / 12
     monthly_transport_cost = (current_monthly_orders * constants.TRANSPORT_COST)
