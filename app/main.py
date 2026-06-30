@@ -49,6 +49,16 @@ from core.error_handling import (
 )
 # External imports for error handling
 from requests.exceptions import Timeout, ConnectionError
+from core.performance import (
+    Paginator,
+    paginate_dataframe,
+    LazyLoader,
+    optimize_session_state,
+    compress_dataframe,
+    optimize_table_display,
+    free_memory,
+    get_memory_usage
+)
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
@@ -5069,6 +5079,21 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = value
 
+    # 🚀 OPTIMIZE SESSION STATE
+    # Remove unnecessary large data from session state
+    try:
+        optimize_session_state()
+        logger.info("Session state optimized")
+    except Exception as e:
+        logger.warning(f"Session state optimization skipped: {e}")
+    
+    # Log memory usage
+    try:
+        memory_mb = get_memory_usage()
+        logger.info(f"💾 Memory usage at startup: {memory_mb:.1f} MB")
+    except Exception as e:
+        logger.warning(f"Memory usage logging skipped: {e}")
+
     if not st.session_state.db_initialized:
         init_db()
         fix_order_date()
@@ -5188,20 +5213,13 @@ def main():
     kpis = analyzer.calculate_kpis(period=st.session_state.selected_period)
     # Initialize advanced analytics
     analytics = AdvancedAnalytics() 
+
    # Try to load from Google Sheets first
     @st.cache_data(ttl=600)
     @safe_operation(error_message="Failed to load inventory data")
     def load_inventory_data():
         """
         Load inventory data from Google Sheets with comprehensive error handling.
-        
-        Returns:
-            tuple: (inventory_items dict, stock_df DataFrame)
-            
-        Raises:
-            Timeout: If Google Sheets request times out
-            ConnectionError: If network connection fails
-            Exception: For any other unexpected errors
         """
         inventory_items = {}
         stock_df = None
@@ -5218,6 +5236,25 @@ def main():
             
             logger.info("Google Sheets authentication successful. Fetching data...")
             stock_df = gsheet.get_stock_with_pricing()
+            
+            # ============================================================
+            # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
+            # ============================================================
+            if not stock_df.empty:
+                original_size = len(stock_df)
+                original_memory = stock_df.memory_usage(deep=True).sum() / 1024 / 1024
+                
+                stock_df = compress_dataframe(stock_df)
+                
+                compressed_memory = stock_df.memory_usage(deep=True).sum() / 1024 / 1024
+                reduction = ((original_memory - compressed_memory) / original_memory) * 100
+                
+                logger.info(f"📊 Stock DataFrame compressed: {original_size} rows")
+                logger.info(f"💾 Memory: {original_memory:.1f}MB → {compressed_memory:.1f}MB (↓{reduction:.0f}%)")
+            else:
+                logger.warning("Google Sheets returned empty data. Using sample data.")
+                st.info("📊 No data found in Google Sheets. Using sample data for demonstration.")
+                return get_sample_inventory_data(), None
             
             # Check if data is empty
             if stock_df.empty:
@@ -6171,37 +6208,29 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
+    # --- OPTIMIZE DATA DISPLAY ---
+    # Show only summary stats, not full data
     sidebar_start_str = display_start_date.strftime('%d/%m/%Y')
     sidebar_end_str = display_end_date.strftime('%d/%m/%Y')
 
+    # Use len(df) efficiently
+    total_orders = len(df) if df is not None else 0
+    data_points = df.shape[0] if df is not None and hasattr(df, 'shape') else 0
+
     st.sidebar.write(f"**Analysis Period:** {sidebar_start_str} to {sidebar_end_str}")
-    st.sidebar.write(f"**Total Orders:** {len(df):,}")
-    st.sidebar.write(f"**Data Points:** {df.shape[0]:,}")
+    st.sidebar.write(f"**Total Orders:** {total_orders:,}")
+    st.sidebar.write(f"**Data Points:** {data_points:,}")
+
+    # ============================================================
+    # 🆕 SHOW MEMORY USAGE (Enterprise Monitoring)
+    # ============================================================
+    try:
+        memory_mb = get_memory_usage()
+        st.sidebar.caption(f"💾 Memory: {memory_mb:.0f} MB")
+    except:
+        pass
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
-
-    # ============================================================
-    # SECTION 9: FOOTER (Container Style) - INCREASED FONT SIZES
-    # ============================================================
-    st.sidebar.markdown("""
-    <div style="
-        border-radius: 12px;
-        padding: 18px 15px;
-        text-align: center;
-        background: rgba(0,0,0,0.03);
-        border: 1px solid rgba(0,0,0,0.05);
-    ">
-        <div style="font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px;">
-            🧀 Browns Cheese
-        </div>
-        <div style="font-size: 14px; color: #666; margin-top: 4px;">
-            Dry Ice Management System
-        </div>
-        <div style="font-size: 13px; color: #888; margin-top: 6px;">
-            © 2025 - Gathura Chege
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
     # 🔗 SERVICE STATUS - COMPACT TEAL CONTAINER
     # ============================================================
@@ -6232,6 +6261,29 @@ def main():
     service_manager.show_service_status()
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    
+    # ============================================================
+    # SECTION 9: FOOTER (Container Style) - INCREASED FONT SIZES
+    # ============================================================
+    st.sidebar.markdown("""
+    <div style="
+        border-radius: 12px;
+        padding: 18px 15px;
+        text-align: center;
+        background: rgba(0,0,0,0.03);
+        border: 1px solid rgba(0,0,0,0.05);
+    ">
+        <div style="font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px;">
+            🧀 Browns Cheese
+        </div>
+        <div style="font-size: 14px; color: #666; margin-top: 4px;">
+            Dry Ice Management System
+        </div>
+        <div style="font-size: 13px; color: #888; margin-top: 6px;">
+            © 2025 - Gathura Chege
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ============================================================
     # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
@@ -7364,457 +7416,512 @@ def main():
             st.markdown("## 📈 All Items Analytics")
             st.markdown("Comprehensive analysis for all inventory items using Google Sheets data")
             
-            # Load data with caching
-            @st.cache_data(ttl=600)
-            def load_analytics_data():
+            # ============================================================
+            # 🎯 LAZY LOADING FOR HEAVY ANALYTICS DATA
+            # ============================================================
+            
+            # Define the heavy loading function
+            def load_heavy_analytics_data():
+                """Load heavy analytics data only when needed."""
                 try:
+                    logger.info("Loading heavy analytics data...")
                     gsheet = GoogleSheetReader()
                     if gsheet.authenticate():
                         stock = gsheet.get_stock_with_pricing()
+                        
+                        # ============================================================
+                        # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
+                        # ============================================================
+                        if not stock.empty:
+                            original_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
+                            stock = compress_dataframe(stock)
+                            compressed_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
+                            reduction = ((original_memory - compressed_memory) / original_memory) * 100
+                            logger.info(f"💾 Analytics stock compressed: {original_memory:.1f}MB → {compressed_memory:.1f}MB (↓{reduction:.0f}%)")
+                        
                         check_in = gsheet.get_check_in()
                         check_out = gsheet.get_check_out()
                         current_stock = gsheet.get_current_stock()
+                        
+                        # Compress the other DataFrames too
+                        if not check_in.empty:
+                            check_in = compress_dataframe(check_in)
+                        if not check_out.empty:
+                            check_out = compress_dataframe(check_out)
+                        if not current_stock.empty:
+                            current_stock = compress_dataframe(current_stock)
+                        
+                        logger.info(f"Analytics data loaded: {len(stock)} items")
                         return stock, check_in, check_out, current_stock
+                    else:
+                        logger.warning("Google Sheets authentication failed for analytics")
                 except Exception as e:
-                    st.error(f"Error loading data: {e}")
+                    logger.error(f"Error loading analytics data: {e}")
+                    st.error(f"❌ Error loading analytics data: {str(e)}")
                 return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             
-            with st.spinner("📊Loading analytics data..."):
-                stock_df, check_in_df, check_out_df, current_stock_df = load_analytics_data()
+            # Use lazy loader with caching
+            analytics_loader = LazyLoader(
+                load_heavy_analytics_data,
+                cache_ttl=600,  # 10 minute cache
+                key_prefix="analytics"
+            )
             
-            if not stock_df.empty:
-                # --- SECTION 1: ORDER ANALYSIS FOR ALL ITEMS ---
-                st.divider()
-                st.markdown("### 📊 Order Analysis for All Items")
+            # Show load status
+            if not analytics_loader.is_loaded:
+                st.info("💡 Click the button below to load analytics data. This may take a moment.")
+            
+            # Render load button (or show loaded status)
+            analytics_loader.render_load_button("📊 Load Analytics Data")
+            
+            # ============================================================
+            # 🎯 DISPLAY ANALYTICS (ONLY WHEN LOADED)
+            # ============================================================
+            if analytics_loader.is_loaded:
+                stock_df, check_in_df, check_out_df, current_stock_df = analytics_loader.data
                 
-                # Show summary metrics
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("📦 Total Items", len(stock_df))
-                with col2:
-                    st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
-                with col3:
-                    st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
-                with col4:
-                    st.metric("📊 Current Stock", len(current_stock_df) if not current_stock_df.empty else 0)
-                with col5:
-                    if not check_in_df.empty and not check_out_df.empty:
-                        net_movement = len(check_in_df) - len(check_out_df)
-                        st.metric("📈 Net Movement", net_movement, delta=f"{net_movement:+d}")
-                
-                # Define parse_date_safe function once
-                def parse_date_safe(date_str):
-                    if pd.isna(date_str) or date_str == '' or date_str == 'nan' or date_str == 'None' or date_str == 'NaT':
-                        return None
-                    try:
-                        return pd.to_datetime(date_str, format='%Y-%m-%d', errors='coerce')
-                    except:
+                # Verify data was loaded successfully
+                if stock_df is None or stock_df.empty:
+                    st.warning("⚠️ No analytics data available. Please check your Google Sheets connection.")
+                else:
+                    # ============================================================
+                    # 🎯 SECTION 1: ORDER ANALYSIS FOR ALL ITEMS
+                    # ============================================================
+                    st.divider()
+                    st.markdown("### 📊 Order Analysis for All Items")
+                    
+                    # Show summary metrics
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    with col1:
+                        st.metric("📦 Total Items", len(stock_df))
+                    with col2:
+                        st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
+                    with col3:
+                        st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
+                    with col4:
+                        st.metric("📊 Current Stock", len(current_stock_df) if not current_stock_df.empty else 0)
+                    with col5:
+                        if not check_in_df.empty and not check_out_df.empty:
+                            net_movement = len(check_in_df) - len(check_out_df)
+                            st.metric("📈 Net Movement", net_movement, delta=f"{net_movement:+d}")
+                    
+                    # Define parse_date_safe function once
+                    def parse_date_safe(date_str):
+                        if pd.isna(date_str) or date_str == '' or date_str == 'nan' or date_str == 'None' or date_str == 'NaT':
+                            return None
                         try:
-                            return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S', errors='coerce')
+                            return pd.to_datetime(date_str, format='%Y-%m-%d', errors='coerce')
                         except:
                             try:
-                                return pd.to_datetime(date_str, format='mixed', errors='coerce')
+                                return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S', errors='coerce')
                             except:
-                                return None
-                
-                # --- CHECK-IN ANALYSIS ---
-                if not check_in_df.empty:
-                    st.markdown("#### 📥 Check-In Analysis")
-                    
-                    # Find date column - try multiple approaches
-                    date_col_in = None
-                    for col in check_in_df.columns:
-                        if 'date' in col.lower():
-                            date_col_in = col
-                            break
-                    
-                    # Find item column
-                    item_col_in = None
-                    for col in check_in_df.columns:
-                        if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                            item_col_in = col
-                            break
-                    
-                    if date_col_in:
-                        try:
-                            # Parse dates for check-in
-                            check_in_df['DATE_STR'] = check_in_df[date_col_in].astype(str).str.strip()
-                            check_in_df['DATE'] = check_in_df['DATE_STR'].apply(parse_date_safe)
-                            check_in_df = check_in_df.dropna(subset=['DATE'])
-                            
-                            if not check_in_df.empty:
-                                check_in_df['MONTH'] = check_in_df['DATE'].dt.to_period('M')
-                                
-                                # Monthly check-ins
-                                monthly_checkins = check_in_df.groupby('MONTH').size().reset_index(name='Check-In Count')
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.markdown("##### 📈 Monthly Check-In Trends")
-                                    if not monthly_checkins.empty:
-                                        monthly_checkins['MONTH_STR'] = monthly_checkins['MONTH'].astype(str)
-                                        fig_checkin = px.line(
-                                            monthly_checkins,
-                                            x='MONTH_STR',
-                                            y='Check-In Count',
-                                            title='Monthly Check-Ins (Receipts/Incoming)',
-                                            markers=True
-                                        )
-                                        st.plotly_chart(fig_checkin, use_container_width=True)
-                                    else:
-                                        st.info("No monthly check-in data")
-                                
-                                with col2:
-                                    st.markdown("##### 🏆 Top Received Items")
-                                    if item_col_in:
-                                        # Get value counts and clean data
-                                        top_checkins = check_in_df[item_col_in].value_counts().head(10)
-                                        top_checkins = top_checkins[top_checkins.index.notna()]
-                                        top_checkins = top_checkins[top_checkins.index != '']
-                                        top_checkins = top_checkins[top_checkins.index != 'nan']
-                                        
-                                        if not top_checkins.empty:
-                                            fig_top_in = px.bar(
-                                                x=top_checkins.values,
-                                                y=top_checkins.index,
-                                                title='Top 10 Most Received Items',
-                                                labels={'x': 'Receipt Count', 'y': 'Item Name'},
-                                                orientation='h'
-                                            )
-                                            fig_top_in.update_layout(height=400)
-                                            st.plotly_chart(fig_top_in, use_container_width=True)
-                                        else:
-                                            st.info("No item data available for check-ins")
-                                    else:
-                                        st.warning("No item column found. Available columns: " + ", ".join(list(check_in_df.columns)))
-                        except Exception as e:
-                            st.warning(f"Could not process check-in data: {e}")
-                    else:
-                        st.warning("No date column found in check-in data")
-                
-                # --- CHECK-OUT ANALYSIS ---
-                if not check_out_df.empty:
-                    st.markdown("#### 📤 Check-Out Analysis")
-                    
-                    # Find date and item columns for check-out
-                    date_col_out = None
-                    for col in check_out_df.columns:
-                        if 'date' in col.lower():
-                            date_col_out = col
-                            break
-                    
-                    item_col_out = None
-                    for col in check_out_df.columns:
-                        if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                            item_col_out = col
-                            break
-                    
-                    if date_col_out:
-                        try:
-                            # Parse dates for check-out
-                            check_out_df['DATE_STR'] = check_out_df[date_col_out].astype(str).str.strip()
-                            check_out_df['DATE'] = check_out_df['DATE_STR'].apply(parse_date_safe)
-                            check_out_df = check_out_df.dropna(subset=['DATE'])
-                            
-                            if not check_out_df.empty:
-                                check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
-                                check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
-                                
-                                # Monthly check-outs
-                                monthly_checkouts = check_out_df.groupby('MONTH').size().reset_index(name='Check-Out Count')
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.markdown("##### 📈 Monthly Check-Out Trends")
-                                    if not monthly_checkouts.empty:
-                                        monthly_checkouts['MONTH_STR'] = monthly_checkouts['MONTH'].astype(str)
-                                        fig_checkout = px.line(
-                                            monthly_checkouts,
-                                            x='MONTH_STR',
-                                            y='Check-Out Count',
-                                            title='Monthly Check-Outs (Issues/Usage)',
-                                            markers=True
-                                        )
-                                        st.plotly_chart(fig_checkout, use_container_width=True)
-                                    else:
-                                        st.info("No monthly check-out data")
-                                
-                                with col2:
-                                    st.markdown("##### 🏆 Top Used Items")
-                                    if item_col_out:
-                                        top_checkouts = check_out_df[item_col_out].value_counts().head(10)
-                                        top_checkouts = top_checkouts[top_checkouts.index.notna()]
-                                        top_checkouts = top_checkouts[top_checkouts.index != '']
-                                        top_checkouts = top_checkouts[top_checkouts.index != 'nan']
-                                        
-                                        if not top_checkouts.empty:
-                                            fig_top_out = px.bar(
-                                                x=top_checkouts.values,
-                                                y=top_checkouts.index,
-                                                title='Top 10 Most Used Items',
-                                                labels={'x': 'Usage Count', 'y': 'Item Name'},
-                                                orientation='h'
-                                            )
-                                            fig_top_out.update_layout(height=400)
-                                            st.plotly_chart(fig_top_out, use_container_width=True)
-                                        else:
-                                            st.info("No item data available for check-outs")
-                                    else:
-                                        st.warning("No item column found in check-out data")
-                        except Exception as e:
-                            st.warning(f"Could not process check-out data: {e}")
-                    else:
-                        st.warning("No date column found in check-out data")
-                
-                # --- COMPARISON: CHECK-IN vs CHECK-OUT ---
-                if not check_in_df.empty and not check_out_df.empty and 'MONTH' in check_in_df.columns and 'MONTH' in check_out_df.columns:
-                    st.markdown("#### 📊 Check-In vs Check-Out Comparison")
-                    
-                    try:
-                        checkin_monthly = check_in_df.groupby('MONTH').size().reset_index(name='Check-Ins')
-                        checkout_monthly = check_out_df.groupby('MONTH').size().reset_index(name='Check-Outs')
-                        
-                        comparison = pd.merge(checkin_monthly, checkout_monthly, on='MONTH', how='outer').fillna(0)
-                        comparison['MONTH_STR'] = comparison['MONTH'].astype(str)
-                        comparison['Net'] = comparison['Check-Ins'] - comparison['Check-Outs']
-                        
-                        fig_comparison = go.Figure()
-                        fig_comparison.add_trace(go.Bar(
-                            x=comparison['MONTH_STR'],
-                            y=comparison['Check-Ins'],
-                            name='Check-Ins',
-                            marker_color='#2ecc71'
-                        ))
-                        fig_comparison.add_trace(go.Bar(
-                            x=comparison['MONTH_STR'],
-                            y=comparison['Check-Outs'],
-                            name='Check-Outs',
-                            marker_color='#e74c3c'
-                        ))
-                        fig_comparison.update_layout(
-                            title='Monthly Check-Ins vs Check-Outs',
-                            xaxis_title='Month',
-                            yaxis_title='Count',
-                            barmode='group',
-                            height=400
-                        )
-                        st.plotly_chart(fig_comparison, use_container_width=True)
-                        
-                        total_net = comparison['Net'].sum()
-                        st.metric(
-                            "📊 Net Total Movement",
-                            f"{total_net:+.0f}",
-                            delta=f"{total_net:+.0f}"
-                        )
-                    except Exception as e:
-                        st.warning(f"Could not create comparison chart: {e}")
-                
-                # --- SECTION 2: DEMAND FORECAST FOR ALL ITEMS ---
-                st.divider()
-                st.markdown("### 🔮 Demand Forecast for All Items")
-                
-                if not check_out_df.empty and 'DATE' in check_out_df.columns:
-                    # Find item column
-                    item_col = None
-                    for col in check_out_df.columns:
-                        if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                            item_col = col
-                            break
-                    
-                    # Find quantity column
-                    qty_col = None
-                    for col in check_out_df.columns:
-                        if 'quantity' in col.lower() or 'qty' in col.lower():
-                            qty_col = col
-                            break
-                    
-                    if item_col and qty_col:
-                        items_with_history = check_out_df[item_col].dropna().unique().tolist()
-                        items_with_history = [x for x in items_with_history if x != '' and x != 'nan']
-                        
-                        if items_with_history:
-                            selected_item = st.selectbox(
-                                "Select Item for Demand Forecast",
-                                sorted(items_with_history),
-                                key="forecast_item"
-                            )
-                            
-                            if selected_item:
-                                item_history = check_out_df[check_out_df[item_col] == selected_item].copy()
-                                
-                                if not item_history.empty and 'DATE' in item_history.columns and qty_col:
-                                    try:
-                                        item_history[qty_col] = pd.to_numeric(item_history[qty_col], errors='coerce')
-                                        item_history = item_history.dropna(subset=[qty_col])
-                                        
-                                        if not item_history.empty:
-                                            daily_demand = item_history.groupby('DATE')[qty_col].sum().reset_index()
-                                            daily_demand.columns = ['Date', 'Order_Quantity_kg']
-                                            
-                                            daily_demand['Order_Quantity_kg'] = pd.to_numeric(daily_demand['Order_Quantity_kg'], errors='coerce')
-                                            daily_demand = daily_demand.dropna()
-                                            
-                                            if len(daily_demand) >= 5 and daily_demand['Order_Quantity_kg'].sum() > 0:
-                                                with st.spinner(f"Generating forecast for {selected_item}..."):
-                                                    fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
-                                                        daily_demand,
-                                                        forecast_days=30
-                                                    )
-                                                    
-                                                    if fig_forecast:
-                                                        st.plotly_chart(fig_forecast, use_container_width=True)
-                                                        
-                                                        col1, col2, col3 = st.columns(3)
-                                                        with col1:
-                                                            total_forecast = np.sum(forecast_values) if len(forecast_values) > 0 else 0
-                                                            st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
-                                                        with col2:
-                                                            avg_daily = np.mean(forecast_values) if len(forecast_values) > 0 else 0
-                                                            st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
-                                                        with col3:
-                                                            st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
-                                                        
-                                                        with st.expander("🔬 View Model Performance"):
-                                                            for model_name, daily_avg in model_forecasts.items():
-                                                                st.metric(model_name, f"{daily_avg:.1f} units/day")
-                                                    else:
-                                                        st.warning("Could not generate forecast for this item.")
-                                            else:
-                                                st.warning(f"Not enough data for {selected_item}. Need at least 5 positive values.")
-                                        else:
-                                            st.warning("No valid quantity data after cleaning")
-                                    except Exception as e:
-                                        st.warning(f"Error processing data: {e}")
-                                else:
-                                    st.warning("No quantity data available for this item.")
-                        else:
-                            st.info("No items with check-out history found.")
-                    else:
-                        st.info(f"Missing required columns. Item column: {item_col}, Quantity column: {qty_col}")
-                else:
-                    st.info("No check-out data available for forecasting.")
-                
-                # --- SECTION 3: COST OPTIMIZATION FOR ALL ITEMS ---
-                st.divider()
-                st.markdown("### 💰 Cost Optimization for All Items")
-                
-                if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                    cost_df = stock_df.copy()
-                    cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
-                    cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
-                    cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                    
-                    if not cost_df.empty:
-                        cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
-                        cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            order_cost = st.number_input(
-                                "Ordering Cost (KSh)", 
-                                value=float(constants.TRANSPORT_COST), 
-                                step=100.0,
-                                key="cost_analysis_order_cost"
-                            )
-                        with col2:
-                            holding_rate = st.number_input(
-                                "Holding Rate (%)", 
-                                value=float(constants.HOLDING_RATE * 100), 
-                                step=0.5,
-                                key="cost_analysis_holding_rate"
-                            ) / 100
-                        
-                        if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
-                            cost_results = []
-                            for _, row in cost_df.iterrows():
                                 try:
-                                    if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0 and row['ANNUAL_DEMAND'] > 0:
-                                        eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
-                                        
-                                        if row['QUANTITY'] > 0 and eoq > 0:
-                                            current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
-                                            optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
-                                            
-                                            cost_results.append({
-                                                'Item': row.get('ITEM_NAME', 'Unknown'),
-                                                'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
-                                                'Current Stock': row['QUANTITY'],
-                                                'Unit Price': row['UNIT PRICE'],
-                                                'Annual Demand': row['ANNUAL_DEMAND'],
-                                                'EOQ': eoq,
-                                                'Current Cost': current_total_cost,
-                                                'Optimal Cost': optimal_total_cost,
-                                                'Potential Savings': current_total_cost - optimal_total_cost if current_total_cost > optimal_total_cost else 0
-                                            })
+                                    return pd.to_datetime(date_str, format='mixed', errors='coerce')
                                 except:
-                                    pass
+                                    return None
+                    
+                    # --- CHECK-IN ANALYSIS ---
+                    if not check_in_df.empty:
+                        st.markdown("#### 📥 Check-In Analysis")
+                        
+                        # Find date column - try multiple approaches
+                        date_col_in = None
+                        for col in check_in_df.columns:
+                            if 'date' in col.lower():
+                                date_col_in = col
+                                break
+                        
+                        # Find item column
+                        item_col_in = None
+                        for col in check_in_df.columns:
+                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                item_col_in = col
+                                break
+                        
+                        if date_col_in:
+                            try:
+                                # Parse dates for check-in
+                                check_in_df['DATE_STR'] = check_in_df[date_col_in].astype(str).str.strip()
+                                check_in_df['DATE'] = check_in_df['DATE_STR'].apply(parse_date_safe)
+                                check_in_df = check_in_df.dropna(subset=['DATE'])
+                                
+                                if not check_in_df.empty:
+                                    check_in_df['MONTH'] = check_in_df['DATE'].dt.to_period('M')
+                                    
+                                    # Monthly check-ins
+                                    monthly_checkins = check_in_df.groupby('MONTH').size().reset_index(name='Check-In Count')
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.markdown("##### 📈 Monthly Check-In Trends")
+                                        if not monthly_checkins.empty:
+                                            monthly_checkins['MONTH_STR'] = monthly_checkins['MONTH'].astype(str)
+                                            fig_checkin = px.line(
+                                                monthly_checkins,
+                                                x='MONTH_STR',
+                                                y='Check-In Count',
+                                                title='Monthly Check-Ins (Receipts/Incoming)',
+                                                markers=True
+                                            )
+                                            st.plotly_chart(fig_checkin, use_container_width=True)
+                                        else:
+                                            st.info("No monthly check-in data")
+                                    
+                                    with col2:
+                                        st.markdown("##### 🏆 Top Received Items")
+                                        if item_col_in:
+                                            # Get value counts and clean data
+                                            top_checkins = check_in_df[item_col_in].value_counts().head(10)
+                                            top_checkins = top_checkins[top_checkins.index.notna()]
+                                            top_checkins = top_checkins[top_checkins.index != '']
+                                            top_checkins = top_checkins[top_checkins.index != 'nan']
+                                            
+                                            if not top_checkins.empty:
+                                                fig_top_in = px.bar(
+                                                    x=top_checkins.values,
+                                                    y=top_checkins.index,
+                                                    title='Top 10 Most Received Items',
+                                                    labels={'x': 'Receipt Count', 'y': 'Item Name'},
+                                                    orientation='h'
+                                                )
+                                                fig_top_in.update_layout(height=400)
+                                                st.plotly_chart(fig_top_in, use_container_width=True)
+                                            else:
+                                                st.info("No item data available for check-ins")
+                                        else:
+                                            st.warning("No item column found. Available columns: " + ", ".join(list(check_in_df.columns)))
+                            except Exception as e:
+                                st.warning(f"Could not process check-in data: {e}")
+                        else:
+                            st.warning("No date column found in check-in data")
+                    
+                    # --- CHECK-OUT ANALYSIS ---
+                    if not check_out_df.empty:
+                        st.markdown("#### 📤 Check-Out Analysis")
+                        
+                        # Find date and item columns for check-out
+                        date_col_out = None
+                        for col in check_out_df.columns:
+                            if 'date' in col.lower():
+                                date_col_out = col
+                                break
+                        
+                        item_col_out = None
+                        for col in check_out_df.columns:
+                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                item_col_out = col
+                                break
+                        
+                        if date_col_out:
+                            try:
+                                # Parse dates for check-out
+                                check_out_df['DATE_STR'] = check_out_df[date_col_out].astype(str).str.strip()
+                                check_out_df['DATE'] = check_out_df['DATE_STR'].apply(parse_date_safe)
+                                check_out_df = check_out_df.dropna(subset=['DATE'])
+                                
+                                if not check_out_df.empty:
+                                    check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
+                                    check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
+                                    
+                                    # Monthly check-outs
+                                    monthly_checkouts = check_out_df.groupby('MONTH').size().reset_index(name='Check-Out Count')
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.markdown("##### 📈 Monthly Check-Out Trends")
+                                        if not monthly_checkouts.empty:
+                                            monthly_checkouts['MONTH_STR'] = monthly_checkouts['MONTH'].astype(str)
+                                            fig_checkout = px.line(
+                                                monthly_checkouts,
+                                                x='MONTH_STR',
+                                                y='Check-Out Count',
+                                                title='Monthly Check-Outs (Issues/Usage)',
+                                                markers=True
+                                            )
+                                            st.plotly_chart(fig_checkout, use_container_width=True)
+                                        else:
+                                            st.info("No monthly check-out data")
+                                    
+                                    with col2:
+                                        st.markdown("##### 🏆 Top Used Items")
+                                        if item_col_out:
+                                            top_checkouts = check_out_df[item_col_out].value_counts().head(10)
+                                            top_checkouts = top_checkouts[top_checkouts.index.notna()]
+                                            top_checkouts = top_checkouts[top_checkouts.index != '']
+                                            top_checkouts = top_checkouts[top_checkouts.index != 'nan']
+                                            
+                                            if not top_checkouts.empty:
+                                                fig_top_out = px.bar(
+                                                    x=top_checkouts.values,
+                                                    y=top_checkouts.index,
+                                                    title='Top 10 Most Used Items',
+                                                    labels={'x': 'Usage Count', 'y': 'Item Name'},
+                                                    orientation='h'
+                                                )
+                                                fig_top_out.update_layout(height=400)
+                                                st.plotly_chart(fig_top_out, use_container_width=True)
+                                            else:
+                                                st.info("No item data available for check-outs")
+                                        else:
+                                            st.warning("No item column found in check-out data")
+                            except Exception as e:
+                                st.warning(f"Could not process check-out data: {e}")
+                        else:
+                            st.warning("No date column found in check-out data")
+                    
+                    # --- COMPARISON: CHECK-IN vs CHECK-OUT ---
+                    if not check_in_df.empty and not check_out_df.empty and 'MONTH' in check_in_df.columns and 'MONTH' in check_out_df.columns:
+                        st.markdown("#### 📊 Check-In vs Check-Out Comparison")
+                        
+                        try:
+                            checkin_monthly = check_in_df.groupby('MONTH').size().reset_index(name='Check-Ins')
+                            checkout_monthly = check_out_df.groupby('MONTH').size().reset_index(name='Check-Outs')
                             
-                            if cost_results:
-                                cost_df_results = pd.DataFrame(cost_results)
-                                
-                                col1, col2, col3, col4 = st.columns(4)
-                                with col1:
-                                    st.metric("📦 Items Analyzed", len(cost_df_results))
-                                with col2:
-                                    total_savings = cost_df_results['Potential Savings'].sum()
-                                    st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
-                                with col3:
-                                    avg_savings = cost_df_results['Potential Savings'].mean()
-                                    st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
-                                with col4:
-                                    items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
-                                    st.metric("✅ Items with Savings", items_with_savings)
-                                
-                                st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
-                                
-                                csv = cost_df_results.to_csv(index=False).encode('utf-8')
-                                st.download_button(
-                                    label="📥 Download Cost Analysis Results",
-                                    data=csv,
-                                    file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
-                                    mime='text/csv'
+                            comparison = pd.merge(checkin_monthly, checkout_monthly, on='MONTH', how='outer').fillna(0)
+                            comparison['MONTH_STR'] = comparison['MONTH'].astype(str)
+                            comparison['Net'] = comparison['Check-Ins'] - comparison['Check-Outs']
+                            
+                            fig_comparison = go.Figure()
+                            fig_comparison.add_trace(go.Bar(
+                                x=comparison['MONTH_STR'],
+                                y=comparison['Check-Ins'],
+                                name='Check-Ins',
+                                marker_color='#2ecc71'
+                            ))
+                            fig_comparison.add_trace(go.Bar(
+                                x=comparison['MONTH_STR'],
+                                y=comparison['Check-Outs'],
+                                name='Check-Outs',
+                                marker_color='#e74c3c'
+                            ))
+                            fig_comparison.update_layout(
+                                title='Monthly Check-Ins vs Check-Outs',
+                                xaxis_title='Month',
+                                yaxis_title='Count',
+                                barmode='group',
+                                height=400
+                            )
+                            st.plotly_chart(fig_comparison, use_container_width=True)
+                            
+                            total_net = comparison['Net'].sum()
+                            st.metric(
+                                "📊 Net Total Movement",
+                                f"{total_net:+.0f}",
+                                delta=f"{total_net:+.0f}"
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not create comparison chart: {e}")
+                    
+                    # ============================================================
+                    # 🎯 SECTION 2: DEMAND FORECAST FOR ALL ITEMS
+                    # ============================================================
+                    st.divider()
+                    st.markdown("### 🔮 Demand Forecast for All Items")
+                    
+                    if not check_out_df.empty and 'DATE' in check_out_df.columns:
+                        # Find item column
+                        item_col = None
+                        for col in check_out_df.columns:
+                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                item_col = col
+                                break
+                        
+                        # Find quantity column
+                        qty_col = None
+                        for col in check_out_df.columns:
+                            if 'quantity' in col.lower() or 'qty' in col.lower():
+                                qty_col = col
+                                break
+                        
+                        if item_col and qty_col:
+                            items_with_history = check_out_df[item_col].dropna().unique().tolist()
+                            items_with_history = [x for x in items_with_history if x != '' and x != 'nan']
+                            
+                            if items_with_history:
+                                selected_item = st.selectbox(
+                                    "Select Item for Demand Forecast",
+                                    sorted(items_with_history),
+                                    key="forecast_item"
                                 )
                                 
-                                st.divider()
-                                st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
-                                top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
-                                if not top_savings.empty:
-                                    st.dataframe(
-                                        top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
-                                        use_container_width=True,
-                                        hide_index=True
-                                    )
-                                
-                                st.divider()
-                                st.markdown("#### 📊 Cost Savings by Category")
-                                category_cost_summary = cost_df_results.groupby('Category').agg({
-                                    'Item': 'count',
-                                    'Potential Savings': 'sum'
-                                }).reset_index()
-                                category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
-                                st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
-                                
-                                fig_savings = px.bar(
-                                    category_cost_summary,
-                                    x='Category',
-                                    y='Total Savings',
-                                    title='Potential Savings by Category',
-                                    color='Category',
-                                    height=400,
-                                    labels={'Total Savings': 'Savings (KSh)'}
-                                )
-                                fig_savings.update_layout(showlegend=False)
-                                st.plotly_chart(fig_savings, use_container_width=True)
+                                if selected_item:
+                                    item_history = check_out_df[check_out_df[item_col] == selected_item].copy()
+                                    
+                                    if not item_history.empty and 'DATE' in item_history.columns and qty_col:
+                                        try:
+                                            item_history[qty_col] = pd.to_numeric(item_history[qty_col], errors='coerce')
+                                            item_history = item_history.dropna(subset=[qty_col])
+                                            
+                                            if not item_history.empty:
+                                                daily_demand = item_history.groupby('DATE')[qty_col].sum().reset_index()
+                                                daily_demand.columns = ['Date', 'Order_Quantity_kg']
+                                                
+                                                daily_demand['Order_Quantity_kg'] = pd.to_numeric(daily_demand['Order_Quantity_kg'], errors='coerce')
+                                                daily_demand = daily_demand.dropna()
+                                                
+                                                if len(daily_demand) >= 5 and daily_demand['Order_Quantity_kg'].sum() > 0:
+                                                    with st.spinner(f"Generating forecast for {selected_item}..."):
+                                                        fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
+                                                            daily_demand,
+                                                            forecast_days=30
+                                                        )
+                                                        
+                                                        if fig_forecast:
+                                                            st.plotly_chart(fig_forecast, use_container_width=True)
+                                                            
+                                                            col1, col2, col3 = st.columns(3)
+                                                            with col1:
+                                                                total_forecast = np.sum(forecast_values) if len(forecast_values) > 0 else 0
+                                                                st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
+                                                            with col2:
+                                                                avg_daily = np.mean(forecast_values) if len(forecast_values) > 0 else 0
+                                                                st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
+                                                            with col3:
+                                                                st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
+                                                            
+                                                            with st.expander("🔬 View Model Performance"):
+                                                                for model_name, daily_avg in model_forecasts.items():
+                                                                    st.metric(model_name, f"{daily_avg:.1f} units/day")
+                                                        else:
+                                                            st.warning("Could not generate forecast for this item.")
+                                                else:
+                                                    st.warning(f"Not enough data for {selected_item}. Need at least 5 positive values.")
+                                            else:
+                                                st.warning("No valid quantity data after cleaning")
+                                        except Exception as e:
+                                            st.warning(f"Error processing data: {e}")
+                                    else:
+                                        st.warning("No quantity data available for this item.")
                             else:
-                                st.warning("No valid cost results generated. Please check your data.")
+                                st.info("No items with check-out history found.")
+                        else:
+                            st.info(f"Missing required columns. Item column: {item_col}, Quantity column: {qty_col}")
                     else:
-                        st.warning("No valid data with both quantity and price found.")
-                else:
-                    st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
+                        st.info("No check-out data available for forecasting.")
+                    
+                    # ============================================================
+                    # 🎯 SECTION 3: COST OPTIMIZATION FOR ALL ITEMS
+                    # ============================================================
+                    st.divider()
+                    st.markdown("### 💰 Cost Optimization for All Items")
+                    
+                    if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                        cost_df = stock_df.copy()
+                        cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
+                        cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
+                        cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                        
+                        if not cost_df.empty:
+                            cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
+                            cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                order_cost = st.number_input(
+                                    "Ordering Cost (KSh)", 
+                                    value=float(constants.TRANSPORT_COST), 
+                                    step=100.0,
+                                    key="cost_analysis_order_cost"
+                                )
+                            with col2:
+                                holding_rate = st.number_input(
+                                    "Holding Rate (%)", 
+                                    value=float(constants.HOLDING_RATE * 100), 
+                                    step=0.5,
+                                    key="cost_analysis_holding_rate"
+                                ) / 100
+                            
+                            if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
+                                cost_results = []
+                                for _, row in cost_df.iterrows():
+                                    try:
+                                        if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0 and row['ANNUAL_DEMAND'] > 0:
+                                            eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
+                                            
+                                            if row['QUANTITY'] > 0 and eoq > 0:
+                                                current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
+                                                optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
+                                                
+                                                cost_results.append({
+                                                    'Item': row.get('ITEM_NAME', 'Unknown'),
+                                                    'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                                                    'Current Stock': row['QUANTITY'],
+                                                    'Unit Price': row['UNIT PRICE'],
+                                                    'Annual Demand': row['ANNUAL_DEMAND'],
+                                                    'EOQ': eoq,
+                                                    'Current Cost': current_total_cost,
+                                                    'Optimal Cost': optimal_total_cost,
+                                                    'Potential Savings': current_total_cost - optimal_total_cost if current_total_cost > optimal_total_cost else 0
+                                                })
+                                    except:
+                                        pass
+                                
+                                if cost_results:
+                                    cost_df_results = pd.DataFrame(cost_results)
+                                    
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("📦 Items Analyzed", len(cost_df_results))
+                                    with col2:
+                                        total_savings = cost_df_results['Potential Savings'].sum()
+                                        st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
+                                    with col3:
+                                        avg_savings = cost_df_results['Potential Savings'].mean()
+                                        st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
+                                    with col4:
+                                        items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
+                                        st.metric("✅ Items with Savings", items_with_savings)
+                                    
+                                    st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
+                                    
+                                    csv = cost_df_results.to_csv(index=False).encode('utf-8')
+                                    st.download_button(
+                                        label="📥 Download Cost Analysis Results",
+                                        data=csv,
+                                        file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
+                                        mime='text/csv'
+                                    )
+                                    
+                                    st.divider()
+                                    st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
+                                    top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
+                                    if not top_savings.empty:
+                                        st.dataframe(
+                                            top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
+                                            use_container_width=True,
+                                            hide_index=True
+                                        )
+                                    
+                                    st.divider()
+                                    st.markdown("#### 📊 Cost Savings by Category")
+                                    category_cost_summary = cost_df_results.groupby('Category').agg({
+                                        'Item': 'count',
+                                        'Potential Savings': 'sum'
+                                    }).reset_index()
+                                    category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
+                                    st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
+                                    
+                                    fig_savings = px.bar(
+                                        category_cost_summary,
+                                        x='Category',
+                                        y='Total Savings',
+                                        title='Potential Savings by Category',
+                                        color='Category',
+                                        height=400,
+                                        labels={'Total Savings': 'Savings (KSh)'}
+                                    )
+                                    fig_savings.update_layout(showlegend=False)
+                                    st.plotly_chart(fig_savings, use_container_width=True)
+                                else:
+                                    st.warning("No valid cost results generated. Please check your data.")
+                        else:
+                            st.warning("No valid data with both quantity and price found.")
+                    else:
+                        st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
             else:
-                st.warning("No stock data found.")
+                st.info("💡 Click 'Load Analytics Data' to view the analysis.")
 
         with tab_inventory_visual:  
             st.markdown("### 📦 Visual Inventory Dashboard")
@@ -9227,6 +9334,13 @@ def main():
                 trans_df['date'] = pd.to_datetime(trans_df['date'])
                 trans_df = trans_df.sort_values('date', ascending=False)
                 
+                # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
+                # ============================================================
+                trans_df = compress_dataframe(trans_df)
+                logger.info(f"Transactions loaded and compressed: {len(trans_df)} records")
+                # ============================================================
+                # 🎯 FILTERS (BEFORE PAGINATION)
+                # ============================================================
                 filter_col1, filter_col2, filter_col3 = st.columns(3)
                 with filter_col1:
                     transaction_type = st.selectbox("Transaction Type", ["All", "usage", "receipt"], key="trans_type_filter")
@@ -9237,6 +9351,7 @@ def main():
                 with filter_col3:
                     show_limit = st.selectbox("Show Last", ["All", "10", "25", "50", "100"], key="show_limit_filter")
                 
+                # Apply filters
                 filtered_df = trans_df.copy()
                 if transaction_type != "All":
                     filtered_df = filtered_df[filtered_df['type'] == transaction_type]
@@ -9246,16 +9361,48 @@ def main():
                 if show_limit != "All":
                     filtered_df = filtered_df.head(int(show_limit))
 
+                # ============================================================
+                # 🎯 DISPLAY WITH PAGINATION (FOR LARGE DATASETS)
+                # ============================================================
                 with st.expander("📋 View Transaction Records", expanded=not mobile_ui.should_collapse_advanced()):
-                    display_df = filtered_df.copy()
-                    display_df['Date'] = display_df['date'].dt.strftime('%Y-%m-%d %H:%M')
-                    display_df['Type'] = display_df['type'].str.title()
-                    display_df['Quantity (kg)'] = display_df['quantity'].apply(lambda x: f"{x:,.2f}")
-                    mobile_ui.display_mobile_table(
-                        display_df[['Date', 'Type', 'Quantity (kg)', 'description']],
-                        max_height=400
+                    # Paginate the filtered data (only if more than 100 rows)
+                    if len(filtered_df) > 100:
+                        paginated_df, paginator = paginate_dataframe(
+                            filtered_df,
+                            page_size=50,  # Show 50 per page
+                            key_prefix="transactions",
+                            show_controls=True,
+                            compact=False
+                        )
+                        display_df = paginated_df
+                        show_pagination = True
+                    else:
+                        display_df = filtered_df
+                        show_pagination = False
+                    
+                    # Prepare display DataFrame
+                    display_df_display = display_df.copy()
+                    display_df_display['Date'] = display_df_display['date'].dt.strftime('%Y-%m-%d %H:%M')
+                    display_df_display['Type'] = display_df_display['type'].str.title()
+                    display_df_display['Quantity (kg)'] = display_df_display['quantity'].apply(lambda x: f"{x:,.2f}")
+                    
+                    # Show optimized table
+                    st.dataframe(
+                        display_df_display[['Date', 'Type', 'Quantity (kg)', 'description']],
+                        use_container_width=True,
+                        height=400,
+                        hide_index=True
                     )
+                    
+                    # Show pagination info
+                    if show_pagination:
+                        st.caption(f"📊 Page {paginator.current_page} of {paginator.total_pages} | Showing {len(display_df):,} of {len(filtered_df):,} records")
+                    else:
+                        st.caption(f"📊 Showing {len(filtered_df):,} records")
                 
+                # ============================================================
+                # 🎯 TRANSACTION SUMMARY
+                # ============================================================
                 st.markdown("### 📈 Transaction Summary (Filtered Period)")
                 total_used = filtered_df[filtered_df['type']=='usage']['quantity'].sum()
                 total_received = filtered_df[filtered_df['type']=='receipt']['quantity'].sum()
@@ -9267,15 +9414,18 @@ def main():
                 stat_col3.metric("Net Change", f"{net_change:,.1f} kg", delta=f"{net_change:,.1f} kg")
                 stat_col4.metric("Total Transactions", len(filtered_df))
 
-                # --- EXPORT DATA SECTION ---
+                # ============================================================
+                # 🎯 EXPORT DATA SECTION
+                # ============================================================
                 st.markdown("### 📥 Export Filtered Data")
                 if not filtered_df.empty:
                     csv = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                    label="Download as CSV",
-                    data=csv,
-                    file_name=f"transaction_history_{st.session_state.selected_period.replace('/', '-')}_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime='text/csv',
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"transaction_history_{st.session_state.selected_period.replace('/', '-')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime='text/csv',
+                        use_container_width=True
                     )
                 else:
                     st.caption("No data in the current filter to export.")
@@ -9321,7 +9471,7 @@ def main():
             #            
             #    with col2:
             #        if st.button("Cancel"):
-            #            st.session_state.confirm_clear_pressed = False           
+            #            st.session_state.confirm_clear_pressed = False          
 
 if __name__ == "__main__":
     main()
