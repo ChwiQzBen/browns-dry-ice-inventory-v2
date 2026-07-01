@@ -59,34 +59,6 @@ class AuthManager:
         }
     }
     
-    # Demo users (in production, use database)
-    DEMO_USERS = {
-        'admin@browns.com': {
-            'password': 'Admin123!',
-            'role': 'admin',
-            'name': 'System Administrator',
-            '2fa_enabled': False
-        },
-        'manager@browns.com': {
-            'password': 'Manager123!',
-            'role': 'manager',
-            'name': 'Inventory Manager',
-            '2fa_enabled': False
-        },
-        'user@browns.com': {
-            'password': 'User123!',
-            'role': 'user',
-            'name': 'Inventory User',
-            '2fa_enabled': False
-        },
-        'viewer@browns.com': {
-            'password': 'Viewer123!',
-            'role': 'viewer',
-            'name': 'Read-Only Viewer',
-            '2fa_enabled': False
-        }
-    }
-    
     def __init__(self):
         """Initialize authentication manager."""
         self._init_session_state()
@@ -123,7 +95,7 @@ class AuthManager:
         return st.session_state.auth.get('role')
     
     # ============================================================
-    # 🔐 RATE-LIMITED LOGIN METHOD
+    # 🔐 RATE-LIMITED LOGIN METHOD (UPDATED TO USE USERMANAGER)
     # ============================================================
     @rate_limited(max_calls=5, period=60)  # 5 attempts per minute
     def login(self, email: str, password: str) -> Dict:
@@ -140,17 +112,23 @@ class AuthManager:
             Dict with success status and message
         """
         try:
+            # Import UserManager and PasswordManager from advanced_security
+            from core.advanced_security import UserManager, PasswordManager
+            
+            user_manager = UserManager()
+            users = user_manager.get_users()
+            
             # Check if user exists
-            if email not in self.DEMO_USERS:
+            if email not in users:
                 return {
                     'success': False,
                     'message': '❌ Invalid email or password'
                 }
             
-            user = self.DEMO_USERS[email]
+            user = users[email]
             
-            # Check password (in production, use hashed passwords)
-            if user['password'] != password:
+            # Verify password using bcrypt
+            if not PasswordManager.verify_password(password, user['password']):
                 return {
                     'success': False,
                     'message': '❌ Invalid email or password'
@@ -188,7 +166,9 @@ class AuthManager:
                 'session_id': session_id
             }
             
-            # Log the login
+            # Update last login
+            user_manager.update_user(email, last_login=login_time)
+            
             logger.info(f"🔐 User logged in: {email} (Role: {user['role']})")
             
             return {
@@ -215,7 +195,7 @@ class AuthManager:
             }
     
     # ============================================================
-    # 🔐 RATE-LIMITED 2FA VERIFICATION METHOD
+    # 🔐 RATE-LIMITED 2FA VERIFICATION METHOD (UPDATED)
     # ============================================================
     @rate_limited(max_calls=10, period=60)  # 10 attempts per minute
     def verify_2fa(self, otp: str) -> Dict:
@@ -239,46 +219,58 @@ class AuthManager:
                     'message': '❌ No pending 2FA verification'
                 }
             
-            # For demo purposes, we'll use a simple verification
-            # In production, use proper TOTP verification
-            # For demo, accept any 6-digit code or 123456 for testing
-            if len(otp) == 6 and (otp.isdigit() and (otp == '123456' or True)):
-                # Complete the login
-                email = pending['email']
-                user = pending['user']
-                
-                session_id = self._generate_session_id()
-                login_time = datetime.now().isoformat()
-                
-                st.session_state.auth = {
-                    'authenticated': True,
-                    'user': {
-                        'email': email,
-                        'name': user['name'],
-                        'role': user['role']
-                    },
-                    'role': user['role'],
-                    'login_time': login_time,
-                    'last_activity': login_time,
-                    'session_id': session_id
-                }
-                
-                # Clear pending
-                st.session_state._2fa_pending = None
-                
-                logger.info(f"🔐 2FA verified for: {email}")
-                
-                return {
-                    'success': True,
-                    'message': f"✅ Welcome, {user['name']}!",
-                    'user': st.session_state.auth['user']
-                }
+            from core.advanced_security import TwoFactorAuth
+            
+            # Check if 2FA is set up
+            secret = st.session_state.get('2fa', {}).get('secret')
+            
+            if secret:
+                # Use the actual 2FA verification
+                two_factor = TwoFactorAuth()
+                if not two_factor.verify_otp(secret, otp):
+                    return {
+                        'success': False,
+                        'message': '❌ Invalid 2FA code'
+                    }
             else:
-                return {
-                    'success': False,
-                    'message': '❌ Invalid 2FA code'
-                }
-                
+                # For demo/backward compatibility, accept any 6-digit code or 123456
+                if len(otp) != 6 or not otp.isdigit() or (otp != '123456' and not True):
+                    return {
+                        'success': False,
+                        'message': '❌ Invalid 2FA code'
+                    }
+            
+            # Complete the login
+            email = pending['email']
+            user = pending['user']
+            
+            session_id = self._generate_session_id()
+            login_time = datetime.now().isoformat()
+            
+            st.session_state.auth = {
+                'authenticated': True,
+                'user': {
+                    'email': email,
+                    'name': user['name'],
+                    'role': user['role']
+                },
+                'role': user['role'],
+                'login_time': login_time,
+                'last_activity': login_time,
+                'session_id': session_id
+            }
+            
+            # Clear pending
+            st.session_state._2fa_pending = None
+            
+            logger.info(f"🔐 2FA verified for: {email}")
+            
+            return {
+                'success': True,
+                'message': f"✅ Welcome, {user['name']}!",
+                'user': st.session_state.auth['user']
+            }
+            
         except Exception as e:
             error_msg = str(e)
             # Check if it's a rate limit error
@@ -499,6 +491,8 @@ class AuthManager:
                     st.rerun()
 
             return False
+
+
 # ============================================================
 # ROLE-BASED ACCESS DECORATOR
 # ============================================================
@@ -865,317 +859,7 @@ class ApiKeyManager:
 
 
 # ============================================================
-# USER MANAGEMENT (Integrated from Step 5)
-# ============================================================
-
-class UserManager:
-    """
-    User management system with CRUD operations for admin users.
-    """
-    
-    def __init__(self):
-        self.users_file = 'users.json'
-        self._init_users_file()
-    
-    def _init_users_file(self):
-        """Initialize users file with default admin."""
-        if not os.path.exists(self.users_file):
-            # Migrate demo users to JSON file
-            default_users = {}
-            for email, data in AuthManager.DEMO_USERS.items():
-                default_users[email] = {
-                    'password': data['password'],  # Will be hashed later
-                    'role': data['role'],
-                    'name': data['name'],
-                    '2fa_enabled': data.get('2fa_enabled', False),
-                    'email_verified': True,
-                    'created': datetime.now().isoformat(),
-                    'last_login': None
-                }
-            with open(self.users_file, 'w') as f:
-                json.dump(default_users, f, indent=2)
-            logger.info("📁 Users file initialized with demo users")
-    
-    def get_users(self) -> Dict:
-        """Get all users."""
-        try:
-            with open(self.users_file, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def get_user(self, email: str) -> Optional[Dict]:
-        """Get a specific user."""
-        users = self.get_users()
-        return users.get(email)
-    
-    def create_user(self, email: str, password: str, role: str, name: str) -> bool:
-        """
-        Create a new user.
-        
-        Args:
-            email: User email
-            password: User password
-            role: User role (admin, manager, user, viewer)
-            name: User name
-        
-        Returns:
-            bool: True if created successfully
-        """
-        try:
-            users = self.get_users()
-            
-            # Check if user exists
-            if email in users:
-                return False
-            
-            # Validate email
-            import re
-            if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-                return False
-            
-            # Validate password strength
-            if len(password) < 8:
-                return False
-            
-            # Validate role
-            if role not in AuthManager.ROLES:
-                return False
-            
-            # Create user
-            users[email] = {
-                'password': password,  # Will be hashed when integrated with bcrypt
-                'role': role,
-                'name': name,
-                '2fa_enabled': False,
-                'email_verified': False,
-                'created': datetime.now().isoformat(),
-                'last_login': None
-            }
-            
-            with open(self.users_file, 'w') as f:
-                json.dump(users, f, indent=2)
-            
-            logger.info(f"👤 User created: {email} ({role})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"User creation error: {e}")
-            return False
-    
-    def update_user(self, email: str, **kwargs) -> bool:
-        """
-        Update user information.
-        
-        Args:
-            email: User email
-            **kwargs: Fields to update
-        
-        Returns:
-            bool: True if updated successfully
-        """
-        try:
-            users = self.get_users()
-            
-            if email not in users:
-                return False
-            
-            # Update fields
-            for key, value in kwargs.items():
-                if key in users[email]:
-                    users[email][key] = value
-            
-            with open(self.users_file, 'w') as f:
-                json.dump(users, f, indent=2)
-            
-            logger.info(f"👤 User updated: {email}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"User update error: {e}")
-            return False
-    
-    def delete_user(self, email: str) -> bool:
-        """
-        Delete a user.
-        
-        Args:
-            email: User email to delete
-        
-        Returns:
-            bool: True if deleted successfully
-        """
-        try:
-            users = self.get_users()
-            
-            if email not in users:
-                return False
-            
-            # Don't allow deleting the last admin
-            admins = [u for u, d in users.items() if d.get('role') == 'admin']
-            if len(admins) <= 1 and users[email].get('role') == 'admin':
-                return False
-            
-            del users[email]
-            
-            with open(self.users_file, 'w') as f:
-                json.dump(users, f, indent=2)
-            
-            logger.info(f"👤 User deleted: {email}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"User deletion error: {e}")
-            return False
-    
-    def toggle_2fa(self, email: str) -> bool:
-        """
-        Toggle 2FA status for a user.
-        
-        Args:
-            email: User email
-        
-        Returns:
-            bool: True if toggled successfully
-        """
-        try:
-            users = self.get_users()
-            if email not in users:
-                return False
-            
-            current_status = users[email].get('2fa_enabled', False)
-            users[email]['2fa_enabled'] = not current_status
-            
-            with open(self.users_file, 'w') as f:
-                json.dump(users, f, indent=2)
-            
-            logger.info(f"🔄 2FA toggled for {email}: {not current_status}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"2FA toggle error: {e}")
-            return False
-    
-    def render_user_management(self):
-        """
-        Render user management dashboard (Admin only).
-        """
-        st.markdown("### 👤 User Management")
-        
-        auth = AuthManager()
-        if not auth.is_authenticated or auth.current_role != 'admin':
-            st.warning("🔒 This section is restricted to administrators")
-            return
-        
-        users = self.get_users()
-        
-        # Display users
-        st.markdown("#### 📋 Current Users")
-        
-        user_data = []
-        for email, data in users.items():
-            user_data.append({
-                'Email': email,
-                'Name': data.get('name', ''),
-                'Role': data.get('role', 'viewer').title(),
-                '2FA Enabled': '✅' if data.get('2fa_enabled') else '❌',
-                'Verified': '✅' if data.get('email_verified') else '❌',
-                'Created': data.get('created', '')[:10]
-            })
-        
-        if user_data:
-            st.dataframe(pd.DataFrame(user_data), use_container_width=True, hide_index=True)
-        
-        # Stats
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("👤 Total Users", len(users))
-        with col2:
-            admins = len([u for u in users.values() if u.get('role') == 'admin'])
-            st.metric("👑 Admins", admins)
-        with col3:
-            twofa_users = len([u for u in users.values() if u.get('2fa_enabled')])
-            st.metric("🔐 2FA Enabled", twofa_users)
-        
-        # Add user form
-        st.markdown("---")
-        st.markdown("#### ➕ Add New User")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            new_email = st.text_input("Email Address", placeholder="user@example.com")
-            new_name = st.text_input("Full Name", placeholder="John Doe")
-        
-        with col2:
-            new_password = st.text_input("Password", type="password", placeholder="••••••••")
-            new_role = st.selectbox("Role", ['viewer', 'user', 'manager', 'admin'])
-        
-        # Show password requirements
-        with st.expander("🔑 Password Requirements"):
-            st.markdown("""
-            - Minimum 8 characters
-            - At least one uppercase letter
-            - At least one lowercase letter
-            - At least one number
-            - At least one special character (!@#$%^&*)
-            """)
-        
-        if st.button("👤 Create User", type="primary"):
-            if not new_email or not new_password or not new_name:
-                st.error("❌ Please fill in all fields")
-            else:
-                success = self.create_user(new_email, new_password, new_role, new_name)
-                if success:
-                    st.success(f"✅ User {new_email} created successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to create user. Email may already exist or password is weak.")
-        
-        # User actions
-        st.markdown("---")
-        st.markdown("#### 🔧 User Actions")
-        
-        selected_user = st.selectbox(
-            "Select user to manage",
-            list(users.keys()) if users else ["No users"]
-        )
-        
-        if selected_user and selected_user != "No users":
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                current_2fa = users[selected_user].get('2fa_enabled', False)
-                status = "Disable" if current_2fa else "Enable"
-                if st.button(f"🔐 {status} 2FA", use_container_width=True):
-                    success = self.toggle_2fa(selected_user)
-                    if success:
-                        st.success(f"✅ 2FA {status}d for {selected_user}")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to toggle 2FA")
-            
-            with col2:
-                if st.button("👤 Reset Password", use_container_width=True):
-                    st.session_state._reset_password_for = selected_user
-                    st.info(f"📧 Password reset link sent to {selected_user}")
-            
-            with col3:
-                if st.button("🗑️ Delete User", type="secondary", use_container_width=True):
-                    if selected_user != auth.current_user['email']:
-                        if st.button("⚠️ Confirm Delete", type="primary"):
-                            success = self.delete_user(selected_user)
-                            if success:
-                                st.success(f"✅ User {selected_user} deleted")
-                                st.rerun()
-                            else:
-                                st.error("❌ Failed to delete user")
-                    else:
-                        st.warning("⚠️ Cannot delete your own account")
-
-
-# ============================================================
-# SECURITY DASHBOARD UI (Enhanced with Step 5)
+# SECURITY DASHBOARD UI
 # ============================================================
 
 def render_security_dashboard():
@@ -1218,7 +902,8 @@ def render_security_dashboard():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Get total users
+            # Get total users from UserManager
+            from core.advanced_security import UserManager
             user_manager = UserManager()
             users = user_manager.get_users()
             st.metric("👤 Total Users", len(users))
@@ -1252,7 +937,8 @@ def render_security_dashboard():
                 st.rerun()
     
     with security_tab2:
-        # User Management (from Step 5)
+        # User Management (from advanced_security)
+        from core.advanced_security import UserManager
         user_manager = UserManager()
         user_manager.render_user_management()
     
