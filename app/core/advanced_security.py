@@ -147,6 +147,10 @@ class RateLimiter:
             return max_calls
 
 
+# ============================================================
+# 🔐 FIXED: RATE LIMITED DECORATOR (NO CIRCULAR IMPORT)
+# ============================================================
+
 def rate_limited(max_calls: int = 5, period: int = 60):
     """
     Decorator for rate limiting (in-memory version).
@@ -163,13 +167,17 @@ def rate_limited(max_calls: int = 5, period: int = 60):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Get user identifier
+            # Get user identifier - use session state directly to avoid circular import
+            user_key = 'anonymous'
             try:
-                from core.security import AuthManager
-                auth = AuthManager()
-                user_key = auth.current_user['email'] if auth.is_authenticated else 'anonymous'
+                # Try to get user from session state directly
+                auth_data = st.session_state.get('auth', {})
+                if auth_data.get('authenticated', False):
+                    user = auth_data.get('user', {})
+                    if user:
+                        user_key = user.get('email', 'anonymous')
             except:
-                user_key = 'anonymous'
+                pass
             
             key = f"{user_key}:{func.__name__}"
             now = time.time()
