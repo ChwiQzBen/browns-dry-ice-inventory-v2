@@ -5195,17 +5195,6 @@ def main():
         st.session_state.db_initialized = True
         print("✅ Database initialized")
 
-    # 🔐 INITIALIZE AUTHENTICATION 
-    # ============================================================
-    from core.security import AuthManager, SessionManager
-    
-    auth = AuthManager()
-    session = SessionManager()
-    
-    # Check session validity
-    if not session.validate_session():
-        # Session expired, force logout
-        auth.logout()
 
     # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     st.sidebar.markdown("""

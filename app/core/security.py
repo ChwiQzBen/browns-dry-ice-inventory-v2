@@ -1,4 +1,7 @@
-# core/security.py - PATCHED VERSION
+# core/security.py
+"""
+Enterprise-grade security utilities for the inventory app.
+"""
 
 import streamlit as st
 import hashlib
@@ -23,11 +26,17 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 class AuthManager:
-    """Authentication manager with role-based access control."""
+    """
+    Authentication manager with role-based access control.
     
+    Uses simple email/password with session management.
+    In production, integrate with OAuth/SSO.
+    """
+    
+    # Pre-defined roles with permissions
     ROLES = {
         'admin': {
-            'permissions': ['*'],
+            'permissions': ['*'],  # All permissions
             'priority': 100
         },
         'manager': {
@@ -44,6 +53,7 @@ class AuthManager:
         }
     }
     
+    # Demo users (in production, use database)
     DEMO_USERS = {
         'admin@browns.com': {
             'password': 'Admin123!',
@@ -68,7 +78,7 @@ class AuthManager:
     }
     
     def __init__(self):
-        """Initialize authentication manager - lightweight init."""
+        """Initialize authentication manager."""
         self._init_session_state()
     
     def _init_session_state(self):
@@ -85,24 +95,47 @@ class AuthManager:
     
     @property
     def is_authenticated(self) -> bool:
+        """Check if user is authenticated."""
         return st.session_state.auth.get('authenticated', False)
     
     @property
     def current_user(self) -> Optional[Dict]:
+        """Get current user info."""
         return st.session_state.auth.get('user')
     
     @property
     def current_role(self) -> Optional[str]:
+        """Get current user role."""
         return st.session_state.auth.get('role')
     
     def login(self, email: str, password: str) -> Dict:
+        """
+        Authenticate user.
+        
+        Args:
+            email: User email
+            password: User password
+        
+        Returns:
+            Dict with success status and message
+        """
+        # Check if user exists
         if email not in self.DEMO_USERS:
-            return {'success': False, 'message': '❌ Invalid email or password'}
+            return {
+                'success': False,
+                'message': '❌ Invalid email or password'
+            }
         
         user = self.DEMO_USERS[email]
-        if user['password'] != password:
-            return {'success': False, 'message': '❌ Invalid email or password'}
         
+        # Check password (in production, use hashed passwords)
+        if user['password'] != password:
+            return {
+                'success': False,
+                'message': '❌ Invalid email or password'
+            }
+        
+        # Create session
         session_id = self._generate_session_id()
         login_time = datetime.now().isoformat()
         
@@ -119,6 +152,9 @@ class AuthManager:
             'session_id': session_id
         }
         
+        # Log the login
+        logger.info(f"🔐 User logged in: {email} (Role: {user['role']})")
+        
         return {
             'success': True,
             'message': f"✅ Welcome, {user['name']}!",
@@ -126,10 +162,12 @@ class AuthManager:
         }
     
     def logout(self):
+        """Log out current user."""
         if self.is_authenticated:
             user_email = self.current_user['email']
             logger.info(f"🔐 User logged out: {user_email}")
         
+        # Clear session
         st.session_state.auth = {
             'authenticated': False,
             'user': None,
@@ -141,6 +179,15 @@ class AuthManager:
         st.rerun()
     
     def check_permission(self, permission: str) -> bool:
+        """
+        Check if current user has a specific permission.
+        
+        Args:
+            permission: Permission to check
+        
+        Returns:
+            bool: True if user has permission
+        """
         if not self.is_authenticated:
             return False
         
@@ -149,15 +196,21 @@ class AuthManager:
             return False
         
         permissions = self.ROLES[role]['permissions']
+        
+        # Admin has all permissions
         if '*' in permissions:
             return True
+        
         return permission in permissions
     
     def _generate_session_id(self) -> str:
+        """Generate a secure session ID."""
         return secrets.token_urlsafe(32)
     
     def render_login_form(self):
+        """Render login form in sidebar."""
         if self.is_authenticated:
+            # Show user info when logged in
             user = self.current_user
             st.sidebar.markdown(f"""
             <div style="
@@ -177,8 +230,10 @@ class AuthManager:
             
             if st.sidebar.button("🚪 Logout", type="secondary", use_container_width=True):
                 self.logout()
+            
             return True
         else:
+            # Show login form
             st.sidebar.markdown("""
             <div style="
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -195,6 +250,7 @@ class AuthManager:
             email = st.sidebar.text_input("📧 Email", placeholder="user@browns.com")
             password = st.sidebar.text_input("🔑 Password", type="password", placeholder="••••••••")
             
+            # Show demo credentials
             with st.sidebar.expander("🔑 Demo Credentials", expanded=False):
                 st.markdown("""
                 **Admin:** admin@browns.com / Admin123!<br>
@@ -213,14 +269,18 @@ class AuthManager:
                         st.sidebar.error(result['message'])
                 else:
                     st.sidebar.warning("⚠️ Please enter both email and password")
+            
             return False
 
 
 # ============================================================
-# DECORATORS - Keep these simple and fast
+# ROLE-BASED ACCESS DECORATOR
 # ============================================================
 
 def require_auth(func):
+    """
+    Decorator to require authentication.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
         auth = AuthManager()
@@ -231,6 +291,12 @@ def require_auth(func):
     return wrapper
 
 def require_permission(permission: str):
+    """
+    Decorator to require a specific permission.
+    
+    Args:
+        permission: Permission required (e.g., 'edit_inventory')
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -246,6 +312,12 @@ def require_permission(permission: str):
     return decorator
 
 def require_role(role: str):
+    """
+    Decorator to require a specific role.
+    
+    Args:
+        role: Role required (e.g., 'admin')
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -262,56 +334,188 @@ def require_role(role: str):
 
 
 # ============================================================
-# AUDIT LOGGER - Lazy initialization
+# AUDIT LOGGING
 # ============================================================
 
 class AuditLogger:
-    """Audit logging with lazy file initialization."""
+    """
+    Comprehensive audit logging for all sensitive operations.
+    """
     
     def __init__(self):
         self.log_file = 'audit.log'
-        self._initialized = False
+        self._ensure_log_file()
     
     def _ensure_log_file(self):
-        """Ensure audit log file exists - only when needed."""
-        if self._initialized:
-            return
-        
-        try:
-            # Try to write to the file
-            if not os.path.exists(self.log_file):
-                with open(self.log_file, 'w') as f:
-                    f.write("# Audit Log\n")
-                    f.write("# Format: TIMESTAMP | USER | ACTION | DETAILS | IP\n")
-            self._initialized = True
-        except Exception as e:
-            # Don't fail - just continue without file logging
-            logger.warning(f"Could not create audit log file: {e}")
-            self._initialized = True
+        """Ensure audit log file exists."""
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, 'w') as f:
+                f.write("# Audit Log\n")
+                f.write("# Format: TIMESTAMP | USER | ACTION | DETAILS | IP\n")
     
     def log(self, action: str, details: str = "", user: str = None):
-        """Log an audit event."""
-        self._ensure_log_file()
+        """
+        Log an audit event.
+        
+        Args:
+            action: Action performed (e.g., 'LOGIN', 'RECORD_RECEIPT')
+            details: Additional details about the action
+            user: User who performed the action
+        """
+        auth = AuthManager()
+        user_email = user or (auth.current_user['email'] if auth.is_authenticated else 'SYSTEM')
+        
+        timestamp = datetime.now().isoformat()
+        log_entry = f"{timestamp} | {user_email} | {action} | {details}\n"
         
         try:
-            auth = AuthManager()
-            user_email = user or (auth.current_user['email'] if auth.is_authenticated else 'SYSTEM')
-            timestamp = datetime.now().isoformat()
-            log_entry = f"{timestamp} | {user_email} | {action} | {details}\n"
-            
             with open(self.log_file, 'a') as f:
                 f.write(log_entry)
         except Exception as e:
-            # Silently fail - don't break the app for logging
-            logger.debug(f"Audit log failed: {e}")
+            logger.error(f"Failed to write audit log: {e}")
+    
+    def get_logs(self, limit: int = 100, user: str = None) -> List[str]:
+        """
+        Retrieve audit logs.
+        
+        Args:
+            limit: Maximum number of logs to return
+            user: Filter by user
+        
+        Returns:
+            List of log entries
+        """
+        logs = []
+        try:
+            with open(self.log_file, 'r') as f:
+                lines = f.readlines()
+                # Skip header lines
+                lines = [l for l in lines if not l.startswith('#')]
+                
+                for line in lines[-limit:]:
+                    if user and user not in line:
+                        continue
+                    logs.append(line.strip())
+        except Exception as e:
+            logger.error(f"Failed to read audit logs: {e}")
+        
+        return logs
+    
+    def log_action(func):
+        """
+        Decorator to automatically log function calls.
+        
+        Args:
+            func: Function to wrap
+        """
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            audit = AuditLogger()
+            auth = AuthManager()
+            
+            # Log before execution
+            action = f"CALL_{func.__name__.upper()}"
+            user = auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+            
+            audit.log(
+                action=action,
+                details=f"Arguments: {args}, {kwargs}",
+                user=user
+            )
+            
+            # Execute function
+            result = func(*args, **kwargs)
+            
+            # Log success
+            audit.log(
+                action=f"{action}_SUCCESS",
+                details=f"Function completed successfully",
+                user=user
+            )
+            
+            return result
+        return wrapper
+        return log_action
 
 
 # ============================================================
-# SESSION MANAGER
+# DATA ENCRYPTION
+# ============================================================
+
+class DataEncryption:
+    """
+    Data encryption utilities for sensitive data.
+    """
+    
+    def __init__(self, key: str = None):
+        """
+        Initialize encryption with a key.
+        
+        Args:
+            key: Encryption key (if None, generates from secret)
+        """
+        if key is None:
+            # Use a derived key from app secrets
+            try:
+                secret = st.secrets.get("ENCRYPTION_KEY", "default_encryption_key")
+            except:
+                secret = "default_encryption_key"
+            
+            # Derive a key
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=b'salt_',
+                iterations=100000,
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(secret.encode()))
+        
+        self.cipher = Fernet(key)
+    
+    def encrypt(self, data: str) -> str:
+        """
+        Encrypt data.
+        
+        Args:
+            data: Data to encrypt
+        
+        Returns:
+            Encrypted data as string
+        """
+        if not data:
+            return data
+        encrypted = self.cipher.encrypt(data.encode())
+        return base64.urlsafe_b64encode(encrypted).decode()
+    
+    def decrypt(self, encrypted_data: str) -> str:
+        """
+        Decrypt data.
+        
+        Args:
+            encrypted_data: Data to decrypt
+        
+        Returns:
+            Decrypted data
+        """
+        if not encrypted_data:
+            return encrypted_data
+        try:
+            encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
+            decrypted = self.cipher.decrypt(encrypted_bytes)
+            return decrypted.decode()
+        except Exception as e:
+            logger.error(f"Decryption failed: {e}")
+            return None
+
+
+# ============================================================
+# SESSION MANAGEMENT
 # ============================================================
 
 class SessionManager:
-    """Secure session management with timeout."""
+    """
+    Secure session management with timeout and validation.
+    """
     
     SESSION_TIMEOUT = 3600  # 1 hour
     
@@ -319,150 +523,139 @@ class SessionManager:
         self.auth = AuthManager()
     
     def validate_session(self) -> bool:
+        """
+        Validate current session.
+        
+        Returns:
+            bool: True if session is valid
+        """
         if not self.auth.is_authenticated:
             return False
         
+        # Check session timeout
         last_activity = st.session_state.auth.get('last_activity')
         if last_activity:
-            try:
-                last_time = datetime.fromisoformat(last_activity)
-                if (datetime.now() - last_time).seconds > self.SESSION_TIMEOUT:
-                    self.auth.logout()
-                    st.warning("⏰ Session expired. Please login again.")
-                    return False
-            except:
-                pass
+            last_time = datetime.fromisoformat(last_activity)
+            if (datetime.now() - last_time).seconds > self.SESSION_TIMEOUT:
+                # Session expired
+                self.auth.logout()
+                st.warning("⏰ Session expired. Please login again.")
+                return False
         
+        # Update last activity
         st.session_state.auth['last_activity'] = datetime.now().isoformat()
         return True
+    
+    def render_session_status(self):
+        """Render session status in sidebar."""
+        if self.auth.is_authenticated:
+            user = self.auth.current_user
+            st.sidebar.caption(f"🕐 Session active")
 
 
 # ============================================================
-# DATA ENCRYPTION - Lazy initialization
-# ============================================================
-
-class DataEncryption:
-    """Data encryption with lazy initialization."""
-    
-    def __init__(self, key: str = None):
-        self._key = key
-        self._cipher = None
-        self._initialized = False
-    
-    def _ensure_cipher(self):
-        """Initialize cipher only when needed."""
-        if self._initialized:
-            return
-        
-        try:
-            if self._key is None:
-                try:
-                    secret = st.secrets.get("ENCRYPTION_KEY", "default_encryption_key")
-                except:
-                    secret = "default_encryption_key"
-                
-                # Use fewer iterations for faster startup
-                kdf = PBKDF2HMAC(
-                    algorithm=hashes.SHA256(),
-                    length=32,
-                    salt=b'salt_',
-                    iterations=10000,  # Reduced from 100000
-                )
-                self._key = base64.urlsafe_b64encode(kdf.derive(secret.encode()))
-            
-            self._cipher = Fernet(self._key)
-            self._initialized = True
-        except Exception as e:
-            logger.error(f"Failed to initialize encryption: {e}")
-            self._initialized = True
-    
-    def encrypt(self, data: str) -> str:
-        if not data:
-            return data
-        self._ensure_cipher()
-        if not self._cipher:
-            return data
-        try:
-            encrypted = self._cipher.encrypt(data.encode())
-            return base64.urlsafe_b64encode(encrypted).decode()
-        except:
-            return data
-    
-    def decrypt(self, encrypted_data: str) -> str:
-        if not encrypted_data:
-            return encrypted_data
-        self._ensure_cipher()
-        if not self._cipher:
-            return encrypted_data
-        try:
-            encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
-            decrypted = self._cipher.decrypt(encrypted_bytes)
-            return decrypted.decode()
-        except:
-            return None
-
-
-# ============================================================
-# API KEY MANAGER - Lazy initialization
+# API KEY MANAGEMENT
 # ============================================================
 
 class ApiKeyManager:
-    """API key management with lazy file initialization."""
+    """
+    API key management for external integrations.
+    """
     
     def __init__(self):
         self.keys_file = 'api_keys.json'
-        self._initialized = False
+        self._ensure_keys_file()
     
     def _ensure_keys_file(self):
-        if self._initialized:
-            return
-        
-        try:
-            if not os.path.exists(self.keys_file):
-                with open(self.keys_file, 'w') as f:
-                    json.dump({}, f)
-            self._initialized = True
-        except Exception as e:
-            logger.warning(f"Could not create API keys file: {e}")
-            self._initialized = True
+        """Ensure API keys file exists."""
+        if not os.path.exists(self.keys_file):
+            with open(self.keys_file, 'w') as f:
+                json.dump({}, f)
     
     def generate_key(self, name: str, permissions: List[str] = None) -> str:
-        self._ensure_keys_file()
+        """
+        Generate a new API key.
+        
+        Args:
+            name: Name for the key
+            permissions: List of permissions
+        
+        Returns:
+            API key
+        """
         key = secrets.token_urlsafe(32)
         
+        with open(self.keys_file, 'r') as f:
+            keys = json.load(f)
+        
+        keys[key] = {
+            'name': name,
+            'created': datetime.now().isoformat(),
+            'permissions': permissions or ['*'],
+            'last_used': None
+        }
+        
+        with open(self.keys_file, 'w') as f:
+            json.dump(keys, f, indent=2)
+        
+        logger.info(f"🔑 API key generated: {name}")
+        return key
+    
+    def validate_key(self, key: str, required_permission: str = None) -> bool:
+        """
+        Validate an API key.
+        
+        Args:
+            key: API key to validate
+            required_permission: Permission required
+        
+        Returns:
+            bool: True if key is valid
+        """
         try:
             with open(self.keys_file, 'r') as f:
                 keys = json.load(f)
             
-            keys[key] = {
-                'name': name,
-                'created': datetime.now().isoformat(),
-                'permissions': permissions or ['*'],
-                'last_used': None
-            }
+            if key not in keys:
+                return False
             
+            key_data = keys[key]
+            
+            # Update last used
+            key_data['last_used'] = datetime.now().isoformat()
             with open(self.keys_file, 'w') as f:
                 json.dump(keys, f, indent=2)
-        except:
-            pass
-        
-        return key
+            
+            # Check permissions
+            if required_permission:
+                permissions = key_data.get('permissions', [])
+                if '*' not in permissions and required_permission not in permissions:
+                    return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"API key validation failed: {e}")
+            return False
 
 
 # ============================================================
-# SECURITY DASHBOARD
+# SECURITY DASHBOARD UI
 # ============================================================
 
 def render_security_dashboard():
-    """Render security dashboard."""
+    """
+    Render security dashboard for admin users.
+    """
     st.markdown("### 🔐 Security Dashboard")
     
     auth = AuthManager()
     
+    # Only show to admin
     if not auth.is_authenticated or auth.current_role != 'admin':
         st.warning("🔒 This section is restricted to administrators")
         return
     
+    # Current session info
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -472,21 +665,88 @@ def render_security_dashboard():
     with col3:
         login_time = datetime.fromisoformat(auth.current_user.get('login_time', datetime.now().isoformat()))
         st.metric("🕐 Login Time", login_time.strftime('%H:%M:%S'))
+    
+    # Audit logs
+    st.markdown("---")
+    st.markdown("### 📜 Recent Audit Logs")
+    
+    audit = AuditLogger()
+    logs = audit.get_logs(limit=20)
+    
+    if logs:
+        for log in logs:
+            parts = log.split(' | ')
+            if len(parts) >= 4:
+                timestamp, user, action, details = parts[:4]
+                st.text(f"{timestamp} | {user} | {action} | {details[:50]}...")
+    else:
+        st.info("No audit logs found")
+    
+    # API Key Management
+    st.markdown("---")
+    st.markdown("### 🔑 API Key Management")
+    
+    api_manager = ApiKeyManager()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        key_name = st.text_input("Key Name", placeholder="Integration Name")
+        key_permissions = st.multiselect(
+            "Permissions",
+            ['view_inventory', 'edit_inventory', 'view_reports', 'record_usage', 'record_receipt'],
+            default=['view_inventory']
+        )
+        
+        if st.button("🔑 Generate API Key", type="primary"):
+            if key_name:
+                new_key = api_manager.generate_key(key_name, key_permissions)
+                st.success(f"✅ API Key generated: `{new_key}`")
+                st.info("💡 Save this key now. It won't be shown again.")
+            else:
+                st.error("❌ Please enter a key name")
+    
+    with col2:
+        st.info("""
+        **API Key Management:**
+        - Keys are used for external integrations
+        - Each key has specific permissions
+        - Keys can be revoked at any time
+        - Store keys securely
+        """)
+    
+    # Session Management
+    st.markdown("---")
+    st.markdown("### 🔄 Active Sessions")
+    
+    session_manager = SessionManager()
+    if session_manager.auth.is_authenticated:
+        st.success(f"✅ Active session for: {session_manager.auth.current_user['name']}")
+        st.caption(f"Session timeout: {session_manager.SESSION_TIMEOUT // 60} minutes")
+        
+        if st.button("🚪 Force Logout", type="secondary"):
+            session_manager.auth.logout()
+            st.success("✅ Logged out successfully")
+            st.rerun()
 
 
 # ============================================================
-# SECURE ENDPOINT DECORATOR
+# SECURITY DECORATORS
 # ============================================================
 
 def secure_endpoint(func):
-    """Decorator to secure an endpoint."""
+    """
+    Decorator to secure an endpoint with authentication and session validation.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
+        # Validate session
         session = SessionManager()
         if not session.validate_session():
             st.error("🔒 Session invalid or expired. Please login again.")
             return None
         
+        # Check authentication
         auth = AuthManager()
         if not auth.is_authenticated:
             st.error("🔒 Please login to access this feature")
