@@ -22,9 +22,87 @@ import os
 import time
 from functools import wraps
 import re
-from streamlit_extras.rate_limiting import rate_limit
+import pandas as pd  # <-- ADD THIS
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# 🔐 RATE LIMITING (FIXED - No external dependency)
+# ============================================================
+
+# In-memory rate limit storage
+_rate_limit_cache = {}
+
+def _clean_rate_limit_cache():
+    """Clean expired rate limit entries."""
+    now = time.time()
+    expired = []
+    for key, data in _rate_limit_cache.items():
+        if now - data['first_call'] > data['period']:
+            expired.append(key)
+    for key in expired:
+        del _rate_limit_cache[key]
+
+def rate_limited(max_calls: int = 5, period: int = 60):
+    """
+    Decorator to rate limit function calls.
+    
+    Args:
+        max_calls: Maximum number of calls allowed in the period
+        period: Time period in seconds
+    
+    Usage:
+        @rate_limited(max_calls=5, period=60)
+        def my_function():
+            pass
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get user identifier
+            try:
+                # Try to import AuthManager dynamically
+                from core.security import AuthManager
+                auth = AuthManager()
+                user_key = auth.current_user['email'] if auth.is_authenticated else 'anonymous'
+            except:
+                user_key = 'anonymous'
+            
+            key = f"{user_key}:{func.__name__}"
+            now = time.time()
+            
+            # Clean expired entries
+            _clean_rate_limit_cache()
+            
+            # Check if key exists
+            if key not in _rate_limit_cache:
+                _rate_limit_cache[key] = {
+                    'calls': 0,
+                    'first_call': now,
+                    'period': period,
+                    'max_calls': max_calls
+                }
+            
+            data = _rate_limit_cache[key]
+            
+            # Reset if period expired
+            if now - data['first_call'] > period:
+                data['calls'] = 0
+                data['first_call'] = now
+            
+            # Check rate limit
+            if data['calls'] >= max_calls:
+                remaining = max_calls - data['calls']
+                st.warning(f"⚠️ Rate limit exceeded. Please wait {period} seconds before trying again.")
+                raise Exception(f"Rate limit exceeded. {remaining} attempts remaining.")
+            
+            # Increment call count
+            data['calls'] += 1
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 
 # ============================================================
 # PASSWORD HASHING
@@ -377,137 +455,6 @@ class TwoFactorAuth:
 
 
 # ============================================================
-# RATE LIMITING
-# ============================================================
-
-class RateLimiter:
-    """
-    Rate limiting for sensitive operations.
-    """
-    
-    def __init__(self):
-        self.limits_file = 'rate_limits.json'
-        self._init_limits_file()
-    
-    def _init_limits_file(self):
-        """Initialize rate limits file."""
-        if not os.path.exists(self.limits_file):
-            with open(self.limits_file, 'w') as f:
-                json.dump({}, f)
-    
-    def check_limit(self, key: str, max_calls: int = 10, period: int = 60) -> bool:
-        """
-        Check if rate limit is exceeded.
-        
-        Args:
-            key: Unique key for the operation (e.g., user_id + action)
-            max_calls: Maximum calls allowed in the period
-            period: Time period in seconds
-        
-        Returns:
-            bool: True if limit is not exceeded
-        """
-        try:
-            with open(self.limits_file, 'r') as f:
-                limits = json.load(f)
-            
-            current_time = time.time()
-            
-            if key not in limits:
-                limits[key] = {
-                    'calls': 0,
-                    'first_call': current_time,
-                    'last_call': current_time
-                }
-            
-            limit_data = limits[key]
-            
-            # Check if period has expired
-            if current_time - limit_data['first_call'] > period:
-                # Reset counter
-                limits[key] = {
-                    'calls': 1,
-                    'first_call': current_time,
-                    'last_call': current_time
-                }
-                with open(self.limits_file, 'w') as f:
-                    json.dump(limits, f, indent=2)
-                return True
-            
-            # Check if limit is exceeded
-            if limit_data['calls'] >= max_calls:
-                return False
-            
-            # Increment counter
-            limits[key]['calls'] += 1
-            limits[key]['last_call'] = current_time
-            
-            with open(self.limits_file, 'w') as f:
-                json.dump(limits, f, indent=2)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Rate limit check error: {e}")
-            return True  # Allow if there's an error
-    
-    def get_remaining(self, key: str, max_calls: int = 10, period: int = 60) -> int:
-        """
-        Get remaining calls allowed.
-        
-        Args:
-            key: Unique key for the operation
-            max_calls: Maximum calls allowed
-            period: Time period in seconds
-        
-        Returns:
-            int: Remaining calls
-        """
-        try:
-            with open(self.limits_file, 'r') as f:
-                limits = json.load(f)
-            
-            if key not in limits:
-                return max_calls
-            
-            current_time = time.time()
-            limit_data = limits[key]
-            
-            if current_time - limit_data['first_call'] > period:
-                return max_calls
-            
-            return max_calls - limit_data['calls']
-            
-        except Exception as e:
-            logger.error(f"Get remaining calls error: {e}")
-            return max_calls
-
-
-def rate_limited(max_calls: int = 10, period: int = 60):
-    """
-    Decorator for rate limiting.
-    
-    Args:
-        max_calls: Maximum calls allowed in the period
-        period: Time period in seconds
-    """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            limiter = RateLimiter()
-            key = f"{func.__name__}_{st.session_state.get('user_email', 'anonymous')}"
-            
-            if not limiter.check_limit(key, max_calls, period):
-                remaining = limiter.get_remaining(key, max_calls, period)
-                st.warning(f"⏰ Rate limit exceeded. Please wait {period} seconds. Remaining calls: {remaining}")
-                return None
-            
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
-# ============================================================
 # SSO/OAUTH INTEGRATION (Simplified)
 # ============================================================
 
@@ -700,6 +647,8 @@ class UserManager:
         """
         st.markdown("### 👤 User Management")
         
+        # Import AuthManager here to avoid circular import
+        from core.security import AuthManager
         auth = AuthManager()
         if not auth.is_authenticated or auth.current_role != 'admin':
             st.warning("🔒 This section is restricted to administrators")
@@ -723,6 +672,17 @@ class UserManager:
         
         if user_data:
             st.dataframe(pd.DataFrame(user_data), use_container_width=True, hide_index=True)
+        
+        # Stats
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("👤 Total Users", len(users))
+        with col2:
+            admins = len([u for u in users.values() if u.get('role') == 'admin'])
+            st.metric("👑 Admins", admins)
+        with col3:
+            twofa_users = len([u for u in users.values() if u.get('2fa_enabled')])
+            st.metric("🔐 2FA Enabled", twofa_users)
         
         # Add user form
         st.markdown("---")
@@ -758,6 +718,47 @@ class UserManager:
                     st.rerun()
                 else:
                     st.error("❌ Failed to create user. Email may already exist or password is weak.")
+        
+        # User actions
+        st.markdown("---")
+        st.markdown("#### 🔧 User Actions")
+        
+        selected_user = st.selectbox(
+            "Select user to manage",
+            list(users.keys()) if users else ["No users"]
+        )
+        
+        if selected_user and selected_user != "No users":
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                current_2fa = users[selected_user].get('2fa_enabled', False)
+                status = "Disable" if current_2fa else "Enable"
+                if st.button(f"🔐 {status} 2FA", use_container_width=True):
+                    # Toggle 2FA
+                    users[selected_user]['2fa_enabled'] = not current_2fa
+                    with open(self.users_file, 'w') as f:
+                        json.dump(users, f, indent=2)
+                    st.success(f"✅ 2FA {status}d for {selected_user}")
+                    st.rerun()
+            
+            with col2:
+                if st.button("👤 Reset Password", use_container_width=True):
+                    st.session_state._reset_password_for = selected_user
+                    st.info(f"📧 Password reset link sent to {selected_user}")
+            
+            with col3:
+                if st.button("🗑️ Delete User", type="secondary", use_container_width=True):
+                    if selected_user != auth.current_user['email']:
+                        if st.button("⚠️ Confirm Delete", type="primary"):
+                            success = self.delete_user(selected_user)
+                            if success:
+                                st.success(f"✅ User {selected_user} deleted")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete user")
+                    else:
+                        st.warning("⚠️ Cannot delete your own account")
 
 
 # ============================================================
@@ -779,7 +780,7 @@ class PasswordReset:
             with open(self.reset_file, 'w') as f:
                 json.dump({}, f)
     
-    def request_reset(self, email: str) -> bool:
+    def request_reset(self, email: str) -> Dict:
         """
         Request password reset for a user.
         
@@ -787,7 +788,7 @@ class PasswordReset:
             email: User email
         
         Returns:
-            bool: True if reset email sent
+            Dict with success status and message
         """
         try:
             # Check if user exists
@@ -795,7 +796,10 @@ class PasswordReset:
             users = user_manager.get_users()
             
             if email not in users:
-                return False
+                return {
+                    'success': False,
+                    'message': 'Email not found in our system'
+                }
             
             # Generate reset token
             token = secrets.token_urlsafe(32)
@@ -819,11 +823,17 @@ class PasswordReset:
             self._send_reset_email(email, token)
             
             logger.info(f"Password reset requested for: {email}")
-            return True
+            return {
+                'success': True,
+                'message': 'Password reset link sent to your email'
+            }
             
         except Exception as e:
             logger.error(f"Password reset request error: {e}")
-            return False
+            return {
+                'success': False,
+                'message': f'Password reset failed: {str(e)}'
+            }
     
     def reset_password(self, token: str, new_password: str) -> bool:
         """
@@ -924,10 +934,10 @@ class PasswordReset:
             
             if st.button("📧 Send Reset Link", type="primary"):
                 if email:
-                    success = self.request_reset(email)
-                    if success:
-                        st.success("✅ Password reset link sent to your email")
+                    result = self.request_reset(email)
+                    if result['success']:
+                        st.success(result['message'])
                     else:
-                        st.error("❌ Email not found in our system")
+                        st.error(result['message'])
                 else:
                     st.warning("⚠️ Please enter your email address")
