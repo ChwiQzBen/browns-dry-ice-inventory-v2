@@ -721,8 +721,6 @@ def clear_transactions_from_db():
     # ============================================================
     # 🔐 AUDIT LOGGING
     # ============================================================
-    from core.security import AuditLogger, AuthManager
-    
     audit = AuditLogger()
     auth = AuthManager()
     
@@ -3843,7 +3841,7 @@ def request_password_reset(email):
         dict: Success status and message
     """
     try:
-        from core.advanced_security import PasswordReset
+#         from core.advanced_security import PasswordReset
         reset_manager = PasswordReset()
         result = reset_manager.request_reset(email)
         
@@ -5361,7 +5359,7 @@ def main():
                 two_fa_code = st.sidebar.text_input("6-digit code", type="password", placeholder="123456")
                 
                 if st.sidebar.button("✅ Verify", type="primary", use_container_width=True):
-                    from core.advanced_security import TwoFactorAuth
+#                     from core.advanced_security import TwoFactorAuth
                     two_factor = TwoFactorAuth()
                     
                     # Try to verify the code
@@ -5949,8 +5947,6 @@ def main():
         # ============================================================
         # 🔐 AUTHENTICATION CHECK
         # ============================================================
-        from core.security import AuthManager, AuditLogger
-        
         auth = AuthManager()
         if not auth.is_authenticated:
             st.sidebar.error("🔒 Please login to record usage")
@@ -6344,8 +6340,6 @@ def main():
         # ============================================================
         # 🔐 AUTHENTICATION CHECK
         # ============================================================
-        from core.security import AuthManager, AuditLogger
-        
         auth = AuthManager()
         if not auth.is_authenticated:
             st.sidebar.error("🔒 Please login to generate reports")
