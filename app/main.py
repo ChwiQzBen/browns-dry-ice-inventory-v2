@@ -6945,6 +6945,12 @@ def main():
     # Close the card
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # ============================================================
+    # 🔐 SECURITY DASHBOARD
+    if st.session_state.get('show_security_dashboard', False):
+        from core.security import render_security_dashboard
+        render_security_dashboard()
+        st.stop()
 
     # ============================================================
     # CONTAINER 1: ALL ITEMS MODE (5 TABS)
