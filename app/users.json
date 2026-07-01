@@ -1,0 +1,11 @@
+{
+  "admin@browns.com": {
+    "password": "$2b$12$Y52pIdBzgca.UzPa6Xmzuu7S5NFLEt.xff6kK0U7LICNSj7MDAxxC",
+    "role": "admin",
+    "name": "System Administrator",
+    "email_verified": true,
+    "2fa_enabled": false,
+    "created": "2026-07-01T15:20:06.709768",
+    "last_login": null
+  }
+}

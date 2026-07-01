@@ -83,12 +83,7 @@ from core.advanced_security import (
 )
 # 🔐 SECURITY AVAILABILITY FLAG
 # ============================================================
-try:
-    from core.security import AuthManager
-    SECURITY_AVAILABLE = True
-except ImportError:
-    SECURITY_AVAILABLE = False
-    print("Warning: Security modules not available")
+SECURITY_AVAILABLE = True
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
@@ -5399,8 +5394,11 @@ def main():
                 st.session_state.show_security_dashboard = True
 
     except Exception as e:
-        logger.error(f"Auth UI error: {e}")
-        st.sidebar.warning("🔒 Security UI unavailable")
+        # SHOW THE REAL ERROR
+        st.sidebar.error(f"❌ Auth Error: {str(e)}")
+        import traceback
+        st.sidebar.code(traceback.format_exc())
+        logger.error(f"Auth UI error: {e}", exc_info=True)
 
     # ============================================================
     # VIEW MODE SELECTOR 

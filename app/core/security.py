@@ -21,9 +21,14 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import pandas as pd
 
 # ============================================================
-# 🔐 IMPORT RATE LIMITING FROM ADVANCED SECURITY
+# 🔐 IMPORT FROM ADVANCED SECURITY (MOVED TO TOP)
 # ============================================================
-from core.advanced_security import rate_limited
+from core.advanced_security import (
+    rate_limited,
+    UserManager,
+    PasswordManager,
+    TwoFactorAuth
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +117,7 @@ class AuthManager:
             Dict with success status and message
         """
         try:
-            # Import UserManager and PasswordManager from advanced_security
-            from core.advanced_security import UserManager, PasswordManager
-            
+            # UserManager and PasswordManager are already imported at the top
             user_manager = UserManager()
             users = user_manager.get_users()
             
@@ -219,7 +222,7 @@ class AuthManager:
                     'message': '❌ No pending 2FA verification'
                 }
             
-            from core.advanced_security import TwoFactorAuth
+            # TwoFactorAuth is already imported at the top
             
             # Check if 2FA is set up
             secret = st.session_state.get('2fa', {}).get('secret')
@@ -902,8 +905,7 @@ def render_security_dashboard():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Get total users from UserManager
-            from core.advanced_security import UserManager
+            # UserManager is already imported at the top
             user_manager = UserManager()
             users = user_manager.get_users()
             st.metric("👤 Total Users", len(users))
@@ -937,8 +939,7 @@ def render_security_dashboard():
                 st.rerun()
     
     with security_tab2:
-        # User Management (from advanced_security)
-        from core.advanced_security import UserManager
+        # User Management (UserManager is already imported at the top)
         user_manager = UserManager()
         user_manager.render_user_management()
     
