@@ -5317,7 +5317,6 @@ def main():
     # ============================================================
     # 🔐 AUTHENTICATION STATUS INDICATOR
     # ============================================================
-    # Show login status (always visible, takes minimal space)
     auth_check = st.session_state.get('_auth')
     if auth_check and auth_check.is_authenticated:
         st.sidebar.markdown("🟢 Logged in")
@@ -5325,9 +5324,9 @@ def main():
         st.sidebar.markdown("🔴 Logged out")
 
     # ============================================================
-    # 🔐 AUTHENTICATION SECTION IN SIDEBAR (Collapsible)
+    # 🔐 AUTHENTICATION SECTION (Compact)
     # ============================================================
-    with st.sidebar.expander("🔐 Authentication", expanded=False):
+    with st.sidebar.expander("🔐", expanded=False):
         try:
             auth = st.session_state.get('_auth')
             if auth is None:
@@ -5345,34 +5344,35 @@ def main():
                             st.warning("🔒 Password reset unavailable")
                     auth = DummyAuth()
             
-            # ============================================================
-            # 🔑 CHECK IF PASSWORD RESET IS REQUESTED
-            # ============================================================
             if st.session_state.get('show_password_reset', False):
                 render_password_reset_form()
             else:
-                # Check if 2FA is pending
                 if '2fa_pending' in st.session_state or st.session_state.get('_2fa_pending'):
                     st.markdown("""
                     <div style="
                         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        padding: 12px 15px;
-                        border-radius: 8px;
+                        padding: 6px 12px;
+                        border-radius: 6px;
                         color: white;
-                        margin-bottom: 15px;
+                        margin-bottom: 10px;
+                        text-align: center;
+                        font-size: 13px;
                     ">
-                        <div style="font-size: 14px; font-weight: 600;">🔐 2FA Verification</div>
-                        <div style="font-size: 12px; opacity: 0.8;">Enter your authenticator code</div>
+                        🔐 2FA
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    two_fa_code = st.text_input("6-digit code", type="password", placeholder="123456")
+                    two_fa_code = st.text_input(
+                        "6-digit code", 
+                        type="password", 
+                        placeholder="123456",
+                        label_visibility="collapsed"
+                    )
                     
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("✅ Verify", type="primary", use_container_width=True):
+                        if st.button("✅", use_container_width=True):
                             two_factor = TwoFactorAuth()
-                            
                             if hasattr(auth, 'verify_2fa'):
                                 result = auth.verify_2fa(two_fa_code)
                                 if result['success']:
@@ -5382,13 +5382,12 @@ def main():
                                     st.error(result['message'])
                             else:
                                 if two_factor.verify_2fa_login(two_fa_code):
-                                    st.success("✅ 2FA verified successfully!")
+                                    st.success("✅ Verified!")
                                     st.rerun()
                                 else:
-                                    st.error("❌ Invalid 2FA code")
-                    
+                                    st.error("❌ Invalid")
                     with col2:
-                        if st.button("❌ Cancel", use_container_width=True):
+                        if st.button("✕", use_container_width=True):
                             if hasattr(auth, 'cancel_2fa'):
                                 auth.cancel_2fa()
                             st.rerun()
@@ -5397,11 +5396,11 @@ def main():
             
             # Security Dashboard (Admin Only)
             if auth.is_authenticated and auth.current_role == 'admin':
-                if st.button("🛡️ Security Dashboard", use_container_width=True):
+                if st.button("🛡️ Dashboard", use_container_width=True):
                     st.session_state.show_security_dashboard = True
 
         except Exception as e:
-            st.error(f"❌ Auth Error: {str(e)}")
+            st.error(f"❌ {str(e)[:50]}")
             import traceback
             st.code(traceback.format_exc())
             logger.error(f"Auth UI error: {e}", exc_info=True)

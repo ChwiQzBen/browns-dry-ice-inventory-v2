@@ -366,135 +366,146 @@ class AuthManager:
     
     def render_login_form(self):
         """
-        Render login form in sidebar with 2FA support and rate limiting.
+        Render compact login form in sidebar with 2FA support and rate limiting.
         """
         # Check if 2FA is pending
         if self.is_2fa_pending():
             user = self.get_2fa_user()
-            st.sidebar.markdown("""
+            st.markdown("""
             <div style="
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 12px 15px;
-                border-radius: 8px;
+                padding: 8px 12px;
+                border-radius: 6px;
                 color: white;
-                margin-bottom: 15px;
+                margin-bottom: 10px;
+                text-align: center;
+                font-size: 13px;
             ">
-                <div style="font-size: 14px; font-weight: 600;">🔐 2FA Verification</div>
-                <div style="font-size: 12px; opacity: 0.8;">Enter your authenticator code</div>
+                🔐 2FA Verification
             </div>
             """, unsafe_allow_html=True)
             
-            st.sidebar.caption(f"👤 {user['name']} ({user['email']})")
+            st.caption(f"👤 {user['name']}")
             
-            two_fa_code = st.sidebar.text_input(
+            two_fa_code = st.text_input(
                 "6-digit code", 
                 type="password", 
                 placeholder="123456",
-                key="2fa_login_code"
+                key="2fa_login_code",
+                label_visibility="collapsed"
             )
             
-            col1, col2 = st.sidebar.columns(2)
+            col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Verify", type="primary", use_container_width=True):
                     if two_fa_code:
                         result = self.verify_2fa(two_fa_code)
                         if result['success']:
-                            st.sidebar.success(result['message'])
+                            st.success(result['message'])
                             st.rerun()
                         else:
-                            st.sidebar.error(result['message'])
+                            st.error(result['message'])
                     else:
-                        st.sidebar.warning("⚠️ Please enter your 2FA code")
+                        st.warning("⚠️ Enter code")
             
             with col2:
                 if st.button("❌ Cancel", use_container_width=True):
                     self.cancel_2fa()
                     st.rerun()
             
-            st.sidebar.info("💡 For demo, use any 6-digit code or '123456'")
+            st.caption("💡 Use any 6-digit code")
             return True
         
         # Show regular login form
         if self.is_authenticated:
-            # Show user info when logged in
             user = self.current_user
-            st.sidebar.markdown(f"""
+            st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%);
-                padding: 12px 15px;
-                border-radius: 8px;
-                color: white;
-                margin-bottom: 15px;
+                background: rgba(76, 175, 80, 0.1);
+                border-radius: 6px;
+                padding: 8px 12px;
+                margin-bottom: 8px;
+                border-left: 3px solid #4caf50;
             ">
-                <div style="font-size: 14px; font-weight: 600;">✅ Logged In</div>
-                <div style="font-size: 13px; opacity: 0.9;">
-                    👤 {user['name']}<br>
+                <div style="font-size: 13px; font-weight: 600; color: #2e7d32;">
+                    ✅ {user['name']}
+                </div>
+                <div style="font-size: 11px; color: #666;">
                     🏷️ {user['role'].title()}
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            if st.sidebar.button("🚪 Logout", type="secondary", use_container_width=True):
+            if st.button("🚪 Logout", use_container_width=True):
                 self.logout()
-            
             return True
         else:
-            # Show login form
-            st.sidebar.markdown("""
+            # Compact login form
+            st.markdown("""
             <div style="
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 12px 15px;
-                border-radius: 8px;
+                padding: 6px 12px;
+                border-radius: 6px;
                 color: white;
-                margin-bottom: 15px;
+                margin-bottom: 10px;
+                text-align: center;
+                font-size: 13px;
             ">
-                <div style="font-size: 14px; font-weight: 600;">🔐 Login Required</div>
-                <div style="font-size: 12px; opacity: 0.8;">Please sign in to continue</div>
+                🔐 Login
             </div>
             """, unsafe_allow_html=True)
             
-            email = st.sidebar.text_input("📧 Email", placeholder="user@browns.com", key="login_email")
-            password = st.sidebar.text_input("🔑 Password", type="password", placeholder="••••••••", key="login_password")
+            email = st.text_input(
+                "📧", 
+                placeholder="user@browns.com", 
+                key="login_email",
+                label_visibility="collapsed"
+            )
+            password = st.text_input(
+                "🔑", 
+                type="password", 
+                placeholder="••••••••", 
+                key="login_password",
+                label_visibility="collapsed"
+            )
             
             # Check if rate limited
             if self._is_rate_limited:
-                st.sidebar.warning("⚠️ Too many login attempts. Please wait a moment before trying again.")
+                st.warning("⚠️ Too many attempts")
             
-            # Show demo credentials
-            with st.sidebar.expander("🔑 Demo Credentials", expanded=False):
-                st.markdown("""
-                **Admin:** admin@browns.com / Admin123!<br>
-                **Manager:** manager@browns.com / Manager123!<br>
-                **User:** user@browns.com / User123!<br>
-                **Viewer:** viewer@browns.com / Viewer123!
-                """, unsafe_allow_html=True)
-            
-            if st.sidebar.button("🔐 Login", type="primary", use_container_width=True):
+            if st.button("🔐 Login", type="primary", use_container_width=True):
                 if email and password:
                     result = self.login(email, password)
                     if result.get('success') and result.get('requires_2fa'):
-                        st.sidebar.info("🔐 2FA required - Please enter your code")
+                        st.info("🔐 2FA required")
                         st.rerun()
                     elif result['success']:
-                        st.sidebar.success(result['message'])
+                        st.success(result['message'])
                         st.rerun()
                     else:
-                        st.sidebar.error(result['message'])
+                        st.error(result['message'])
                 else:
-                    st.sidebar.warning("⚠️ Please enter both email and password")
-
-            # ============================================================
-            # 🔑 ADD FORGOT PASSWORD LINK HERE
-            # ============================================================
-            st.sidebar.markdown("---")
-            col1, col2 = st.sidebar.columns([3, 1])
+                    st.warning("⚠️ Enter credentials")
+            
+            # Compact forgot password
+            col1, col2 = st.columns([3, 1])
             with col1:
                 if st.button("🔑 Forgot Password?", use_container_width=True):
                     st.session_state.show_password_reset = True
                     st.rerun()
-
+            with col2:
+                st.caption(" ")
+            
+            # Demo credentials - compact
+            with st.expander("🔑 Demo", expanded=False):
+                st.markdown("""
+                **Admin:** admin@browns.com / Admin123!  
+                **Manager:** manager@browns.com / Manager123!  
+                **User:** user@browns.com / User123!  
+                **Viewer:** viewer@browns.com / Viewer123!
+                """)
+            
             return False
-
 
 # ============================================================
 # ROLE-BASED ACCESS DECORATOR
