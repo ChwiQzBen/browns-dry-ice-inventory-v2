@@ -72,6 +72,23 @@ from core.security import (
     secure_endpoint,
     render_security_dashboard
 )
+from core.advanced_security import (
+    PasswordManager,
+    TwoFactorAuth,
+    RateLimiter,
+    rate_limited,
+    SSOAuth,
+    UserManager,
+    PasswordReset
+)
+# 🔐 SECURITY AVAILABILITY FLAG
+# ============================================================
+try:
+    from core.security import AuthManager
+    SECURITY_AVAILABLE = True
+except ImportError:
+    SECURITY_AVAILABLE = False
+    print("Warning: Security modules not available")
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
@@ -696,6 +713,7 @@ def init_db():
 
 # ============================================================
 # CLEAR TRANSACTIONS - ADMIN ONLY WITH AUDIT LOGGING
+@rate_limited(max_calls=2, period=300)  # 2 clears per 5 minutes
 @require_role('admin')
 def clear_transactions_from_db():
     """
@@ -703,6 +721,7 @@ def clear_transactions_from_db():
     AND historical_orders tables to perform a full reset.
     
     🔐 This function is restricted to ADMIN users only.
+    🔐 Rate limited to 2 calls per 5 minutes to prevent accidental deletion.
     """
     # ============================================================
     # 🔐 AUDIT LOGGING
@@ -757,9 +776,11 @@ def clear_transactions_from_db():
         st.error(f"Database error while clearing transactions: {e}")
     finally:
         conn.close()
-# COMPLETE FUNCTION WITH SECURITY DECORATORS
+# ============================================================
+# 🔐 SECURE ADD TRANSACTION FUNCTION WITH RATE LIMITING
 # ============================================================
 
+@rate_limited(max_calls=10, period=60)  # 10 receipts per minute
 @require_auth
 @require_permission('record_receipt')
 @safe_operation(error_message="Failed to add transaction")
@@ -782,6 +803,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
         DatabaseError: If database operation fails
     
     🔐 This function requires authentication and 'record_receipt' permission.
+    🔐 Rate limited to 10 calls per minute to prevent abuse.
     """
     
     # ============================================================
@@ -2954,9 +2976,12 @@ def display_recommendations(recommendations):
 # 🎨 ENHANCED PDF REPORT GENERATOR (Inventory-Agnostic)
 # ============================================================
 
+@rate_limited(max_calls=5, period=300)  # 5 reports per 5 minutes
 def generate_enhanced_pdf_report(inventory_items, stock_df=None, kpis=None):
     """
     Generate an enhanced PDF report for ALL inventory items
+    
+    🔐 Rate limited to 5 reports per 5 minutes to prevent abuse.
     
     Args:
         inventory_items: Dictionary with all inventory items
@@ -3800,9 +3825,90 @@ def glass_table(dataframe, title=None, height=300):
         hide_index=True
     )
 
+    
     # ============================================================
     # END OF UI HELPER FUNCTIONS
     # ============================================================
+
+    # ============================================================
+    # 🔐 PASSWORD RESET WITH RATE LIMITING
+    # ============================================================
+
+@rate_limited(max_calls=3, period=300)  # 3 password resets per 5 minutes
+def request_password_reset(email):
+    """
+    Request a password reset with rate limiting.
+    
+    🔐 Rate limited to 3 attempts per 5 minutes to prevent abuse.
+    
+    Args:
+        email: User's email address
+    
+    Returns:
+        dict: Success status and message
+    """
+    try:
+        from core.advanced_security import PasswordReset
+        reset_manager = PasswordReset()
+        result = reset_manager.request_reset(email)
+        
+        # Log the request
+        logger.info(f"Password reset requested for: {email}")
+        
+        return result
+    except Exception as e:
+        logger.error(f"Password reset request failed: {e}")
+        return {
+            'success': False, 
+            'message': 'Password reset request failed. Please try again later.'
+        }
+
+def render_password_reset_form():
+    """
+    Render password reset form in the sidebar.
+    """
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+        padding: 12px 15px;
+        border-radius: 8px;
+        color: white;
+        margin-bottom: 15px;
+    ">
+        <div style="font-size: 14px; font-weight: 600;">🔑 Reset Password</div>
+        <div style="font-size: 12px; opacity: 0.8;">Enter your email to receive reset instructions</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    reset_email = st.sidebar.text_input(
+        "📧 Email Address", 
+        placeholder="user@browns.com",
+        key="reset_email_input"
+    )
+    
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        if st.button("📧 Send Reset Link", type="primary", use_container_width=True):
+            if reset_email:
+                result = request_password_reset(reset_email)
+                if result.get('success'):
+                    st.sidebar.success(result.get('message', 'Password reset link sent!'))
+                    st.sidebar.info("📧 Check your email for reset instructions")
+                    # Clear the form
+                    st.session_state.reset_email_input = ""
+                else:
+                    st.sidebar.error(result.get('message', 'Failed to send reset link'))
+            else:
+                st.sidebar.warning("⚠️ Please enter your email address")
+    
+    with col2:
+        if st.button("← Back to Login", use_container_width=True):
+            st.session_state.show_password_reset = False
+            st.rerun()
+    
+    st.sidebar.info("💡 For demo purposes, any valid email will receive a reset link")
+
 def init_stock_take_session():
     """Initialize stock take session state variables (safely)"""
     if 'stock_takes' not in st.session_state:
@@ -5165,7 +5271,10 @@ def main():
         'generate_report': False,
         'confirm_clear_pressed': False,
         'quick_orders': [],
-        'stock_take_inventory': {}
+        'stock_take_inventory': {},
+        'show_password_reset': False,  
+        'reset_email_input': '',       
+        'rate_limit_warning': None    
     }
     
     for key, value in session_defaults.items():
@@ -5212,20 +5321,86 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # 🔐 AUTHENTICATION SECTION
     # ============================================================
-    from core.security import AuthManager
-
-    auth = AuthManager()
-
-    # Show login form or user info
-    auth.render_login_form()
-
+    # 🔐 AUTHENTICATION SECTION IN SIDEBAR
     # ============================================================
-    # 🔐 SECURITY DASHBOARD (Admin Only)
-    if auth.is_authenticated and auth.current_role == 'admin':
-        if st.sidebar.button("🛡️ Security Dashboard", use_container_width=True):
-            st.session_state.show_security_dashboard = True
+    try:
+        auth = st.session_state.get('_auth')
+        if auth is None:
+            if SECURITY_AVAILABLE:
+                auth = AuthManager()
+                st.session_state._auth = auth
+            else:
+                class DummyAuth:
+                    is_authenticated = False
+                    current_user = None
+                    current_role = None
+                    def render_login_form(self):
+                        st.sidebar.warning("🔒 Security module unavailable")
+                    def render_password_reset_form(self):
+                        st.sidebar.warning("🔒 Password reset unavailable")
+                auth = DummyAuth()
+        
+        # ============================================================
+        # 🔑 CHECK IF PASSWORD RESET IS REQUESTED
+        # ============================================================
+        if st.session_state.get('show_password_reset', False):
+            # Show password reset form
+            render_password_reset_form()
+        else:
+            # Check if 2FA is pending
+            if '2fa_pending' in st.session_state or st.session_state.get('_2fa_pending'):
+                st.sidebar.markdown("""
+                <div style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    padding: 12px 15px;
+                    border-radius: 8px;
+                    color: white;
+                    margin-bottom: 15px;
+                ">
+                    <div style="font-size: 14px; font-weight: 600;">🔐 2FA Verification</div>
+                    <div style="font-size: 12px; opacity: 0.8;">Enter your authenticator code</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                two_fa_code = st.sidebar.text_input("6-digit code", type="password", placeholder="123456")
+                
+                if st.sidebar.button("✅ Verify", type="primary", use_container_width=True):
+                    from core.advanced_security import TwoFactorAuth
+                    two_factor = TwoFactorAuth()
+                    
+                    # Try to verify the code
+                    if hasattr(auth, 'verify_2fa'):
+                        result = auth.verify_2fa(two_fa_code)
+                        if result['success']:
+                            st.sidebar.success(result['message'])
+                            st.rerun()
+                        else:
+                            st.sidebar.error(result['message'])
+                    else:
+                        # Fallback: direct verification
+                        if two_factor.verify_2fa_login(two_fa_code):
+                            st.sidebar.success("✅ 2FA verified successfully!")
+                            st.rerun()
+                        else:
+                            st.sidebar.error("❌ Invalid 2FA code")
+                
+                if st.sidebar.button("❌ Cancel", use_container_width=True):
+                    if hasattr(auth, 'cancel_2fa'):
+                        auth.cancel_2fa()
+                    st.rerun()
+            else:
+                # Show login form or user info
+                auth.render_login_form()
+        
+        # Security Dashboard (Admin Only)
+        if auth.is_authenticated and auth.current_role == 'admin':
+            if st.sidebar.button("🛡️ Security Dashboard", use_container_width=True):
+                st.session_state.show_security_dashboard = True
+
+    except Exception as e:
+        logger.error(f"Auth UI error: {e}")
+        st.sidebar.warning("🔒 Security UI unavailable")
 
     # ============================================================
     # VIEW MODE SELECTOR 
