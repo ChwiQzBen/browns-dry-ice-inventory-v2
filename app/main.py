@@ -72,7 +72,6 @@ from core.security import (
     secure_endpoint,
     render_security_dashboard
 )
-from core.security import require_auth, require_permission, AuditLogger, AuthManager
 import base64
 def get_image_base64(image_path):
     """Convert image to base64 for embedding in HTML"""
