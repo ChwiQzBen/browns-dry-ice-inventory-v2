@@ -22,12 +22,12 @@ import os
 import time
 from functools import wraps
 import re
-import pandas as pd  # <-- ADD THIS
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 🔐 RATE LIMITING (FIXED - No external dependency)
+# 🔐 RATE LIMITING
 # ============================================================
 
 # In-memory rate limit storage
@@ -43,12 +43,116 @@ def _clean_rate_limit_cache():
     for key in expired:
         del _rate_limit_cache[key]
 
+
+class RateLimiter:
+    """
+    Rate limiting for sensitive operations.
+    """
+    
+    def __init__(self):
+        self.limits_file = 'rate_limits.json'
+        self._init_limits_file()
+    
+    def _init_limits_file(self):
+        """Initialize rate limits file."""
+        if not os.path.exists(self.limits_file):
+            with open(self.limits_file, 'w') as f:
+                json.dump({}, f)
+    
+    def check_limit(self, key: str, max_calls: int = 10, period: int = 60) -> bool:
+        """
+        Check if rate limit is exceeded.
+        
+        Args:
+            key: Unique key for the operation (e.g., user_id + action)
+            max_calls: Maximum calls allowed in the period
+            period: Time period in seconds
+        
+        Returns:
+            bool: True if limit is not exceeded
+        """
+        try:
+            with open(self.limits_file, 'r') as f:
+                limits = json.load(f)
+            
+            current_time = time.time()
+            
+            if key not in limits:
+                limits[key] = {
+                    'calls': 0,
+                    'first_call': current_time,
+                    'last_call': current_time
+                }
+            
+            limit_data = limits[key]
+            
+            # Check if period has expired
+            if current_time - limit_data['first_call'] > period:
+                # Reset counter
+                limits[key] = {
+                    'calls': 1,
+                    'first_call': current_time,
+                    'last_call': current_time
+                }
+                with open(self.limits_file, 'w') as f:
+                    json.dump(limits, f, indent=2)
+                return True
+            
+            # Check if limit is exceeded
+            if limit_data['calls'] >= max_calls:
+                return False
+            
+            # Increment counter
+            limits[key]['calls'] += 1
+            limits[key]['last_call'] = current_time
+            
+            with open(self.limits_file, 'w') as f:
+                json.dump(limits, f, indent=2)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Rate limit check error: {e}")
+            return True  # Allow if there's an error
+    
+    def get_remaining(self, key: str, max_calls: int = 10, period: int = 60) -> int:
+        """
+        Get remaining calls allowed.
+        
+        Args:
+            key: Unique key for the operation
+            max_calls: Maximum calls allowed
+            period: Time period in seconds
+        
+        Returns:
+            int: Remaining calls
+        """
+        try:
+            with open(self.limits_file, 'r') as f:
+                limits = json.load(f)
+            
+            if key not in limits:
+                return max_calls
+            
+            current_time = time.time()
+            limit_data = limits[key]
+            
+            if current_time - limit_data['first_call'] > period:
+                return max_calls
+            
+            return max_calls - limit_data['calls']
+            
+        except Exception as e:
+            logger.error(f"Get remaining calls error: {e}")
+            return max_calls
+
+
 def rate_limited(max_calls: int = 5, period: int = 60):
     """
-    Decorator to rate limit function calls.
+    Decorator for rate limiting (in-memory version).
     
     Args:
-        max_calls: Maximum number of calls allowed in the period
+        max_calls: Maximum calls allowed in the period
         period: Time period in seconds
     
     Usage:
@@ -61,7 +165,6 @@ def rate_limited(max_calls: int = 5, period: int = 60):
         def wrapper(*args, **kwargs):
             # Get user identifier
             try:
-                # Try to import AuthManager dynamically
                 from core.security import AuthManager
                 auth = AuthManager()
                 user_key = auth.current_user['email'] if auth.is_authenticated else 'anonymous'
@@ -523,6 +626,11 @@ class UserManager:
         except:
             return {}
     
+    def get_user(self, email: str) -> Optional[Dict]:
+        """Get a specific user."""
+        users = self.get_users()
+        return users.get(email)
+    
     def create_user(self, email: str, password: str, role: str, name: str) -> bool:
         """
         Create a new user.
@@ -641,6 +749,35 @@ class UserManager:
             logger.error(f"User deletion error: {e}")
             return False
     
+    def toggle_2fa(self, email: str) -> bool:
+        """
+        Toggle 2FA for a user.
+        
+        Args:
+            email: User email
+        
+        Returns:
+            bool: True if toggled successfully
+        """
+        try:
+            users = self.get_users()
+            
+            if email not in users:
+                return False
+            
+            current = users[email].get('2fa_enabled', False)
+            users[email]['2fa_enabled'] = not current
+            
+            with open(self.users_file, 'w') as f:
+                json.dump(users, f, indent=2)
+            
+            logger.info(f"🔄 2FA toggled for {email}: {not current}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"2FA toggle error: {e}")
+            return False
+    
     def render_user_management(self):
         """
         Render user management dashboard (Admin only).
@@ -732,15 +869,13 @@ class UserManager:
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                current_2fa = users[selected_user].get('2fa_enabled', False)
-                status = "Disable" if current_2fa else "Enable"
-                if st.button(f"🔐 {status} 2FA", use_container_width=True):
-                    # Toggle 2FA
-                    users[selected_user]['2fa_enabled'] = not current_2fa
-                    with open(self.users_file, 'w') as f:
-                        json.dump(users, f, indent=2)
-                    st.success(f"✅ 2FA {status}d for {selected_user}")
-                    st.rerun()
+                if st.button(f"🔐 Toggle 2FA", use_container_width=True):
+                    success = self.toggle_2fa(selected_user)
+                    if success:
+                        st.success(f"✅ 2FA toggled for {selected_user}")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to toggle 2FA")
             
             with col2:
                 if st.button("👤 Reset Password", use_container_width=True):
