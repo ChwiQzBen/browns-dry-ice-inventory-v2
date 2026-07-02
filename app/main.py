@@ -5609,6 +5609,7 @@ def create_enhanced_charts(df, analyzer, kpis, forecast_data, safety_stock):
     return fig_orders, fig_cost_overview, fig_forecast
 
 def main():
+    global px
     # Initialize all session state variables with defaults
     session_defaults = {
         'initialized': True,
