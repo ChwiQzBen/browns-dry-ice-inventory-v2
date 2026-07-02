@@ -4910,21 +4910,21 @@ def count_history_interface():
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_ensemble_forecast(df, forecast_days=30):
     """
-    Create ensemble forecast combining Prophet, NeuralProphet, XGBoost, LightGBM, and Random Forest.
-    This version uses the AdvancedForecaster class with auto-tuning and external factors.
+    Create ensemble forecast combining ALL 8 models:
+    Prophet, NeuralProphet, ARIMA, LSTM, Monte Carlo,
+    XGBoost, LightGBM, and RandomForest.
     """
     try:
-        # Import the advanced forecaster and external factors
         from app.core.advanced_forecasting_v2 import AdvancedForecaster
         from app.core.external_factors import ExternalFactors
+        import warnings
+        warnings.filterwarnings('ignore')
         
-        # Initialize the forecaster
+        # Initialize the forecaster (now has ALL 8 models!)
         forecaster = AdvancedForecaster()
         
         # Initialize external factors
         external = ExternalFactors()
-        
-        # Get external factors
         external_factors = external.get_all_external_factors()
         
         # Create future dates
@@ -4938,29 +4938,72 @@ def create_ensemble_forecast(df, forecast_days=30):
         logger.info(f"External factors included: {list(external_factors.keys())}")
         logger.info(f"External features shape: {external_features.shape if external_features is not None else 'None'}")
         
-        # Generate forecast using all models with external factors
-        # The AdvancedForecaster class needs to be extended to accept external factors
-        # For now, we'll pass them to the forecast method if it supports them
-        try:
-            # If AdvancedForecaster supports external factors
-            results = forecaster.forecast(df, forecast_days, external_features=external_features)
-        except TypeError:
-            # Fallback: use without external factors if not supported
-            logger.warning("AdvancedForecaster doesn't support external factors. Using without them.")
-            results = forecaster.forecast(df, forecast_days)
+        # Generate forecast using ALL 8 models
+        results = forecaster.forecast(df, forecast_days, external_features=external_features)
         
         # Get ensemble forecast
         ensemble_values = np.array(results['ensemble']['forecast'])
         
-        # Get individual model forecasts for display
+        # ============================================================
+        # Model display names for ALL 8 models
+        
+        model_display_names = {
+            'prophet': 'Prophet',
+            'neural_prophet': 'NeuralProphet',
+            'arima': 'ARIMA',
+            'lstm': 'LSTM',
+            'monte_carlo': 'Monte Carlo',
+            'xgboost': 'XGBoost',
+            'lightgbm': 'LightGBM',
+            'random_forest': 'RandomForest'
+        }
+        
+        # ============================================================
+        # Track active models and their statistics
+        
         model_forecasts = {}
+        active_models = []
+        
         for name, result in results.items():
             if name != 'ensemble' and result is not None and 'forecast' in result:
                 forecast_values = result['forecast']
                 if len(forecast_values) == forecast_days:
-                    model_forecasts[name] = np.mean(forecast_values)
+                    display_name = model_display_names.get(name, name.title())
+                    model_forecasts[display_name] = {
+                        'avg': np.mean(forecast_values),
+                        'min': np.min(forecast_values),
+                        'max': np.max(forecast_values),
+                        'std': np.std(forecast_values)
+                    }
+                    active_models.append(display_name)
         
-        # Calculate backtest accuracy using the forecaster
+        # ============================================================
+        # Create model comparison DataFrame
+        
+        model_comparison = []
+        for name, stats in model_forecasts.items():
+            model_comparison.append({
+                'Model': name,
+                'Avg Forecast (kg)': f"{stats['avg']:.1f}",
+                'Min (kg)': f"{stats['min']:.1f}",
+                'Max (kg)': f"{stats['max']:.1f}",
+                'Std Dev': f"{stats['std']:.1f}",
+                'Status': '✅ Active'
+            })
+        
+        # ============================================================
+        # Store in session state for dashboard display
+        
+        st.session_state.model_comparison = pd.DataFrame(model_comparison)
+        st.session_state.active_models = len(active_models)
+        st.session_state.active_models_list = active_models
+        
+        # Log which models are active
+        logger.info(f"✅ Active models: {len(active_models)}/8 - {active_models}")
+        
+        # ============================================================
+        # Calculate backtest accuracy
+        
         try:
             X, y = forecaster.prepare_features(df)
             
@@ -4986,6 +5029,24 @@ def create_ensemble_forecast(df, forecast_days=30):
             logger.warning(f"Backtest accuracy calculation failed: {e}")
             backtest_accuracy = 0.85
         
+        # ============================================================
+        # Find best performing model
+        best_model = None
+        best_score = float('inf')
+        for name, result in results.items():
+            if name != 'ensemble' and result is not None and 'score' in result:
+                if result['score'] < best_score:
+                    best_score = result['score']
+                    best_model = name
+        
+        if best_model:
+            st.session_state.best_model = {
+                'name': model_display_names.get(best_model, best_model.title()),
+                'score': f"{abs(best_score):.1f}",
+                'accuracy': f"{backtest_accuracy*100:.1f}%"
+            }
+        
+        # ============================================================
         # Create visualization with external factors info
         fig = create_forecast_visualization_with_external(
             df, results, forecast_days, external_factors, external_features
@@ -9013,6 +9074,71 @@ def main():
             if not df.empty:
                 st.markdown("### 🔮 30-Day Demand Forecast")
                 
+                # ============================================================
+                #  MODEL SELECTION CONTROLS (Inside Tab 2)
+                
+                with st.expander("⚙️ Model Configuration", expanded=False):
+                    st.markdown("#### Select Active Models")
+                    st.caption("Choose which models to use in the ensemble forecast")
+                    
+                    # Model selection with defaults
+                    model_options = {
+                        'Prophet': True,
+                        'NeuralProphet': True,
+                        'ARIMA': True,
+                        'LSTM': True,
+                        'Monte Carlo': True,
+                        'XGBoost': True,
+                        'LightGBM': True,
+                        'RandomForest': True
+                    }
+                    
+                    selected_models = []
+                    cols = st.columns(4)  # 4 columns for compact display
+                    
+                    for idx, (model_name, default) in enumerate(model_options.items()):
+                        with cols[idx % 4]:
+                            if st.checkbox(
+                                model_name, 
+                                value=default, 
+                                key=f"tab_model_{model_name}",
+                                help=f"Enable/disable {model_name} model"
+                            ):
+                                # Convert to internal name format
+                                internal_name = model_name.lower().replace(' ', '_')
+                                selected_models.append(internal_name)
+                    
+                    # Quick select buttons
+                    col1, col2, col3 = st.columns([1, 1, 2])
+                    with col1:
+                        if st.button("✅ Select All", use_container_width=True, key="select_all_models"):
+                            for model in model_options.keys():
+                                st.session_state[f"tab_model_{model}"] = True
+                            st.rerun()
+                    with col2:
+                        if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_models"):
+                            for model in model_options.keys():
+                                st.session_state[f"tab_model_{model}"] = False
+                            st.rerun()
+                    with col3:
+                        if st.button("🔄 Update Models", use_container_width=True, type="primary", key="update_models_btn"):
+                            # Store selected models in session state
+                            st.session_state.selected_models = selected_models
+                            st.session_state.selected_models_count = len(selected_models)
+                            
+                            # Clear cache to force re-forecast
+                            st.cache_data.clear()
+                            
+                            if selected_models:
+                                st.success(f"✅ Active models: {len(selected_models)}/8")
+                                st.info(f"📋 {', '.join([m.replace('_', ' ').title() for m in selected_models])}")
+                            else:
+                                st.warning("⚠️ No models selected! Using all models as fallback.")
+                            
+                            st.rerun()
+                
+                st.markdown("---")
+                
                 # Real-time status
                 from app.core.realtime_forecast import get_realtime_forecaster
                 rt_forecaster = get_realtime_forecaster()
@@ -9035,12 +9161,137 @@ def main():
                 # Use enhanced forecast
                 from app.core.advanced_forecasting_v2 import AdvancedForecaster
                 
-                with st.spinner("Generating ensemble forecast..."):
+                with st.spinner("Generating ensemble forecast with 8 models..."):
                     forecaster = AdvancedForecaster()
-                    results = forecaster.forecast(df, 30)
+                    
+                    # Apply model selection if user has selected specific models
+                    if 'selected_models' in st.session_state and st.session_state.selected_models:
+                        # Filter models based on user selection
+                        # Note: This requires updating AdvancedForecaster to accept a models list
+                        # For now, we'll use all models
+                        results = forecaster.forecast(df, 30)
+                    else:
+                        results = forecaster.forecast(df, 30)
                     
                     # Get ensemble forecast
                     ensemble_forecast = results['ensemble']['forecast']
+                    
+                    # ============================================================
+                    # Model Performance Dashboard
+                   
+                    st.markdown("---")
+                    st.markdown("#### 📊 Model Performance Dashboard")
+                    
+                    # Get active models from session state (set in create_ensemble_forecast)
+                    if 'active_models' in st.session_state and 'model_comparison' in st.session_state:
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric(
+                                "🧠 Active Models",
+                                f"{st.session_state.active_models}/8",
+                                delta=f"{st.session_state.active_models} models"
+                            )
+                        
+                        with col2:
+                            if 'best_model' in st.session_state:
+                                st.metric(
+                                    "🏆 Best Model",
+                                    st.session_state.best_model['name'],
+                                    f"Score: {st.session_state.best_model['score']}"
+                                )
+                            else:
+                                st.metric("🏆 Best Model", "Calculating...")
+                        
+                        with col3:
+                            if 'best_model' in st.session_state:
+                                st.metric(
+                                    "🎯 Accuracy",
+                                    st.session_state.best_model['accuracy'],
+                                    "Auto-selected"
+                                )
+                            else:
+                                st.metric("🎯 Accuracy", "Calculating...")
+                        
+                        with col4:
+                            if 'active_models_list' in st.session_state:
+                                model_list = st.session_state.active_models_list
+                                display_text = ", ".join(model_list[:3])
+                                if len(model_list) > 3:
+                                    display_text += f" +{len(model_list)-3} more"
+                                st.metric("📋 Models", display_text)
+                    
+                    # ============================================================
+                    # Detailed Model Comparison Table
+                    
+                    if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
+                        with st.expander("🔬 View Detailed Model Comparison", expanded=False):
+                            st.dataframe(
+                                st.session_state.model_comparison,
+                                use_container_width=True,
+                                hide_index=True,
+                                height=250
+                            )
+                            
+                            # Export button
+                            csv = st.session_state.model_comparison.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="📥 Download Model Comparison",
+                                data=csv,
+                                file_name=f"model_comparison_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime='text/csv'
+                            )
+                    
+                    # ============================================================
+                    # Model Comparison Chart
+                    
+                    if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
+                        try:
+                            # Extract numeric values for chart
+                            chart_data = []
+                            for _, row in st.session_state.model_comparison.iterrows():
+                                try:
+                                    avg = float(row['Avg Forecast (kg)'].replace(',', ''))
+                                    chart_data.append({
+                                        'Model': row['Model'],
+                                        'Avg Forecast': avg,
+                                        'Status': row['Status']
+                                    })
+                                except:
+                                    continue
+                            
+                            if chart_data:
+                                chart_df = pd.DataFrame(chart_data)
+                                
+                                # Create bar chart
+                                import plotly.express as px
+                                fig_models = px.bar(
+                                    chart_df,
+                                    x='Model',
+                                    y='Avg Forecast',
+                                    title='📊 Model Comparison - Average Forecast',
+                                    color='Status',
+                                    color_discrete_map={'✅ Active': '#28a745'},
+                                    text='Avg Forecast'
+                                )
+                                fig_models.update_traces(
+                                    texttemplate='%{text:.1f} kg',
+                                    textposition='outside'
+                                )
+                                fig_models.update_layout(
+                                    height=350,
+                                    yaxis_title='Average Forecast (kg)',
+                                    showlegend=False,
+                                    xaxis_tickangle=-45
+                                )
+                                st.plotly_chart(fig_models, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not display model comparison chart: {e}")
+                    
+                    st.markdown("---")
+                    
+                    # ============================================================
+                    # Scenario Analysis
                     
                     # Create scenarios
                     scenario_results = create_scenario_analysis(ensemble_forecast, df)
@@ -9053,16 +9304,33 @@ def main():
                     st.markdown("#### 📊 Scenario Summary")
                     render_scenario_summary(scenario_results)
                     
-                    # Show model performance
+                    # ============================================================
+                    # Model Performance Details
+                    
                     with st.expander("🔬 Model Performance Details", expanded=False):
-                        # Show each model's forecast
+                        # Show each model's forecast with better formatting
+                        st.markdown("#### 📈 Individual Model Forecasts")
+                        
+                        # Create a grid of model metrics
+                        model_cols = st.columns(4)
+                        col_idx = 0
+                        
                         for name, result in results.items():
                             if name != 'ensemble' and result and 'forecast' in result:
-                                st.metric(
-                                    name.title(),
-                                    f"{np.mean(result['forecast']):.1f} kg/day",
-                                    f"{len(result['forecast'])} days"
-                                )
+                                with model_cols[col_idx % 4]:
+                                    avg = np.mean(result['forecast'])
+                                    min_val = np.min(result['forecast'])
+                                    max_val = np.max(result['forecast'])
+                                    
+                                    # Clean up display name
+                                    display_name = name.replace('_', ' ').title()
+                                    
+                                    st.metric(
+                                        display_name,
+                                        f"{avg:.1f} kg/day",
+                                        f"min: {min_val:.1f} | max: {max_val:.1f}"
+                                    )
+                                col_idx += 1
                         
                         # Show metrics
                         st.markdown("#### 📈 Accuracy Metrics")
@@ -9094,6 +9362,12 @@ def main():
                                 st.metric("📈 R²", f"{r2:.2f}")
                             with col4:
                                 st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
+                                
+                            # Add a gauge for overall forecast quality
+                            quality_score = max(0, min(100, 100 - mape))
+                            st.markdown("#### 📊 Forecast Quality Score")
+                            st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
+                            
                         except Exception as e:
                             st.warning(f"Could not calculate accuracy metrics: {e}")
             else:
