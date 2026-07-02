@@ -9751,7 +9751,7 @@ def main():
             st.subheader("⏱️ Implementation Timeline")
             fig_timeline = go.Figure()
             fig_timeline.add_trace(go.Scatter(
-                x=['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+'],
+                x=[0, 1, 2, 3],
                 y=[1, 2, 3, 4],
                 mode='markers+lines+text',
                 marker=dict(size=16, color='#3498db'),
@@ -9764,7 +9764,12 @@ def main():
                 height=mobile_ui.get_chart_height(),
                 showlegend=False,
                 yaxis=dict(showticklabels=False, title=None),
-                xaxis=dict(title='Implementation Quarters'),
+                xaxis=dict(
+                    title='Implementation Quarters',
+                    tickmode='array',
+                    tickvals=[0, 1, 2, 3],
+                    ticktext=['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+']
+                ),
                 plot_bgcolor='rgba(0,0,0,0)'
             )
             fig_timeline = mobile_ui.optimize_chart_for_mobile(fig_timeline)
