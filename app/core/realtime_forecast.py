@@ -98,7 +98,7 @@ class RealTimeForecaster:
     
     def _update_forecast(self, df, forecast_days: int):
         """Update forecast with new data."""
-        from app.core.advanced_forecasting import AdvancedForecaster
+        from app.core.advanced_forecasting_v2 import AdvancedForecaster
         
         forecaster = AdvancedForecaster()
         results = forecaster.forecast(df, forecast_days)

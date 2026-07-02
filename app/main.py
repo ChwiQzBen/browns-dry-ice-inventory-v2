@@ -35,7 +35,7 @@ from core.system_integrations import SystemIntegrations
 from core.report_generator import ReportGenerator
 from app.core.advanced_analytics import AdvancedAnalytics, create_advanced_analytics_tab
 from app.core.google_sheet_reader import GoogleSheetReader
-from app.core.advanced_forecasting import AdvancedForecaster
+from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
 import warnings
@@ -4915,7 +4915,7 @@ def create_ensemble_forecast(df, forecast_days=30):
     """
     try:
         # Import the advanced forecaster and external factors
-        from app.core.advanced_forecasting import AdvancedForecaster
+        from app.core.advanced_forecasting_v2 import AdvancedForecaster
         from app.core.external_factors import ExternalFactors
         
         # Initialize the forecaster
@@ -9033,7 +9033,7 @@ def main():
                 st.markdown("---")
                 
                 # Use enhanced forecast
-                from app.core.advanced_forecasting import AdvancedForecaster
+                from app.core.advanced_forecasting_v2 import AdvancedForecaster
                 
                 with st.spinner("Generating ensemble forecast..."):
                     forecaster = AdvancedForecaster()
