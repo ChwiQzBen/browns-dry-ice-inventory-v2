@@ -7893,18 +7893,21 @@ def main():
                             # Show summary table
                             st.dataframe(display_summary, use_container_width=True, hide_index=True)
                             
-                            # Chart: Category breakdown (use numeric values)
-                            fig_category = px.bar(
-                                category_summary,
-                                x='Category',
-                                y='Total Value',
-                                title='Inventory Value by Category',
-                                color='Category',
-                                height=400,
-                                labels={'Total Value': 'Total Value (KSh)'}
-                            )
-                            fig_category.update_layout(showlegend=False)
-                            st.plotly_chart(fig_category, use_container_width=True)
+                            # Check if category_summary exists and has data
+                            if 'category_summary' in locals() and not category_summary.empty:
+                                fig_category = px.bar(
+                                    category_summary,
+                                    x='Category',
+                                    y='Total Value',
+                                    title='Inventory Value by Category',
+                                    color='Category',
+                                    height=400,
+                                    labels={'Total Value': 'Total Value (KSh)'}
+                                )
+                                fig_category.update_layout(showlegend=False)
+                                st.plotly_chart(fig_category, use_container_width=True)
+                            else:
+                                st.info("No category data available to display")
                             
                             # Show total value
                             total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
