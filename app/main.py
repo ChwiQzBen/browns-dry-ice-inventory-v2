@@ -4939,7 +4939,7 @@ def create_ensemble_forecast(df, forecast_days=30):
         logger.info(f"External features shape: {external_features.shape if external_features is not None else 'None'}")
         
         # Generate forecast using ALL 8 models
-        results = forecaster.forecast(df, forecast_days, external_features=external_features)
+        results = forecaster.forecast(df, forecast_days)
         
         # Get ensemble forecast
         ensemble_values = np.array(results['ensemble']['forecast'])
