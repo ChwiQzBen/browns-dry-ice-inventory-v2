@@ -6108,19 +6108,13 @@ def main():
     # Check if we have data before generating forecast
     if not df.empty and len(df) >= 5:
         with st.spinner("🔄 Generating forecast with auto-tuned models..."):
-            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
-                df, 
-                forecast_days=30
-            )
+            # ✅ FIX: Use get_forecast_data() which aggregates by day
+            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev = get_forecast_data(df)
             
             # Update model forecasts with proper names
             if model_forecasts:
                 # Add backtest accuracy to model forecasts
                 model_forecasts['Backtest Accuracy'] = f"{backtest_accuracy*100:.1f}%"
-            
-            # Calculate totals
-            total_forecasted_demand = np.sum(ensemble_forecast_values) if len(ensemble_forecast_values) > 0 else 0
-            forecast_std_dev = np.std(ensemble_forecast_values) if len(ensemble_forecast_values) > 0 else 0
             
             # Log success
             logger.info(f"Forecast generated: {len(ensemble_forecast_values)} days, models: {len(model_forecasts)-1}")
