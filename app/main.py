@@ -9092,9 +9092,9 @@ def main():
                         'ARIMA': True,
                         'LSTM': True,
                         'Monte Carlo': True,
-                        'XGBoost': True,
-                        'LightGBM': True,
-                        'RandomForest': True
+                        'XGBoost': False,
+                        'LightGBM': False,
+                        'RandomForest':False,
                     }
                     
                     selected_models = []
