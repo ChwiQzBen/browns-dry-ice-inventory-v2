@@ -303,11 +303,22 @@ class AdvancedForecaster:
             return None
     
     def _forecast_arima(self, model, forecast_days: int) -> Dict:
-        """Generate ARIMA forecast."""
+        """Generate ARIMA forecast with sanity checks."""
         try:
             forecast = model.forecast(steps=forecast_days)
             # Ensure non-negative
             forecast = np.maximum(forecast, 0)
+            
+            # 🔧 FIX: Sanity guard - ARIMA shouldn't forecast wildly outside historical range
+            hist_max = model.data.endog.max()
+            hist_mean = model.data.endog.mean()
+            
+            # Cap at 3x historical max (reasonable upper bound)
+            cap_value = max(hist_max * 3, hist_mean * 2)
+            forecast = np.minimum(forecast, cap_value)
+            
+            logger.info(f"ARIMA forecast: min={min(forecast):.1f}, max={max(forecast):.1f}, capped at {cap_value:.1f}")
+            
             return {
                 'forecast': forecast.tolist()
             }
@@ -485,6 +496,7 @@ class AdvancedForecaster:
             
             for dist_name, params, dist in distributions:
                 sims = []
+                hist_max = data.max()  # Get historical max for clipping
                 for _ in range(max(1, n_simulations // len(distributions))):
                     try:
                         # Generate random demand from fitted distribution
@@ -497,6 +509,13 @@ class AdvancedForecaster:
                         
                         # Ensure non-negative
                         random_demand = np.maximum(random_demand, 0)
+                        
+                        # 🔧 FIX: Clip to 3x historical max to prevent extreme outliers
+                        if hist_max > 0:
+                            random_demand = np.minimum(random_demand, hist_max * 3)
+                        else:
+                            random_demand = np.minimum(random_demand, 1000)  # Fallback cap
+                        
                         sims.append(random_demand)
                     except:
                         continue
@@ -794,7 +813,15 @@ class AdvancedForecaster:
         except Exception as e:
             logger.error(f"ML models failed: {e}")
             results['ml_models'] = None
-        
+
+        # 🔧 DEBUG: Log each model's forecast summary (ADD THIS HERE)
+        logger.info("📊 Model Forecast Summaries:")
+        for name, result in results.items():
+            if name != 'ensemble' and result is not None and 'forecast' in result:
+                vals = result['forecast']
+                if vals:
+                    logger.info(f"  {name}: min={min(vals):.1f} max={max(vals):.1f} avg={np.mean(vals):.1f} len={len(vals)}")
+                    
         # 7. Ensemble forecast (combines ALL working models)
         ensemble_forecast = self._create_ensemble_forecast(results, forecast_days)
         results['ensemble'] = ensemble_forecast
@@ -814,6 +841,34 @@ class AdvancedForecaster:
         Create ensemble forecast by averaging all available models.
         Now includes ALL 8 models with optimized weights.
         """
+        # 🔧 FIX: First, filter out outlier models
+        model_avgs = {}
+        for name, result in results.items():
+            if name != 'ensemble' and result is not None and 'forecast' in result:
+                forecast = result['forecast']
+                if len(forecast) == forecast_days:
+                    avg = np.mean(forecast)
+                    model_avgs[name] = avg
+        
+        # Calculate median average across models
+        if model_avgs:
+            median_avg = np.median(list(model_avgs.values()))
+            # Only keep models within 3x of median
+            filtered_results = {}
+            for name, avg in model_avgs.items():
+                if avg <= median_avg * 3:
+                    filtered_results[name] = results[name]
+                    logger.info(f"✅ Keeping model {name}: avg={avg:.1f}")
+                else:
+                    logger.warning(f"⚠️ Rejecting outlier model {name}: avg={avg:.1f} (>{median_avg*3:.1f})")
+            
+            # If we filtered out too many, use all models
+            if len(filtered_results) < len(results) // 2:
+                logger.warning("⚠️ Too many models rejected. Using all models.")
+                filtered_results = {k: v for k, v in results.items() if k != 'ensemble' and v is not None}
+        else:
+            filtered_results = {k: v for k, v in results.items() if k != 'ensemble' and v is not None}
+        
         # Updated weights for ALL 8 models
         weights = {
             'prophet': 0.15,
@@ -831,8 +886,8 @@ class AdvancedForecaster:
         active_models = []
         
         for name, weight in weights.items():
-            if name in results and results[name] is not None:
-                forecast = results[name].get('forecast', [])
+            if name in filtered_results and filtered_results[name] is not None:
+                forecast = filtered_results[name].get('forecast', [])
                 if len(forecast) == forecast_days:
                     weighted_sum += np.array(forecast) * weight
                     total_weight += weight
@@ -843,20 +898,22 @@ class AdvancedForecaster:
         else:
             # Fallback: use simple average of all available models
             all_forecasts = []
-            for name, result in results.items():
+            for name, result in filtered_results.items():
                 if result is not None and 'forecast' in result and name != 'ensemble':
                     if len(result['forecast']) == forecast_days:
                         all_forecasts.append(result['forecast'])
             
             if all_forecasts:
                 ensemble_forecast = np.mean(all_forecasts, axis=0)
-                active_models = list(results.keys())
+                active_models = list(filtered_results.keys())
             else:
                 # Ultimate fallback: use historical average
                 ensemble_forecast = np.full(forecast_days, 300.0)
         
         # Ensure non-negative
         ensemble_forecast = np.maximum(ensemble_forecast, 0)
+    
+
         
         # Calculate confidence intervals using weighted standard deviation
         if total_weight > 0:
