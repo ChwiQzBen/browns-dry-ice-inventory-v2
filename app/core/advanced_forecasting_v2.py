@@ -7,7 +7,7 @@ Supports: Prophet, NeuralProphet, XGBoost, LightGBM, RandomForest,
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional, Union, TYPE_CHECKING
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -17,9 +17,18 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, mean_squared_error
-
 from prophet import Prophet
-from neuralprophet import NeuralProphet
+
+try:
+    from neuralprophet import NeuralProphet
+    NEURALPROPHET_AVAILABLE = True
+except ImportError:
+    NEURALPROPHET_AVAILABLE = False
+    NeuralProphet = None
+
+if TYPE_CHECKING:
+    from neuralprophet import NeuralProphet
+
 import logging
 
 # ============================================================
@@ -82,7 +91,7 @@ class AdvancedForecaster:
         """Check which models are available based on installed packages."""
         return {
             'prophet': True,
-            'neural_prophet': True,
+            'neural_prophet': NEURALPROPHET_AVAILABLE,
             'xgboost': True,
             'lightgbm': True,
             'random_forest': True,
@@ -90,21 +99,48 @@ class AdvancedForecaster:
             'lstm': TENSORFLOW_AVAILABLE,
             'monte_carlo': SCIPY_AVAILABLE
         }
+    def _safe_forecast_array(self, forecast):
+        """
+        Safely convert forecast to a list, handling numpy.float64 and other scalar types.
         
+        Args:
+            forecast: The forecast value (could be list, np.ndarray, np.float64, float, int)
+        
+        Returns:
+            list: A list of forecast values
+        """
+        if forecast is None:
+            return []
+        
+        # Handle scalar numpy types
+        if isinstance(forecast, (np.float64, np.float32, np.int64, np.int32, float, int)):
+            return [float(forecast)]
+        
+        # Handle numpy arrays
+        if isinstance(forecast, np.ndarray):
+            return forecast.flatten().tolist()
+        
+        # Handle lists or other iterables
+        try:
+            return list(forecast)
+        except TypeError:
+            # Fallback: convert to single-element list
+            return [float(forecast)]
+            
     def get_models(self) -> Dict:
         """
         Get all available models with their configurations.
-        Now includes ALL 8 models!
         """
         models = {
             'prophet': self._train_prophet,
-            'neural_prophet': self._train_neural_prophet,
             'xgboost': self._train_xgboost,
             'lightgbm': self._train_lightgbm,
             'random_forest': self._train_random_forest,
         }
         
         # Only add optional models if available
+        if NEURALPROPHET_AVAILABLE:
+            models['neural_prophet'] = self._train_neural_prophet
         if ARIMA_AVAILABLE:
             models['arima'] = self._train_arima
         if TENSORFLOW_AVAILABLE:
@@ -141,28 +177,54 @@ class AdvancedForecaster:
             pass
         
         return model
-    
     def _forecast_prophet(self, model, df: pd.DataFrame, forecast_days: int) -> Dict:
-        """Generate Prophet forecast."""
-        prophet_df = df.rename(columns={
-            'Date': 'ds',
-            'Order_Quantity_kg': 'y'
-        })
+        """Generate Prophet forecast with sanity checks to prevent negative values."""
+        try:
+            prophet_df = df.rename(columns={
+                'Date': 'ds',
+                'Order_Quantity_kg': 'y'
+            })
+            
+            model.fit(prophet_df)
+            future = model.make_future_dataframe(periods=forecast_days)
+            forecast = model.predict(future)
+            
+            # Get forecast values
+            forecast_values = forecast['yhat'].values[-forecast_days:].tolist()
+            
+            # 🔧 FIX 1: Ensure no negative values (Prophet can extrapolate below zero)
+            forecast_values = np.maximum(forecast_values, 0)
+            
+            # 🔧 FIX 2: Cap at 3x historical max to prevent unreasonable spikes
+            hist_max = df['Order_Quantity_kg'].max()
+            if hist_max > 0:
+                forecast_values = np.minimum(forecast_values, hist_max * 3)
+            
+            # 🔧 FIX 3: Sanitize upper and lower bounds
+            upper = forecast['yhat_upper'].values[-forecast_days:].tolist()
+            lower = forecast['yhat_lower'].values[-forecast_days:].tolist()
+            lower = np.maximum(lower, 0)
+            
+            logger.info(f"✅ Prophet: min={min(forecast_values):.1f}, max={max(forecast_values):.1f}, hist_max={hist_max:.1f}")
+            
+            return {
+                'forecast': forecast_values.tolist(),
+                'upper': upper,
+                'lower': lower.tolist()
+            }
+        except Exception as e:
+            logger.error(f"Prophet forecast failed: {e}")
+            # Return zeros as fallback
+            return {
+                'forecast': [0] * forecast_days,
+                'upper': [0] * forecast_days,
+                'lower': [0] * forecast_days
+            }
         
-        model.fit(prophet_df)
-        future = model.make_future_dataframe(periods=forecast_days)
-        forecast = model.predict(future)
-        
-        return {
-            'forecast': forecast['yhat'].values[-forecast_days:].tolist(),
-            'upper': forecast['yhat_upper'].values[-forecast_days:].tolist(),
-            'lower': forecast['yhat_lower'].values[-forecast_days:].tolist()
-        }
-    
     # ============================================================
     # 2. NEURALPROPHET MODEL
     # ============================================================
-    def _train_neural_prophet(self, df: pd.DataFrame, params: Dict = None) -> NeuralProphet:
+    def _train_neural_prophet(self, df: pd.DataFrame, params: Dict = None) -> "NeuralProphet":
         """Train NeuralProphet model."""
         default_params = {
             'yearly_seasonality': True,
@@ -719,133 +781,173 @@ class AdvancedForecaster:
     # ============================================================
     # MAIN FORECAST METHOD
     # ============================================================
-    def forecast(self, df: pd.DataFrame, forecast_days: int = 30) -> Dict:
+    def forecast(self, df: pd.DataFrame, forecast_days: int = 30, models: Optional[List[str]] = None) -> Dict:
         """
-        Generate forecast using ALL models and return ensemble results.
-        Now includes all 8 models!
+        Generate forecast using selected models and return ensemble results.
+
+        Args:
+            df: Historical data with 'Date' and 'Order_Quantity_kg' columns
+            forecast_days: Number of days to forecast
+            models: List of internal model names to run, e.g.
+                    ['prophet', 'xgboost']. If None, all available
+                    models run (original behavior, backward-compatible).
         """
         results = {}
-        
+
+        def _wants(name):
+            return models is None or name in models
+
         # 1. Prophet forecast
-        try:
-            prophet_model = self._train_prophet(df)
-            prophet_results = self._forecast_prophet(prophet_model, df, forecast_days)
-            results['prophet'] = prophet_results
-            logger.info("✅ Prophet forecast complete")
-        except Exception as e:
-            logger.error(f"Prophet forecast failed: {e}")
+        if _wants('prophet'):
+            # 🔧 FIX: Prophet needs at least 10 data points
+            if len(df) < 10:
+                logger.warning(f"⚠️ Skipping Prophet: insufficient data (need at least 10 points, got {len(df)})")
+                results['prophet'] = None
+            else:
+                try:
+                    prophet_model = self._train_prophet(df)
+                    prophet_results = self._forecast_prophet(prophet_model, df, forecast_days)
+                    results['prophet'] = prophet_results
+                    logger.info("✅ Prophet forecast complete")
+                except Exception as e:
+                    logger.error(f"Prophet forecast failed: {e}")
+                    results['prophet'] = None
+        else:
             results['prophet'] = None
-        
-        # 2. NeuralProphet forecast
-        try:
-            neural_model = self._train_neural_prophet(df)
-            neural_results = self._forecast_neural_prophet(neural_model, df, forecast_days)
-            results['neural_prophet'] = neural_results
-            logger.info("✅ NeuralProphet forecast complete")
-        except Exception as e:
-            logger.error(f"NeuralProphet forecast failed: {e}")
+
+        # 2. NeuralProphet forecast (if available)
+        if NEURALPROPHET_AVAILABLE and _wants('neural_prophet'):
+            try:
+                neural_model = self._train_neural_prophet(df)
+                neural_results = self._forecast_neural_prophet(neural_model, df, forecast_days)
+                results['neural_prophet'] = neural_results
+                logger.info("✅ NeuralProphet forecast complete")
+            except Exception as e:
+                logger.error(f"NeuralProphet forecast failed: {e}")
+                results['neural_prophet'] = None
+        else:
             results['neural_prophet'] = None
-        
+
         # 3. ARIMA forecast (if available)
-        if ARIMA_AVAILABLE:
+        if ARIMA_AVAILABLE and _wants('arima'):
             try:
                 arima_model = self._train_arima(df)
                 if arima_model:
                     arima_results = self._forecast_arima(arima_model, forecast_days)
                     results['arima'] = arima_results
                     logger.info("✅ ARIMA forecast complete")
+                else:
+                    results['arima'] = None
             except Exception as e:
                 logger.error(f"ARIMA forecast failed: {e}")
                 results['arima'] = None
         else:
             results['arima'] = None
-        
+
         # 4. LSTM forecast (if available)
-        if TENSORFLOW_AVAILABLE:
+        if TENSORFLOW_AVAILABLE and _wants('lstm'):
             try:
                 lstm_model = self._train_lstm(df)
                 if lstm_model:
                     lstm_results = self._forecast_lstm(lstm_model, df, forecast_days)
                     results['lstm'] = lstm_results
                     logger.info("✅ LSTM forecast complete")
+                else:
+                    results['lstm'] = None
             except Exception as e:
                 logger.error(f"LSTM forecast failed: {e}")
                 results['lstm'] = None
         else:
             results['lstm'] = None
-        
+
         # 5. Monte Carlo forecast (if available)
-        if SCIPY_AVAILABLE:
+        if SCIPY_AVAILABLE and _wants('monte_carlo'):
             try:
                 mc_model = self._train_monte_carlo(df)
                 if mc_model:
                     mc_results = self._forecast_monte_carlo(mc_model, forecast_days)
                     results['monte_carlo'] = mc_results
                     logger.info("✅ Monte Carlo forecast complete")
+                else:
+                    results['monte_carlo'] = None
             except Exception as e:
                 logger.error(f"Monte Carlo forecast failed: {e}")
                 results['monte_carlo'] = None
         else:
             results['monte_carlo'] = None
-        
-        # 6. ML Models (XGBoost, LightGBM, RandomForest)
-        try:
-            X, y = self.prepare_features(df)
-            
-            ml_models = {
-                'xgboost': self._train_xgboost(df),
-                'lightgbm': self._train_lightgbm(df),
-                'random_forest': self._train_random_forest(df)
-            }
-            
-            for name, model in ml_models.items():
-                try:
-                    model.fit(X, y)
-                    # Generate future predictions
-                    future_data = self._create_future_features(df, forecast_days)
-                    predictions = model.predict(future_data)
-                    results[name] = {'forecast': predictions.tolist()}
-                    logger.info(f"✅ {name} forecast complete")
-                except Exception as e:
-                    logger.error(f"ML model {name} failed: {e}")
-                    results[name] = None
-                    
-        except Exception as e:
-            logger.error(f"ML models failed: {e}")
-            results['ml_models'] = None
 
-        # 🔧 DEBUG: Log each model's forecast summary (ADD THIS HERE)
+        # 6. ML Models (XGBoost, LightGBM, RandomForest)
+        ml_train_funcs = {
+            'xgboost': self._train_xgboost,
+            'lightgbm': self._train_lightgbm,
+            'random_forest': self._train_random_forest
+        }
+        ml_wanted = {name: _wants(name) for name in ml_train_funcs}
+
+        if any(ml_wanted.values()):
+            try:
+                X, y = self.prepare_features(df)
+                future_data = self._create_future_features(df, forecast_days)
+
+                for name, train_func in ml_train_funcs.items():
+                    if not ml_wanted[name]:
+                        results[name] = None
+                        continue
+                    try:
+                        model = train_func(df)
+                        model.fit(X, y)
+                        predictions = model.predict(future_data)
+                        results[name] = {'forecast': predictions.tolist()}
+                        logger.info(f"✅ {name} forecast complete")
+                    except Exception as e:
+                        logger.error(f"ML model {name} failed: {e}")
+                        results[name] = None
+            except Exception as e:
+                logger.error(f"ML models failed: {e}")
+                for name in ml_train_funcs:
+                    results[name] = None
+        else:
+            for name in ml_train_funcs:
+                results[name] = None
+
+        # 🔧 DEBUG: Log each model's forecast summary
         logger.info("📊 Model Forecast Summaries:")
         for name, result in results.items():
             if name != 'ensemble' and result is not None and 'forecast' in result:
-                vals = result['forecast']
+                # 🔧 FIX: Safely convert forecast to a list
+                vals = self._safe_forecast_array(result['forecast'])
                 if vals:
                     logger.info(f"  {name}: min={min(vals):.1f} max={max(vals):.1f} avg={np.mean(vals):.1f} len={len(vals)}")
-                    
-        # 7. Ensemble forecast (combines ALL working models)
+
+        # 7. Ensemble forecast (combines all active models)
         ensemble_forecast = self._create_ensemble_forecast(results, forecast_days)
         results['ensemble'] = ensemble_forecast
-        
+
         # Log which models are active
-        active_models = [name for name, result in results.items() 
+        active_models = [name for name, result in results.items()
                          if result is not None and name != 'ensemble']
         logger.info(f"🎯 Active models: {len(active_models)}/8 - {active_models}")
-        
+
         return results
     
     # ============================================================
     # ENSEMBLE CREATION
-    # ============================================================
     def _create_ensemble_forecast(self, results: Dict, forecast_days: int) -> Dict:
         """
         Create ensemble forecast by averaging all available models.
         Now includes ALL 8 models with optimized weights.
         """
-        # 🔧 FIX: First, filter out outlier models
+        # Initialize best_model and best_score at the start
+        best_model = None
+        best_score = float('inf')
+        
+        # First, filter out outlier models and calculate averages
         model_avgs = {}
         for name, result in results.items():
             if name != 'ensemble' and result is not None and 'forecast' in result:
-                forecast = result['forecast']
+                # 🔧 FIX: Safely convert forecast to a list
+                forecast = self._safe_forecast_array(result['forecast'])
+                
                 if len(forecast) == forecast_days:
                     avg = np.mean(forecast)
                     model_avgs[name] = avg
@@ -862,12 +964,78 @@ class AdvancedForecaster:
                 else:
                     logger.warning(f"⚠️ Rejecting outlier model {name}: avg={avg:.1f} (>{median_avg*3:.1f})")
             
+            # Find best model from filtered results (lowest average, no negatives)
+            for name, result in filtered_results.items():
+                if result is not None and 'forecast' in result:
+                    # 🔧 FIX: Safely convert forecast to a list
+                    forecast = self._safe_forecast_array(result['forecast'])
+                    if len(forecast) == forecast_days:
+                        avg = np.mean(forecast)
+                        # Safely check for negative values
+                        has_negative = False
+                        try:
+                            forecast_array = np.array(forecast)
+                            if forecast_array.size > 0:
+                                has_negative = np.any(forecast_array < 0)
+                        except:
+                            has_negative = False
+                        if not has_negative and avg < best_score:
+                            best_score = avg
+                            best_model = name
+            
             # If we filtered out too many, use all models
             if len(filtered_results) < len(results) // 2:
                 logger.warning("⚠️ Too many models rejected. Using all models.")
                 filtered_results = {k: v for k, v in results.items() if k != 'ensemble' and v is not None}
+                
+                # Re-evaluate best model from all models
+                best_model = None
+                best_score = float('inf')
+                for name, result in filtered_results.items():
+                    if result is not None and 'forecast' in result:
+                        # 🔧 FIX: Safely convert forecast to a list
+                        forecast = self._safe_forecast_array(result['forecast'])
+                        if len(forecast) == forecast_days:
+                            avg = np.mean(forecast)
+                            has_negative = False
+                            try:
+                                forecast_array = np.array(forecast)
+                                if forecast_array.size > 0:
+                                    has_negative = np.any(forecast_array < 0)
+                            except:
+                                has_negative = False
+                            if not has_negative and avg < best_score:
+                                best_score = avg
+                                best_model = name
         else:
             filtered_results = {k: v for k, v in results.items() if k != 'ensemble' and v is not None}
+            
+            # Find best model from all models
+            best_model = None
+            best_score = float('inf')
+            for name, result in filtered_results.items():
+                if result is not None and 'forecast' in result:
+                    # 🔧 FIX: Safely convert forecast to a list
+                    forecast = self._safe_forecast_array(result['forecast'])
+                    if len(forecast) == forecast_days:
+                        avg = np.mean(forecast)
+                        has_negative = False
+                        try:
+                            forecast_array = np.array(forecast)
+                            if forecast_array.size > 0:
+                                has_negative = np.any(forecast_array < 0)
+                        except:
+                            has_negative = False
+                        if not has_negative and avg < best_score:
+                            best_score = avg
+                            best_model = name
+        
+        # If no best_model found, use first available model
+        if best_model is None and filtered_results:
+            for name in filtered_results:
+                best_model = name
+                best_score = 0
+                break
         
         # Updated weights for ALL 8 models
         weights = {
@@ -887,7 +1055,8 @@ class AdvancedForecaster:
         
         for name, weight in weights.items():
             if name in filtered_results and filtered_results[name] is not None:
-                forecast = filtered_results[name].get('forecast', [])
+                # 🔧 FIX: Safely convert forecast to a list
+                forecast = self._safe_forecast_array(filtered_results[name].get('forecast', []))
                 if len(forecast) == forecast_days:
                     weighted_sum += np.array(forecast) * weight
                     total_weight += weight
@@ -900,8 +1069,10 @@ class AdvancedForecaster:
             all_forecasts = []
             for name, result in filtered_results.items():
                 if result is not None and 'forecast' in result and name != 'ensemble':
-                    if len(result['forecast']) == forecast_days:
-                        all_forecasts.append(result['forecast'])
+                    # 🔧 FIX: Safely convert forecast to a list
+                    forecast = self._safe_forecast_array(result['forecast'])
+                    if len(forecast) == forecast_days:
+                        all_forecasts.append(forecast)
             
             if all_forecasts:
                 ensemble_forecast = np.mean(all_forecasts, axis=0)
@@ -912,8 +1083,6 @@ class AdvancedForecaster:
         
         # Ensure non-negative
         ensemble_forecast = np.maximum(ensemble_forecast, 0)
-    
-
         
         # Calculate confidence intervals using weighted standard deviation
         if total_weight > 0:
@@ -921,7 +1090,8 @@ class AdvancedForecaster:
             weighted_variance = np.zeros(forecast_days)
             for name, weight in weights.items():
                 if name in results and results[name] is not None:
-                    forecast = results[name].get('forecast', [])
+                    # 🔧 FIX: Safely convert forecast to a list
+                    forecast = self._safe_forecast_array(results[name].get('forecast', []))
                     if len(forecast) == forecast_days:
                         # Use Monte Carlo std if available
                         if name == 'monte_carlo' and 'std' in results[name]:
@@ -938,14 +1108,25 @@ class AdvancedForecaster:
         lower = ensemble_forecast - (std_dev * 1.96)  # 95% confidence
         lower = np.maximum(lower, 0)
         
+        # Store best model in results for main.py to use
+        if best_model:
+            results['_best_model'] = best_model
+            results['_best_score'] = best_score
+        else:
+            # Fallback: use first active model
+            if active_models:
+                results['_best_model'] = active_models[0]
+                results['_best_score'] = 0
+        
         return {
             'forecast': ensemble_forecast.tolist(),
             'upper': upper.tolist(),
             'lower': lower.tolist(),
             'active_models': active_models,
-            'total_weight': total_weight
+            'total_weight': total_weight,
+            '_best_model': results.get('_best_model', None),
+            '_best_score': results.get('_best_score', 0)
         }
-    
     # ============================================================
     # METRICS CALCULATION
     # ============================================================
