@@ -163,3 +163,4 @@ wheels/
 *.db
 *.csv
 reports/*.pdf
+app_logs.txt
