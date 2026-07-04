@@ -5049,28 +5049,28 @@ def create_ensemble_forecast(df, forecast_days=30, selected_models=None):
                         r2_normalized = min(r2, 1)
                     
                     # Direction accuracy
+                    # np.mean() of a boolean comparison already returns a
+                    # fraction in [0, 1] — do NOT divide by 100 again.
                     actual_direction = np.sign(np.diff(y_true))
                     pred_direction = np.sign(np.diff(y_pred))
-                    direction_accuracy = (
+                    direction_normalized = (
                         np.mean(actual_direction == pred_direction)
                         if len(actual_direction) > 0
                         else 0
                     )
-                    direction_normalized = direction_accuracy / 100
                     
-                    # MAPE penalty - if MAPE is exploding, penalize heavily
-                    mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-8))) * 100
-                    if mape > 100:
-                        mape_penalty = 0  # Completely invalidate if MAPE > 100%
-                    else:
-                        mape_penalty = 1
+                    # WAPE penalty - smooth decay instead of MAPE's hard cliff.
+                    # MAPE explodes on near-zero actuals (common with
+                    # intermittent demand); WAPE is robust to that.
+                    wape = np.sum(np.abs(y_true - y_pred)) / max(np.sum(np.abs(y_true)), 1e-8) * 100
+                    wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
                     
                     # Composite score (0-1 scale) with penalties
                     backtest_accuracy = (
                         0.4 * (1 - mae_normalized) +
                         0.3 * r2_normalized +
                         0.3 * direction_normalized
-                    ) * mape_penalty
+                    ) * wape_penalty
                 else:
                     backtest_accuracy = 0
                 
