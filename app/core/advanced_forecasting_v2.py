@@ -1108,6 +1108,28 @@ class AdvancedForecaster:
         lower = ensemble_forecast - (std_dev * 1.96)  # 95% confidence
         lower = np.maximum(lower, 0)
         
+        # 🔧 FIX: Ensure ensemble_forecast, upper, and lower are always lists
+        if isinstance(ensemble_forecast, (int, float, np.float64, np.int64)):
+            ensemble_forecast = [float(ensemble_forecast)] * forecast_days
+        elif isinstance(ensemble_forecast, np.ndarray):
+            ensemble_forecast = ensemble_forecast.tolist()
+        elif not isinstance(ensemble_forecast, list):
+            ensemble_forecast = [float(ensemble_forecast)] * forecast_days
+
+        if isinstance(upper, (int, float, np.float64, np.int64)):
+            upper = [float(upper)] * forecast_days
+        elif isinstance(upper, np.ndarray):
+            upper = upper.tolist()
+        elif not isinstance(upper, list):
+            upper = [float(upper)] * forecast_days
+
+        if isinstance(lower, (int, float, np.float64, np.int64)):
+            lower = [float(lower)] * forecast_days
+        elif isinstance(lower, np.ndarray):
+            lower = lower.tolist()
+        elif not isinstance(lower, list):
+            lower = [float(lower)] * forecast_days
+            
         # Store best model in results for main.py to use
         if best_model:
             results['_best_model'] = best_model
@@ -1118,10 +1140,11 @@ class AdvancedForecaster:
                 results['_best_model'] = active_models[0]
                 results['_best_score'] = 0
         
+        # ✅ FIX: Return the lists directly (no .tolist() needed)
         return {
-            'forecast': ensemble_forecast.tolist(),
-            'upper': upper.tolist(),
-            'lower': lower.tolist(),
+            'forecast': ensemble_forecast,
+            'upper': upper,
+            'lower': lower,
             'active_models': active_models,
             'total_weight': total_weight,
             '_best_model': results.get('_best_model', None),
