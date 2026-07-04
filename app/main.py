@@ -5039,11 +5039,14 @@ def create_ensemble_forecast(df, forecast_days=30, selected_models=None):
                     mean_actual = max(np.mean(y_true), 1)
                     mae_normalized = min(mae / mean_actual, 1)
                     
-                    # R²
+                    # R² - stricter: if negative, contribution is 0
                     ss_res = np.sum((y_true - y_pred) ** 2)
                     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
                     r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                    r2_normalized = max(0, min(1, (r2 + 1) / 2))
+                    if r2 < 0:
+                        r2_normalized = 0  # No credit for worse than mean
+                    else:
+                        r2_normalized = min(r2, 1)
                     
                     # Direction accuracy
                     actual_direction = np.sign(np.diff(y_true))
@@ -5053,13 +5056,21 @@ def create_ensemble_forecast(df, forecast_days=30, selected_models=None):
                         if len(actual_direction) > 0
                         else 0
                     )
+                    direction_normalized = direction_accuracy / 100
                     
-                    # Composite score (0-1 scale)
+                    # MAPE penalty - if MAPE is exploding, penalize heavily
+                    mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-8))) * 100
+                    if mape > 100:
+                        mape_penalty = 0  # Completely invalidate if MAPE > 100%
+                    else:
+                        mape_penalty = 1
+                    
+                    # Composite score (0-1 scale) with penalties
                     backtest_accuracy = (
                         0.4 * (1 - mae_normalized) +
                         0.3 * r2_normalized +
-                        0.3 * direction_accuracy
-                    )
+                        0.3 * direction_normalized
+                    ) * mape_penalty
                 else:
                     backtest_accuracy = 0
                 
@@ -9388,28 +9399,34 @@ def main():
                                 
                             # Calculate normalized metrics for quality score
                             # Get mean actual value for normalization
-                            mean_actual = max(np.mean(historical_values), 1)  # Avoid division by zero
+                            mean_actual = max(np.mean(historical_values), 1)
                             
                             # Normalize MAE relative to average demand
                             mae_normalized = min(mae / mean_actual, 1)
                             
-                            # Transform R² from [-1,1] → [0,1]
-                            r2_normalized = max(0, min(1, (r2 + 1) / 2))
+                            # R² - stricter: if negative, contribution is 0
+                            if r2 < 0:
+                                r2_normalized = 0
+                            else:
+                                r2_normalized = min(r2, 1)
                             
-                            # Direction accuracy already in percentage
+                            # Direction accuracy (already in percentage, convert to 0-1)
                             direction_normalized = direction_accuracy / 100
+                            
+                            # MAPE penalty - if MAPE is exploding, penalize
+                            if mape > 100:
+                                mape_penalty = 0
+                            else:
+                                mape_penalty = 1
                             
                             # Composite quality score (0-100)
                             quality_score = (
                                 0.4 * (1 - mae_normalized) +
                                 0.3 * r2_normalized +
                                 0.3 * direction_normalized
-                            ) * 100
+                            ) * mape_penalty * 100
                             
                             quality_score = round(max(0, min(100, quality_score)), 1)
-                            
-                            st.markdown("#### 📊 Forecast Quality Score")
-                            st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
                             
                             # Add quality interpretation
                             if quality_score < 30:
