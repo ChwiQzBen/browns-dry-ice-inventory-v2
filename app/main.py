@@ -9427,6 +9427,10 @@ def main():
                             ) * mape_penalty * 100
                             
                             quality_score = round(max(0, min(100, quality_score)), 1)
+
+                            # Display Forecast Quality Score
+                            st.markdown("#### 📊 Forecast Quality Score")
+                            st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
                             
                             # Add quality interpretation
                             if quality_score < 30:
