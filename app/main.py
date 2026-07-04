@@ -5024,9 +5024,47 @@ def create_ensemble_forecast(df, forecast_days=30, selected_models=None):
                 test_model.fit(X_train, y_train)
                 predictions = test_model.predict(X_test)
                 
-                # Calculate MAPE
-                mape = np.mean(np.abs((y_test - predictions) / (y_test + 1)))
-                backtest_accuracy = max(0, 1 - mape)
+                # Convert to arrays and align lengths
+                y_true = np.array(y_test)
+                y_pred = np.array(predictions[:len(y_test)])
+                
+                # Remove NaNs
+                mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+                y_true = y_true[mask]
+                y_pred = y_pred[mask]
+                
+                if len(y_true) > 1:
+                    # MAE
+                    mae = np.mean(np.abs(y_true - y_pred))
+                    mean_actual = max(np.mean(y_true), 1)
+                    mae_normalized = min(mae / mean_actual, 1)
+                    
+                    # R²
+                    ss_res = np.sum((y_true - y_pred) ** 2)
+                    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+                    r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                    r2_normalized = max(0, min(1, (r2 + 1) / 2))
+                    
+                    # Direction accuracy
+                    actual_direction = np.sign(np.diff(y_true))
+                    pred_direction = np.sign(np.diff(y_pred))
+                    direction_accuracy = (
+                        np.mean(actual_direction == pred_direction)
+                        if len(actual_direction) > 0
+                        else 0
+                    )
+                    
+                    # Composite score (0-1 scale)
+                    backtest_accuracy = (
+                        0.4 * (1 - mae_normalized) +
+                        0.3 * r2_normalized +
+                        0.3 * direction_accuracy
+                    )
+                else:
+                    backtest_accuracy = 0
+                
+                # Ensure it's between 0 and 1
+                backtest_accuracy = max(0, min(1, backtest_accuracy))
             else:
                 backtest_accuracy = 0.85
         except Exception as e:
@@ -9348,9 +9386,38 @@ def main():
                             with col4:
                                 st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
                                 
-                            quality_score = max(0, min(100, 100 - mape))
+                            # Calculate normalized metrics for quality score
+                            # Get mean actual value for normalization
+                            mean_actual = max(np.mean(historical_values), 1)  # Avoid division by zero
+                            
+                            # Normalize MAE relative to average demand
+                            mae_normalized = min(mae / mean_actual, 1)
+                            
+                            # Transform R² from [-1,1] → [0,1]
+                            r2_normalized = max(0, min(1, (r2 + 1) / 2))
+                            
+                            # Direction accuracy already in percentage
+                            direction_normalized = direction_accuracy / 100
+                            
+                            # Composite quality score (0-100)
+                            quality_score = (
+                                0.4 * (1 - mae_normalized) +
+                                0.3 * r2_normalized +
+                                0.3 * direction_normalized
+                            ) * 100
+                            
+                            quality_score = round(max(0, min(100, quality_score)), 1)
+                            
                             st.markdown("#### 📊 Forecast Quality Score")
                             st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
+                            
+                            # Add quality interpretation
+                            if quality_score < 30:
+                                st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
+                            elif quality_score < 50:
+                                st.info("📊 Forecast quality is moderate. Some models may need tuning.")
+                            else:
+                                st.success("✅ Forecast quality is good.")
                             
                         except Exception as e:
                             st.warning(f"Could not calculate accuracy metrics: {e}")
