@@ -15,7 +15,6 @@ import os
 import xgboost as xgb
 import lightgbm as lgb
 from sklearn.ensemble import RandomForestRegressor
-from neuralprophet import NeuralProphet
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -4908,7 +4907,7 @@ def count_history_interface():
 
 @log_performance
 @st.cache_data(ttl=1800, show_spinner=False)
-def create_ensemble_forecast(df, forecast_days=30):
+def create_ensemble_forecast(df, forecast_days=30, selected_models=None):
     """
     Create ensemble forecast combining ALL 8 models:
     Prophet, NeuralProphet, ARIMA, LSTM, Monte Carlo,
@@ -4938,8 +4937,8 @@ def create_ensemble_forecast(df, forecast_days=30):
         logger.info(f"External factors included: {list(external_factors.keys())}")
         logger.info(f"External features shape: {external_features.shape if external_features is not None else 'None'}")
         
-        # Generate forecast using ALL 8 models
-        results = forecaster.forecast(df, forecast_days)
+        # Generate forecast using selected models (or all 8 if none specified)
+        results = forecaster.forecast(df, forecast_days, models=selected_models)
         
         # Get ensemble forecast
         ensemble_values = np.array(results['ensemble']['forecast'])
@@ -5030,19 +5029,23 @@ def create_ensemble_forecast(df, forecast_days=30):
             backtest_accuracy = 0.85
         
         # ============================================================
-        # Find best performing model
-        best_model = None
-        best_score = float('inf')
-        for name, result in results.items():
-            if name != 'ensemble' and result is not None and 'score' in result:
-                if result['score'] < best_score:
-                    best_score = result['score']
-                    best_model = name
+        # 🔧 FIX: Get best model from results
+        # ============================================================
+        # The best model is now stored in the ensemble results
+        best_model_name = results['ensemble'].get('_best_model', None)
+        best_model_score = results['ensemble'].get('_best_score', None)
         
-        if best_model:
+        if best_model_name:
             st.session_state.best_model = {
-                'name': model_display_names.get(best_model, best_model.title()),
-                'score': f"{abs(best_score):.1f}",
+                'name': model_display_names.get(best_model_name, best_model_name.title()),
+                'score': f"{best_model_score:.1f}" if best_model_score else "N/A",
+                'accuracy': f"{backtest_accuracy*100:.1f}%"
+            }
+        elif active_models:
+            # Fallback: use first active model
+            st.session_state.best_model = {
+                'name': active_models[0],
+                'score': "N/A",
                 'accuracy': f"{backtest_accuracy*100:.1f}%"
             }
         
@@ -6156,7 +6159,7 @@ def main():
     sublimation_factor = 1 + avg_sublimation
     adjusted_demand = monthly_demand_input * sublimation_factor
     
-    z_score = stats.norm.ppf(constants.SERVICE_LEVEL)
+    z_score = norm.ppf(constants.SERVICE_LEVEL)
     eoq = math.sqrt((2 * adjusted_demand * constants.TRANSPORT_COST) / (constants.HOLDING_RATE * constants.PRICE_PER_KG)) if (constants.HOLDING_RATE * constants.PRICE_PER_KG) > 0 else 0
     safety_stock = z_score * demand_stddev_input * math.sqrt(constants.LEAD_TIME_DAYS) * sublimation_factor
     reorder_point = (adjusted_demand / 30 * constants.LEAD_TIME_DAYS) + safety_stock
@@ -9073,26 +9076,26 @@ def main():
                 st.markdown("### 🔮 30-Day Demand Forecast")
                 
                 # ============================================================
-                #  MODEL SELECTION CONTROLS (Inside Tab 2)
-                
+                # MODEL SELECTION CONTROLS (Inside Tab 2)
+                # ============================================================
                 with st.expander("⚙️ Model Configuration", expanded=False):
                     st.markdown("#### Select Active Models")
                     st.caption("Choose which models to use in the ensemble forecast")
+                    st.caption("ℹ️ NeuralProphet is currently disabled (dependency unavailable)")
                     
                     # Model selection with defaults
                     model_options = {
                         'Prophet': True,
-                        'NeuralProphet': True,
                         'ARIMA': True,
                         'LSTM': True,
                         'Monte Carlo': True,
                         'XGBoost': True,
                         'LightGBM': True,
-                        'RandomForest':True,
+                        'RandomForest': True,
                     }
                     
                     selected_models = []
-                    cols = st.columns(4)  # 4 columns for compact display
+                    cols = st.columns(4)
                     
                     for idx, (model_name, default) in enumerate(model_options.items()):
                         with cols[idx % 4]:
@@ -9102,11 +9105,9 @@ def main():
                                 key=f"tab_model_{model_name}",
                                 help=f"Enable/disable {model_name} model"
                             ):
-                                # Convert to internal name format
                                 internal_name = model_name.lower().replace(' ', '_')
                                 selected_models.append(internal_name)
                     
-                    # Quick select buttons
                     col1, col2, col3 = st.columns([1, 1, 2])
                     with col1:
                         if st.button("✅ Select All", use_container_width=True, key="select_all_models"):
@@ -9120,15 +9121,12 @@ def main():
                             st.rerun()
                     with col3:
                         if st.button("🔄 Update Models", use_container_width=True, type="primary", key="update_models_btn"):
-                            # Store selected models in session state
                             st.session_state.selected_models = selected_models
                             st.session_state.selected_models_count = len(selected_models)
-                            
-                            # Clear cache to force re-forecast
                             st.cache_data.clear()
                             
                             if selected_models:
-                                st.success(f"✅ Active models: {len(selected_models)}/8")
+                                st.success(f"✅ Active models: {len(selected_models)}/7")
                                 st.info(f"📋 {', '.join([m.replace('_', ' ').title() for m in selected_models])}")
                             else:
                                 st.warning("⚠️ No models selected! Using all models as fallback.")
@@ -9141,7 +9139,6 @@ def main():
                 from app.core.realtime_forecast import get_realtime_forecaster
                 rt_forecaster = get_realtime_forecaster()
                 
-                # Start/stop real-time updates
                 col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
                     rt_forecaster.render_realtime_status()
@@ -9156,38 +9153,38 @@ def main():
                 
                 st.markdown("---")
                 
-                # Use enhanced forecast
-                from app.core.advanced_forecasting_v2 import AdvancedForecaster
-                
-                with st.spinner("Generating ensemble forecast with 8 models..."):
-                    forecaster = AdvancedForecaster()
+                # ============================================================
+                # 🔧 FIX: Use create_ensemble_forecast() instead of forecaster.forecast()
+                # ============================================================
+                with st.spinner("Generating ensemble forecast with 7 models..."):
+                    # Aggregate multi-invoice daily data before forecasting
+                    daily_df_tab2 = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
                     
-                    # Apply model selection if user has selected specific models
-                    if 'selected_models' in st.session_state and st.session_state.selected_models:
-                        # Filter models based on user selection
-                        # Note: This requires updating AdvancedForecaster to accept a models list
-                        # For now, we'll use all models
-                        results = forecaster.forecast(df, 30)
-                    else:
-                        results = forecaster.forecast(df, 30)
+                    # Pull the model selection saved by the "Update Models" button
+                    selected_for_forecast = st.session_state.get('selected_models', None)
                     
-                    # Get ensemble forecast
-                    ensemble_forecast = results['ensemble']['forecast']
+                    # ✅ This sets session state variables automatically
+                    fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
+                        daily_df_tab2, 30, selected_models=selected_for_forecast
+                    )
+                    
+                    # Get ensemble forecast from the returned values
+                    ensemble_forecast = ensemble_forecast_values
                     
                     # ============================================================
                     # Model Performance Dashboard
-                   
+                    # ============================================================
                     st.markdown("---")
                     st.markdown("#### 📊 Model Performance Dashboard")
                     
-                    # Get active models from session state (set in create_ensemble_forecast)
+                    # ✅ Now these session state variables are set!
                     if 'active_models' in st.session_state and 'model_comparison' in st.session_state:
                         col1, col2, col3, col4 = st.columns(4)
                         
                         with col1:
                             st.metric(
                                 "🧠 Active Models",
-                                f"{st.session_state.active_models}/8",
+                                f"{st.session_state.active_models}/7",
                                 delta=f"{st.session_state.active_models} models"
                             )
                         
@@ -9221,7 +9218,7 @@ def main():
                     
                     # ============================================================
                     # Detailed Model Comparison Table
-                    
+                    # ============================================================
                     if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
                         with st.expander("🔬 View Detailed Model Comparison", expanded=False):
                             st.dataframe(
@@ -9231,7 +9228,6 @@ def main():
                                 height=250
                             )
                             
-                            # Export button
                             csv = st.session_state.model_comparison.to_csv(index=False).encode('utf-8')
                             st.download_button(
                                 label="📥 Download Model Comparison",
@@ -9242,10 +9238,9 @@ def main():
                     
                     # ============================================================
                     # Model Comparison Chart
-                    
+                    # ============================================================
                     if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
                         try:
-                            # Extract numeric values for chart
                             chart_data = []
                             for _, row in st.session_state.model_comparison.iterrows():
                                 try:
@@ -9261,7 +9256,6 @@ def main():
                             if chart_data:
                                 chart_df = pd.DataFrame(chart_data)
                                 
-                                # Create bar chart
                                 import plotly.express as px
                                 fig_models = px.bar(
                                     chart_df,
@@ -9290,63 +9284,51 @@ def main():
                     
                     # ============================================================
                     # Scenario Analysis
-                    
-                    # Create scenarios
+                    # ============================================================
                     scenario_results = create_scenario_analysis(ensemble_forecast, df)
                     
-                    # Display scenario chart
                     scenario_fig = render_scenario_analysis(scenario_results, 30)
                     st.plotly_chart(scenario_fig, use_container_width=True)
                     
-                    # Display scenario summary
                     st.markdown("#### 📊 Scenario Summary")
                     render_scenario_summary(scenario_results)
                     
                     # ============================================================
                     # Model Performance Details
-                    
+                    # ============================================================
                     with st.expander("🔬 Model Performance Details", expanded=False):
-                        # Show each model's forecast with better formatting
                         st.markdown("#### 📈 Individual Model Forecasts")
                         
-                        # Create a grid of model metrics
                         model_cols = st.columns(4)
                         col_idx = 0
                         
-                        for name, result in results.items():
-                            if name != 'ensemble' and result and 'forecast' in result:
-                                with model_cols[col_idx % 4]:
-                                    avg = np.mean(result['forecast'])
-                                    min_val = np.min(result['forecast'])
-                                    max_val = np.max(result['forecast'])
-                                    
-                                    # Clean up display name
-                                    display_name = name.replace('_', ' ').title()
-                                    
-                                    st.metric(
-                                        display_name,
-                                        f"{avg:.1f} kg/day",
-                                        f"min: {min_val:.1f} | max: {max_val:.1f}"
-                                    )
-                                col_idx += 1
+                        # Get results from the returned values
+                        # We need to re-run forecast to get individual model results
+                        # Or we can use the model_forecasts from create_ensemble_forecast
+                        if model_forecasts:
+                            for name, stats in model_forecasts.items():
+                                if name != 'External Factors' and isinstance(stats, dict):
+                                    with model_cols[col_idx % 4]:
+                                        st.metric(
+                                            name,
+                                            f"{stats['avg']:.1f} kg/day",
+                                            f"min: {stats['min']:.1f} | max: {stats['max']:.1f}"
+                                        )
+                                    col_idx += 1
                         
                         # Show metrics
                         st.markdown("#### 📈 Accuracy Metrics")
                         try:
-                            # Get historical data for metrics
-                            historical_values = df['Order_Quantity_kg'].tail(30).values
+                            historical_values = daily_df_tab2['Order_Quantity_kg'].tail(30).values
                             forecast_values = np.array(ensemble_forecast[:len(historical_values)])
                             
-                            # Calculate metrics
                             mape = np.mean(np.abs((historical_values - forecast_values) / (historical_values + 1))) * 100
                             mae = np.mean(np.abs(historical_values - forecast_values))
                             
-                            # R² calculation
                             ss_res = np.sum((historical_values - forecast_values) ** 2)
                             ss_tot = np.sum((historical_values - np.mean(historical_values)) ** 2)
                             r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
                             
-                            # Direction accuracy
                             actual_direction = np.sign(np.diff(historical_values))
                             pred_direction = np.sign(np.diff(forecast_values[:len(historical_values)]))
                             direction_accuracy = np.mean(actual_direction == pred_direction) * 100
@@ -9361,7 +9343,6 @@ def main():
                             with col4:
                                 st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
                                 
-                            # Add a gauge for overall forecast quality
                             quality_score = max(0, min(100, 100 - mape))
                             st.markdown("#### 📊 Forecast Quality Score")
                             st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
