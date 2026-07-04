@@ -9371,77 +9371,85 @@ def main():
                                     col_idx += 1
                         
                         # Show metrics
-                        st.markdown("#### 📈 Accuracy Metrics")
-                        try:
-                            historical_values = daily_df_tab2['Order_Quantity_kg'].tail(30).values
-                            forecast_values = np.array(ensemble_forecast[:len(historical_values)])
+                        st.markdown("#### 📈 Accuracy Metrics (Backtest)")
+                        st.caption(
+                            "Trains on all data except the last 30 days, forecasts those 30 days, "
+                            "then compares against what actually happened. This is separate from "
+                            "the live 30-day-ahead forecast above, which has no ground truth yet."
+                        )
+                        
+                        if len(daily_df_tab2) <= 60:
+                            st.info("Need more than 60 days of history to run a reliable backtest.")
+                        else:
+                            run_backtest = st.button(
+                                "🧪 Run Backtest",
+                                key="run_backtest_btn",
+                                help="Retrains all selected models on held-out data. Takes as long as the main forecast."
+                            )
                             
-                            mape = np.mean(np.abs((historical_values - forecast_values) / (historical_values + 1))) * 100
-                            mae = np.mean(np.abs(historical_values - forecast_values))
-                            
-                            ss_res = np.sum((historical_values - forecast_values) ** 2)
-                            ss_tot = np.sum((historical_values - np.mean(historical_values)) ** 2)
-                            r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                            
-                            actual_direction = np.sign(np.diff(historical_values))
-                            pred_direction = np.sign(np.diff(forecast_values[:len(historical_values)]))
-                            direction_accuracy = np.mean(actual_direction == pred_direction) * 100
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("📊 MAPE", f"{mape:.1f}%")
-                            with col2:
-                                st.metric("📉 MAE", f"{mae:.1f}")
-                            with col3:
-                                st.metric("📈 R²", f"{r2:.2f}")
-                            with col4:
-                                st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
-                                
-                            # Calculate normalized metrics for quality score
-                            # Get mean actual value for normalization
-                            mean_actual = max(np.mean(historical_values), 1)
-                            
-                            # Normalize MAE relative to average demand
-                            mae_normalized = min(mae / mean_actual, 1)
-                            
-                            # R² - stricter: if negative, contribution is 0
-                            if r2 < 0:
-                                r2_normalized = 0
-                            else:
-                                r2_normalized = min(r2, 1)
-                            
-                            # Direction accuracy (already in percentage, convert to 0-1)
-                            direction_normalized = direction_accuracy / 100
-                            
-                            # MAPE penalty - if MAPE is exploding, penalize
-                            if mape > 100:
-                                mape_penalty = 0
-                            else:
-                                mape_penalty = 1
-                            
-                            # Composite quality score (0-100)
-                            quality_score = (
-                                0.4 * (1 - mae_normalized) +
-                                0.3 * r2_normalized +
-                                0.3 * direction_normalized
-                            ) * mape_penalty * 100
-                            
-                            quality_score = round(max(0, min(100, quality_score)), 1)
-
-                            # Display Forecast Quality Score
-                            st.markdown("#### 📊 Forecast Quality Score")
-                            st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
-                            
-                            # Add quality interpretation
-                            if quality_score < 30:
-                                st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
-                            elif quality_score < 50:
-                                st.info("📊 Forecast quality is moderate. Some models may need tuning.")
-                            else:
-                                st.success("✅ Forecast quality is good.")
-                            
-                        except Exception as e:
-                            st.warning(f"Could not calculate accuracy metrics: {e}")
+                            if run_backtest:
+                                try:
+                                    backtest_train = daily_df_tab2.iloc[:-30].reset_index(drop=True)
+                                    backtest_actual = daily_df_tab2.iloc[-30:]['Order_Quantity_kg'].values
+                                    
+                                    with st.spinner("Running backtest (retraining models on held-out data)..."):
+                                        _, backtest_forecast, _, _ = create_ensemble_forecast(
+                                            backtest_train, 30, selected_models=selected_for_forecast
+                                        )
+                                    
+                                    historical_values = backtest_actual
+                                    forecast_values = np.array(backtest_forecast[:len(historical_values)])
+                                    
+                                    wape = np.sum(np.abs(historical_values - forecast_values)) / max(np.sum(historical_values), 1) * 100
+                                    mae = np.mean(np.abs(historical_values - forecast_values))
+                                    
+                                    ss_res = np.sum((historical_values - forecast_values) ** 2)
+                                    ss_tot = np.sum((historical_values - np.mean(historical_values)) ** 2)
+                                    r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                                    
+                                    actual_direction = np.sign(np.diff(historical_values))
+                                    pred_direction = np.sign(np.diff(forecast_values[:len(historical_values)]))
+                                    direction_accuracy = np.mean(actual_direction == pred_direction) * 100
+                                    
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("📊 WAPE", f"{wape:.1f}%")
+                                    with col2:
+                                        st.metric("📉 MAE", f"{mae:.1f}")
+                                    with col3:
+                                        st.metric("📈 R²", f"{r2:.2f}")
+                                    with col4:
+                                        st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
+                                    
+                                    mean_actual = max(np.mean(historical_values), 1)
+                                    mae_normalized = min(mae / mean_actual, 1)
+                                    r2_normalized = 0 if r2 < 0 else min(r2, 1)
+                                    direction_normalized = direction_accuracy / 100
+                                    # Smooth decay instead of a hard cliff at 100%.
+                                    # WAPE <= 50%  -> full credit (1.0)
+                                    # WAPE = 100%  -> half credit (0.5)
+                                    # WAPE = 200%+ -> no credit (0.0)
+                                    wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
+                                    
+                                    quality_score = (
+                                        0.4 * (1 - mae_normalized) +
+                                        0.3 * r2_normalized +
+                                        0.3 * direction_normalized
+                                    ) * wape_penalty * 100
+                                    quality_score = round(max(0, min(100, quality_score)), 1)
+                                    
+                                    st.markdown("#### 📊 Forecast Quality Score")
+                                    st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
+                                    
+                                    if quality_score < 30:
+                                        st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
+                                    elif quality_score < 50:
+                                        st.info("📊 Forecast quality is moderate. Some models may need tuning.")
+                                    else:
+                                        st.success("✅ Forecast quality is good.")
+                                        
+                                except Exception as e:
+                                    st.warning(f"Could not run backtest: {e}")
             else:
                 st.warning("📊 No order data found for this period")
 
