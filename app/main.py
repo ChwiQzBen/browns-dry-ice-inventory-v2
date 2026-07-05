@@ -6332,260 +6332,176 @@ def main():
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================================
-    # SECTION 2: UPDATE INVENTORY (Container Style)
-    st.sidebar.markdown("""
-    <div style="
-        border: 2px solid #81c784;
-        border-radius: 12px;
-        padding: 15px;
-        margin-bottom: 15px;
-        background: rgba(129, 199, 132, 0.05);
-    ">
-        <div style="
-            background: #81c784;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            display: inline-block;
-            font-size: 14px;
-            font-weight: 700;
-        ">
-            📝 Update Inventory
-        </div>
-    """, unsafe_allow_html=True)
-
+    # SECTION 2: UPDATE INVENTORY (Compact Expanders)
     # ============================================================
-    # RECORD USAGE - ENHANCED WITH VALIDATION & SECURITY
-    # ============================================================
-    st.sidebar.markdown("#### 📤 Record Usage")
+    with st.sidebar.expander("📤 Record Usage", expanded=False):
+        usage_date = st.date_input("Usage Date", value=datetime.today())
 
-    # Date input with validation
-    usage_date = st.sidebar.date_input("Usage Date", value=datetime.today())
+        usage = safe_number_input(
+            "Quantity Used (kg)",
+            min_value=0.0,
+            max_value=10000.0,
+            value=150.0,
+            step=10.0,
+            validate=True,
+            key="usage_qty",
+            container=st
+        )
 
-    # Use safe number input with validation
-    usage = safe_number_input(
-        "Quantity Used (kg)",
-        min_value=0.0,
-        max_value=10000.0,
-        value=150.0,
-        step=10.0,
-        validate=True,
-        key="usage_qty",
-        container=st.sidebar
-    )
+        current_stock_val = inventory_tracker.current_stock
+        st.caption(f"📊 Available: {current_stock_val:,.0f} kg")
 
-    # Show current stock
-    current_stock_val = inventory_tracker.current_stock
-    st.sidebar.caption(f"📊 Available: {current_stock_val:,.0f} kg")
-
-    # Validate stock sufficiency in real-time
-    if usage is not None and usage > 0:
-        is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
-        if not is_valid:
-            st.sidebar.error(msg)
-        elif "Warning" in msg:
-            st.sidebar.warning(msg)
-        else:
-            st.sidebar.success(msg)
-
-    # ============================================================
-    # RECORD USAGE BUTTON WITH SECURITY & VALIDATION
-    # ============================================================
-    if st.sidebar.button("Record Usage", type="primary"):
-        # ============================================================
-        # 🔐 AUTHENTICATION CHECK
-        # ============================================================
-        auth = AuthManager()
-        if not auth.is_authenticated:
-            st.sidebar.error("🔒 Please login to record usage")
-            return
-        if not auth.check_permission('record_usage'):
-            st.sidebar.error("⛔ You don't have permission to record usage")
-            return
-        
-        # Validate quantity
-        if usage is None or usage <= 0:
-            st.sidebar.error("❌ Please enter a valid quantity")
-            return
-        
-        # Re-validate stock sufficiency
-        is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
-        if not is_valid:
-            st.sidebar.error(msg)
-            return
-        
-        # Confirm large usage (>500kg)
-        if usage > 500:
-            if not st.sidebar.checkbox("☑️ Confirm large usage (>500kg)", key="confirm_large_usage"):
-                st.sidebar.warning("⚠️ Please confirm large usage before proceeding")
-                return
-        
-        # Process the usage with comprehensive error handling
-        try:
-            # ============================================================
-            # 🔐 AUDIT LOGGING
-            # ============================================================
-            audit = AuditLogger()
-            audit.log(
-                action='RECORD_USAGE',
-                details=f"Usage: {usage}kg, Date: {usage_date}",
-                user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
-            )
-            
-            alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
-            add_transaction_to_history(
-                "usage", 
-                usage, 
-                "Daily Consumption", 
-                usage_date, 
-                st.session_state.selected_period
-            )
-            
-            if alert is not None:
-                st.sidebar.error(alert["message"])
+        if usage is not None and usage > 0:
+            is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+            if not is_valid:
+                st.error(msg)
+            elif "Warning" in msg:
+                st.warning(msg)
             else:
-                # ============================================================
-                # 🔐 AUDIT LOGGING - SUCCESS
-                # ============================================================
+                st.success(msg)
+
+        if st.button("Record Usage", type="primary", key="record_usage_btn"):
+            auth = AuthManager()
+            if not auth.is_authenticated:
+                st.error("🔒 Please login to record usage")
+                return
+            if not auth.check_permission('record_usage'):
+                st.error("⛔ You don't have permission to record usage")
+                return
+
+            if usage is None or usage <= 0:
+                st.error("❌ Please enter a valid quantity")
+                return
+
+            is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+            if not is_valid:
+                st.error(msg)
+                return
+
+            if usage > 500:
+                if not st.checkbox("☑️ Confirm large usage (>500kg)", key="confirm_large_usage"):
+                    st.warning("⚠️ Please confirm large usage before proceeding")
+                    return
+
+            try:
+                audit = AuditLogger()
                 audit.log(
-                    action='RECORD_USAGE_SUCCESS',
-                    details=f"Usage: {usage}kg recorded successfully, New stock: {inventory_tracker.current_stock}kg",
+                    action='RECORD_USAGE',
+                    details=f"Usage: {usage}kg, Date: {usage_date}",
                     user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
                 )
-                
-                st.sidebar.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
-                
-                # Show new stock level
-                new_stock = inventory_tracker.current_stock
-                st.sidebar.info(f"📊 New stock level: {new_stock:,.0f} kg")
-                
-                # Suggest reorder if low
-                if new_stock < safety_stock:
-                    st.sidebar.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
-                    
-        except Exception as e:
-            logger.error(f"Failed to record usage: {e}", exc_info=True)
-            st.sidebar.error("❌ Failed to record usage. Please try again.")
 
-    st.sidebar.markdown("---")
+                alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
+                add_transaction_to_history(
+                    "usage", usage, "Daily Consumption", usage_date,
+                    st.session_state.selected_period
+                )
 
-    # ============================================================
-    # RECORD RECEIPT - ENHANCED WITH VALIDATION
-    st.sidebar.markdown("#### 📥 Record Receipt")
+                if alert is not None:
+                    st.error(alert["message"])
+                else:
+                    audit.log(
+                        action='RECORD_USAGE_SUCCESS',
+                        details=f"Usage: {usage}kg recorded successfully, New stock: {inventory_tracker.current_stock}kg",
+                        user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                    )
+                    st.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
+                    new_stock_val = inventory_tracker.current_stock
+                    st.info(f"📊 New stock level: {new_stock_val:,.0f} kg")
+                    if new_stock_val < safety_stock:
+                        st.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
 
-    # Date input with validation
-    receipt_date = st.sidebar.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
+            except Exception as e:
+                logger.error(f"Failed to record usage: {e}", exc_info=True)
+                st.error("❌ Failed to record usage. Please try again.")
 
-    # Show current stock for context
-    current_stock_val = inventory_tracker.current_stock
-    st.sidebar.caption(f"📊 Current stock: {current_stock_val:,.0f} kg")
+    with st.sidebar.expander("📥 Record Receipt", expanded=False):
+        receipt_date = st.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
 
-    # Use safe number input with validation
-    new_stock = safe_number_input(
-        "New Stock Received (kg)",
-        min_value=0.0,
-        max_value=100000.0,
-        value=0.0,
-        step=50.0,
-        validate=True,
-        key="receipt_qty",
-        container=st.sidebar  # ← ADD THIS LINE
-    )
+        current_stock_val = inventory_tracker.current_stock
+        st.caption(f"📊 Current stock: {current_stock_val:,.0f} kg")
 
-    # Real-time validation feedback
-    if new_stock is not None and new_stock > 0:
-        # Calculate what new stock will be
-        new_total = current_stock_val + new_stock
-        st.sidebar.info(f"📊 New stock after receipt: {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
-        
-        # Warn about very large receipts
-        if new_stock > 1000:
-            st.sidebar.warning(f"⚠️ Large receipt: {new_stock:.0f} kg. Please confirm below.")
-        
-        # Show if stock will exceed max recommended
-        max_recommended = safety_stock * 3  # Assuming safety_stock is defined
-        if new_total > max_recommended:
-            st.sidebar.warning(f"⚠️ New stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+        new_stock = safe_number_input(
+            "New Stock Received (kg)",
+            min_value=0.0,
+            max_value=100000.0,
+            value=0.0,
+            step=50.0,
+            validate=True,
+            key="receipt_qty",
+            container=st
+        )
 
-    # Validate date
-    if receipt_date:
-        is_valid, msg = validate_date(receipt_date, allow_future=False)
-        if not is_valid:
-            st.sidebar.error(msg)
-
-    # Record Receipt button with comprehensive validation
-    if st.sidebar.button("Record Receipt", type="primary"):
-        # Validate quantity
-        if new_stock is None or new_stock <= 0:
-            st.sidebar.error("❌ Please enter a valid quantity greater than 0")
-            return
-        
-        # Validate date
-        is_valid, msg = validate_date(receipt_date, allow_future=False)
-        if not is_valid:
-            st.sidebar.error(msg)
-            return
-        
-        # Confirm large receipt (>1000kg)
-        if new_stock > 1000:
-            if not st.sidebar.checkbox("☑️ Confirm large receipt (>1000kg)", key="confirm_large_receipt"):
-                st.sidebar.warning("⚠️ Please confirm large receipt before proceeding")
-                return
-        
-        # Process the receipt with comprehensive error handling
-        try:
-            # Get the correct period for the receipt date
-            correct_period = get_period_from_date(receipt_date)
-            
-            # Store old stock for reference
-            old_stock = inventory_tracker.current_stock
-            
-            # Update stock
-            inventory_tracker.current_stock += new_stock
-            update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
-            
-            # Add to transaction history
-            add_transaction_to_history(
-                transaction_type="receipt",
-                quantity=new_stock,
-                description="Stock Receipt",
-                date=receipt_date,
-                period=correct_period
-            )
-            
-            # Show success message with details
-            st.sidebar.success(
-                f"✅ Order for {new_stock:.0f} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
-                f"It has been automatically assigned to the {correct_period} period."
-            )
-            
-            # Show new stock level with change
-            new_total = inventory_tracker.current_stock
-            st.sidebar.info(f"📊 Stock updated: {old_stock:,.0f} → {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
-            
-            # Check if stock is now too high
+        if new_stock is not None and new_stock > 0:
+            new_total = current_stock_val + new_stock
+            st.info(f"📊 New stock after receipt: {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+            if new_stock > 1000:
+                st.warning(f"⚠️ Large receipt: {new_stock:.0f} kg. Please confirm below.")
             max_recommended = safety_stock * 3
             if new_total > max_recommended:
-                st.sidebar.warning(f"⚠️ Stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
-                st.sidebar.info("💡 Consider reducing future orders or increasing usage")
-            
-            # Switch period if needed
-            if st.session_state.selected_period != correct_period:
-                st.session_state.selected_period = correct_period
-                st.sidebar.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
-                
-        except ValidationError as e:
-            st.sidebar.error(f"❌ Validation Error: {e}")
-            
-        except DatabaseError as e:
-            st.sidebar.error(f"⚠️ Database Error: {e}")
-            st.sidebar.info("💡 Your data was saved locally. It will sync when the cloud is available.")
-            
-        except Exception as e:
-            logger.error(f"Failed to record receipt: {e}", exc_info=True)
-            st.sidebar.error("❌ Failed to record receipt. Please try again.")
-            st.sidebar.info("💡 If the problem persists, please contact support.")
+                st.warning(f"⚠️ New stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+
+        if receipt_date:
+            is_valid, msg = validate_date(receipt_date, allow_future=False)
+            if not is_valid:
+                st.error(msg)
+
+        if st.button("Record Receipt", type="primary", key="record_receipt_btn"):
+            if new_stock is None or new_stock <= 0:
+                st.error("❌ Please enter a valid quantity greater than 0")
+                return
+
+            is_valid, msg = validate_date(receipt_date, allow_future=False)
+            if not is_valid:
+                st.error(msg)
+                return
+
+            if new_stock > 1000:
+                if not st.checkbox("☑️ Confirm large receipt (>1000kg)", key="confirm_large_receipt"):
+                    st.warning("⚠️ Please confirm large receipt before proceeding")
+                    return
+
+            try:
+                correct_period = get_period_from_date(receipt_date)
+                old_stock = inventory_tracker.current_stock
+
+                inventory_tracker.current_stock += new_stock
+                update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
+
+                add_transaction_to_history(
+                    transaction_type="receipt",
+                    quantity=new_stock,
+                    description="Stock Receipt",
+                    date=receipt_date,
+                    period=correct_period
+                )
+
+                st.success(
+                    f"✅ Order for {new_stock:.0f} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
+                    f"It has been automatically assigned to the {correct_period} period."
+                )
+
+                new_total = inventory_tracker.current_stock
+                st.info(f"📊 Stock updated: {old_stock:,.0f} → {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+
+                max_recommended = safety_stock * 3
+                if new_total > max_recommended:
+                    st.warning(f"⚠️ Stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+                    st.info("💡 Consider reducing future orders or increasing usage")
+
+                if st.session_state.selected_period != correct_period:
+                    st.session_state.selected_period = correct_period
+                    st.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
+
+            except ValidationError as e:
+                st.error(f"❌ Validation Error: {e}")
+            except DatabaseError as e:
+                st.error(f"⚠️ Database Error: {e}")
+                st.info("💡 Your data was saved locally. It will sync when the cloud is available.")
+            except Exception as e:
+                logger.error(f"Failed to record receipt: {e}", exc_info=True)
+                st.error("❌ Failed to record receipt. Please try again.")
+                st.info("💡 If the problem persists, please contact support.")
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
