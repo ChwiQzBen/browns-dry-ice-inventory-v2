@@ -7679,9 +7679,7 @@ def main():
                                     else:
                                         return 'background-color: #d4edda; color: #155724;'
                                 
-                                styled_cycle_df = cycle_df.style.map(
-                                    style_priority, subset=['Priority']
-                                )
+                                styled_cycle_df = cycle_df.style.applymap(style_priority, subset=['Priority'])
                                 
                                 st.dataframe(
                                     styled_cycle_df,
@@ -7778,10 +7776,10 @@ def main():
                                     else:
                                         return 'background-color: #d4edda;'
                                 
-                                styled_replenishment = replenishment_df.style.map(
+                                styled_replenishment = replenishment_df.style.applymap(
                                     style_abc_class, subset=['ABC Class']
                                 )
-                                
+                                                                
                                 st.dataframe(
                                     styled_replenishment,
                                     use_container_width=True,
