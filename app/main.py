@@ -9419,32 +9419,37 @@ def main():
                                     with col4:
                                         st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
                                     
-                                    mean_actual = max(np.mean(historical_values), 1)
-                                    mae_normalized = min(mae / mean_actual, 1)
-                                    r2_normalized = 0 if r2 < 0 else min(r2, 1)
-                                    direction_normalized = direction_accuracy / 100
-                                    # Smooth decay instead of a hard cliff at 100%.
-                                    # WAPE <= 50%  -> full credit (1.0)
-                                    # WAPE = 100%  -> half credit (0.5)
-                                    # WAPE = 200%+ -> no credit (0.0)
-                                    wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
-                                    
-                                    quality_score = (
-                                        0.4 * (1 - mae_normalized) +
-                                        0.3 * r2_normalized +
-                                        0.3 * direction_normalized
-                                    ) * wape_penalty * 100
-                                    quality_score = round(max(0, min(100, quality_score)), 1)
-                                    
-                                    st.markdown("#### 📊 Forecast Quality Score")
-                                    st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
-                                    
-                                    if quality_score < 30:
-                                        st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
-                                    elif quality_score < 50:
-                                        st.info("📊 Forecast quality is moderate. Some models may need tuning.")
+                                    metrics_valid = all(np.isfinite(v) for v in [wape, mae, r2, direction_accuracy])
+                                    if not metrics_valid:
+                                        quality_score = 0.0
+                                        st.markdown("#### 📊 Forecast Quality Score")
+                                        st.progress(0.0, text="0% — invalid metrics")
+                                        st.error("⚠️ Backtest produced NaN metrics — one of the ensemble models "
+                                                "(check NeuralProphet) likely returned NaN forecasts. "
+                                                "Quality score forced to 0 instead of falsely showing 100%.")
                                     else:
-                                        st.success("✅ Forecast quality is good.")
+                                        mean_actual = max(np.mean(historical_values), 1)
+                                        mae_normalized = min(mae / mean_actual, 1)
+                                        r2_normalized = 0 if r2 < 0 else min(r2, 1)
+                                        direction_normalized = direction_accuracy / 100
+                                        wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
+
+                                        quality_score = (
+                                            0.4 * (1 - mae_normalized) +
+                                            0.3 * r2_normalized +
+                                            0.3 * direction_normalized
+                                        ) * wape_penalty * 100
+                                        quality_score = round(max(0, min(100, quality_score)), 1)
+
+                                        st.markdown("#### 📊 Forecast Quality Score")
+                                        st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
+
+                                        if quality_score < 30:
+                                            st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
+                                        elif quality_score < 50:
+                                            st.info("📊 Forecast quality is moderate. Some models may need tuning.")
+                                        else:
+                                            st.success("✅ Forecast quality is good.")
                                         
                                 except Exception as e:
                                     st.warning(f"Could not run backtest: {e}")
