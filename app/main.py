@@ -10313,8 +10313,8 @@ def main():
 
             st.dataframe(
             maintenance_data.style
-            .map(style_status, subset=['Status'])
-            .map(style_priority, subset=['Priority']),
+            .applymap(style_status, subset=['Status'])
+            .applymap(style_priority, subset=['Priority']),
             use_container_width=True,
             height=250,
             hide_index=True
