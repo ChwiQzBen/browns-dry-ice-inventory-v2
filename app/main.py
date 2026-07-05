@@ -5693,7 +5693,8 @@ def main():
         'stock_take_inventory': {},
         'show_password_reset': False,  
         'reset_email_input': '',       
-        'rate_limit_warning': None    
+        'rate_limit_warning': None,
+        'selected_models': ['prophet', 'arima', 'lstm', 'monte_carlo', 'xgboost', 'lightgbm', 'random_forest'],
     }
     
     for key, value in session_defaults.items():
@@ -6147,7 +6148,9 @@ def main():
             if daily_df.empty or daily_df['Order_Quantity_kg'].sum() == 0:
                 return None, np.array([0]), {}, 0, 0, 0
             
-            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(daily_df, forecast_days=30)
+            fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
+            daily_df, forecast_days=30, selected_models=st.session_state.get('selected_models')
+        )
             
             # Check if forecast returned valid values
             if ensemble_forecast_values is None or len(ensemble_forecast_values) == 0:
