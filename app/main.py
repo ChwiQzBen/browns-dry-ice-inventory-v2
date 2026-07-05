@@ -10149,7 +10149,7 @@ def main():
 
             # Styled dataframe with highlighting
             st.dataframe(
-            roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
+            roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
             .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
             use_container_width=True,
             height=200,
