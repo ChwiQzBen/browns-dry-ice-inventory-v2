@@ -9805,7 +9805,7 @@ def main():
                 st.dataframe(
                         cost_components.style
                         .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-                        .map(lambda x: 'font-weight: bold', subset=['Component'])
+                        .applymap(lambda x: 'font-weight: bold', subset=['Component'])
                         .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
                         use_container_width=True,
                         height=220,
