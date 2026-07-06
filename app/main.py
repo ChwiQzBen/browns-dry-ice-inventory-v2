@@ -2236,9 +2236,9 @@ def show_replenishment_suggestions(recommendations_df, title="🛒 Replenishment
             return 'background-color: #d4edda;'
     
     # Apply styling
-    styled_df = display_df.style.applymap(
+    styled_df = display_df.style.map(
     color_urgency, subset=['Urgency']
-    ).applymap(
+    ).map(
         color_action, subset=['Action']
     )
     
@@ -5866,7 +5866,7 @@ def main():
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
     
     st.sidebar.header("🗓️ Analysis Period")
-    analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028']
+    analysis_periods = ['2024/2025', '2025/2026', '2026/2027', '2027/2028', '2028/2029']
 
     if 'selected_period' not in st.session_state:
         st.session_state.selected_period = '2024/2025'
@@ -6950,33 +6950,12 @@ def main():
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
-    # 🔗 SERVICE STATUS - COMPACT TEAL CONTAINER
     # ============================================================
-    st.sidebar.markdown("""
-    <div style="
-        border: 2px solid #26a69a;
-        border-radius: 12px;
-        padding: 10px 15px;
-        margin-bottom: 10px;
-        background: rgba(38, 166, 154, 0.05);
-    ">
-        <div style="
-            background: #26a69a;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 6px;
-            margin-bottom: 8px;
-            display: inline-block;
-            font-size: 12px;
-            font-weight: 600;
-        ">
-            🔗 Service Status
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Initialize Service Status Manager and show status
-    service_manager = ServiceStatusManager()
-    service_manager.show_service_status()
+    # 🔗 SERVICE STATUS (Compact Expander)
+    # ============================================================
+    with st.sidebar.expander("🔗 Service Status", expanded=False):
+        service_manager = ServiceStatusManager()
+        service_manager.show_service_status()
 
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
     
@@ -7598,7 +7577,7 @@ def main():
                                     else:
                                         return 'background-color: #d4edda; color: #155724;'
                                 
-                                styled_cycle_df = cycle_df.style.applymap(style_priority, subset=['Priority'])
+                                styled_cycle_df = cycle_df.style.map(style_priority, subset=['Priority'])
                                 
                                 st.dataframe(
                                     styled_cycle_df,
@@ -7695,7 +7674,7 @@ def main():
                                     else:
                                         return 'background-color: #d4edda;'
                                 
-                                styled_replenishment = replenishment_df.style.applymap(
+                                styled_replenishment = replenishment_df.style.map(
                                     style_abc_class, subset=['ABC Class']
                                 )
                                                                 
@@ -9729,7 +9708,7 @@ def main():
                 st.dataframe(
                         cost_components.style
                         .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-                        .applymap(lambda x: 'font-weight: bold', subset=['Component'])
+                        .map(lambda x: 'font-weight: bold', subset=['Component'])
                         .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
                         use_container_width=True,
                         height=220,
@@ -10073,7 +10052,7 @@ def main():
 
             # Styled dataframe with highlighting
             st.dataframe(
-            roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
+            roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
             .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
             use_container_width=True,
             height=200,
@@ -10237,8 +10216,8 @@ def main():
 
             st.dataframe(
             maintenance_data.style
-            .applymap(style_status, subset=['Status'])
-            .applymap(style_priority, subset=['Priority']),
+            .map(style_status, subset=['Status'])
+            .map(style_priority, subset=['Priority']),
             use_container_width=True,
             height=250,
             hide_index=True
@@ -10248,7 +10227,7 @@ def main():
             st.markdown("---")
             st.markdown("#### 💰 Maintenance Costs")
             cost_data = pd.DataFrame({
-                'Month': pd.date_range('2024-01-01', periods=6, freq='M'),
+                'Month': pd.date_range('2024-01-01', periods=6, freq='ME'),
                 'Preventive': [2500, 3200, 2800, 4100, 2900, 3500],
                 'Reactive': [1200, 800, 2100, 600, 1800, 900],
                 'Emergency': [0, 0, 1500, 0, 0, 2200]

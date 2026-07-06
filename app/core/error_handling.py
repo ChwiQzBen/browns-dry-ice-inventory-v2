@@ -328,35 +328,35 @@ class ServiceStatusManager:
         self.check_all_services()
         
         if self.services['supabase']['status'] == 'healthy':
-            st.sidebar.success("☁️ Supabase: Connected")
+            st.success("☁️ Supabase: Connected")
         else:
-            st.sidebar.error("☁️ Supabase: Disconnected")
+            st.error("☁️ Supabase: Disconnected")
             if self.services['supabase']['error']:
-                st.sidebar.caption(f"Error: {self.services['supabase']['error'][:50]}...")
+                st.caption(f"Error: {self.services['supabase']['error'][:50]}...")
         
         if self.services['sqlite']['status'] == 'healthy':
-            st.sidebar.success("💾 SQLite: Connected")
+            st.success("💾 SQLite: Connected")
         else:
-            st.sidebar.error("💾 SQLite: Disconnected (Critical!)")
+            st.error("💾 SQLite: Disconnected (Critical!)")
         
         if self.services['google_sheets']['status'] == 'healthy':
-            st.sidebar.success("📊 Google Sheets: Connected")
+            st.success("📊 Google Sheets: Connected")
         else:
-            st.sidebar.warning("📊 Google Sheets: Not connected")
+            st.warning("📊 Google Sheets: Not connected")
         
-        st.sidebar.markdown("---")
+        st.markdown("---")
         if self.current_mode == 'cloud':
-            st.sidebar.info("🌐 Mode: Cloud Connected")
-            st.sidebar.caption("✅ All features available")
+            st.info("🌐 Mode: Cloud Connected")
+            st.caption("✅ All features available")
         elif self.current_mode == 'local':
-            st.sidebar.info("💻 Mode: Local Only")
-            st.sidebar.caption("⚠️ Some cloud features unavailable")
+            st.info("💻 Mode: Local Only")
+            st.caption("⚠️ Some cloud features unavailable")
         else:
-            st.sidebar.error("❌ Mode: Offline")
-            st.sidebar.caption("⚠️ Limited functionality available")
+            st.error("❌ Mode: Offline")
+            st.caption("⚠️ Limited functionality available")
         
         if self.last_check_time:
-            st.sidebar.caption(f"🕐 Last check: {self.last_check_time.strftime('%H:%M:%S')}")
+            st.caption(f"🕐 Last check: {self.last_check_time.strftime('%H:%M:%S')}")
 
 # ============================================================
 # SAFE INPUT FUNCTIONS - FIXED WITH CONTAINER SUPPORT
