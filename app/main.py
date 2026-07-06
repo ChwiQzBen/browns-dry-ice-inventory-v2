@@ -2238,7 +2238,7 @@ def show_replenishment_suggestions(recommendations_df, title="🛒 Replenishment
     # Apply styling
     styled_df = display_df.style.applymap(
     color_urgency, subset=['Urgency']
-    ).map(
+    ).applymap(
         color_action, subset=['Action']
     )
     
