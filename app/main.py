@@ -667,6 +667,91 @@ class Constants:
 
 constants = Constants()
 
+# 🔐 ROLE-BASED ACCESS CONTROL (tab/section visibility layer)
+# Independent of AuthManager.check_permission() — different granularity,
+# same underlying role read from st.session_state._auth.current_role
+from enum import Enum
+
+class Permission(str, Enum):
+    VIEW_STOCK = "view_stock"
+    VIEW_STOCK_TAKE = "view_stock_take"
+    RECORD_USAGE = "record_usage"
+    RECORD_RECEIPT = "record_receipt"
+    RUN_STOCK_TAKE = "run_stock_take"
+    VIEW_ANALYTICS = "view_analytics"
+    VIEW_FORECASTS = "view_forecasts"
+    VIEW_COST_DATA = "view_cost_data"
+    VIEW_STRATEGY = "view_strategy"
+    VIEW_MAINTENANCE = "view_maintenance"
+    GENERATE_REPORTS = "generate_reports"
+    VIEW_REPORTS = "view_reports"
+    EDIT_SYSTEM_PARAMS = "edit_system_params"
+    CLEAR_TRANSACTIONS = "clear_transactions"
+    VIEW_SECURITY_DASHBOARD = "view_security_dashboard"
+    MANAGE_USERS = "manage_users"
+
+ROLE_PERMISSIONS = {
+    "admin": set(Permission),
+    "manager": {
+        Permission.VIEW_STOCK, Permission.VIEW_STOCK_TAKE,
+        Permission.RECORD_USAGE, Permission.RECORD_RECEIPT, Permission.RUN_STOCK_TAKE,
+        Permission.VIEW_ANALYTICS, Permission.VIEW_FORECASTS, Permission.VIEW_COST_DATA,
+        Permission.VIEW_STRATEGY, Permission.VIEW_MAINTENANCE,
+        Permission.GENERATE_REPORTS, Permission.VIEW_REPORTS,
+    },
+    "user": {
+        Permission.VIEW_STOCK, Permission.VIEW_STOCK_TAKE,
+        Permission.RECORD_USAGE, Permission.RECORD_RECEIPT, Permission.RUN_STOCK_TAKE,
+    },
+    "viewer": {
+        Permission.VIEW_STOCK, Permission.VIEW_ANALYTICS, Permission.VIEW_REPORTS,
+    },
+}
+
+ALL_ITEMS_TAB_REQUIREMENTS = {
+    "📦 Inventory": Permission.VIEW_STOCK,
+    "📊 Stock Movements": Permission.RUN_STOCK_TAKE,
+    "📈 All Items Analytics": Permission.VIEW_ANALYTICS,
+    "🖼️ Visual Inventory": Permission.VIEW_ANALYTICS,
+    "🤖 Advanced Analytics": Permission.VIEW_ANALYTICS,
+}
+
+DRY_ICE_TAB_REQUIREMENTS = {
+    "📊 Order Analysis": Permission.VIEW_ANALYTICS,
+    "🔮 Demand Forecast": Permission.VIEW_FORECASTS,
+    "📦 Inventory Management": Permission.VIEW_STOCK,
+    "💰 Cost Optimization": Permission.VIEW_COST_DATA,
+    "📋 Recommendations": Permission.VIEW_STRATEGY,
+    "🛠️ Maintenance": Permission.VIEW_MAINTENANCE,
+    "📜 Transaction History": Permission.VIEW_REPORTS,
+}
+
+def get_current_role() -> str:
+    auth = st.session_state.get('_auth')
+    if auth and getattr(auth, 'is_authenticated', False):
+        return getattr(auth, 'current_role', 'viewer') or 'viewer'
+    return 'viewer'
+
+def has_permission(permission: Permission) -> bool:
+    return permission in ROLE_PERMISSIONS.get(get_current_role(), set())
+
+def filter_tabs(tab_requirements: dict) -> list:
+    role_perms = ROLE_PERMISSIONS.get(get_current_role(), set())
+    return [tab for tab, req in tab_requirements.items() if req in role_perms]
+
+def get_user_email_safe() -> str:
+    auth = st.session_state.get('_auth')
+    if auth and getattr(auth, 'is_authenticated', False):
+        return auth.current_user.get('email', 'unknown')
+    return 'anonymous'
+
+def log_access_denied(action: str):
+    AuditLogger().log(
+        action='ACCESS_DENIED',
+        details=f"Role '{get_current_role()}' attempted: {action}",
+        user=get_user_email_safe()
+    )
+
 # SQLite Database Setup
 def init_db():
     """Initialize database (Supabase or SQLite)"""
@@ -2236,9 +2321,9 @@ def show_replenishment_suggestions(recommendations_df, title="🛒 Replenishment
             return 'background-color: #d4edda;'
     
     # Apply styling
-    styled_df = display_df.style.applymap(
+    styled_df = display_df.style.map(
     color_urgency, subset=['Urgency']
-    ).applymap(
+    ).map(
         color_action, subset=['Action']
     )
     
@@ -6334,176 +6419,178 @@ def main():
     # ============================================================
     # SECTION 2: UPDATE INVENTORY (Compact Expanders)
     # ============================================================
-    with st.sidebar.expander("📤 Record Usage", expanded=False):
-        usage_date = st.date_input("Usage Date", value=datetime.today())
+    if has_permission(Permission.RECORD_USAGE):
+        with st.sidebar.expander("📤 Record Usage", expanded=False):
+            usage_date = st.date_input("Usage Date", value=datetime.today())
 
-        usage = safe_number_input(
-            "Quantity Used (kg)",
-            min_value=0.0,
-            max_value=10000.0,
-            value=150.0,
-            step=10.0,
-            validate=True,
-            key="usage_qty",
-            container=st
-        )
+            usage = safe_number_input(
+                "Quantity Used (kg)",
+                min_value=0.0,
+                max_value=10000.0,
+                value=150.0,
+                step=10.0,
+                validate=True,
+                key="usage_qty",
+                container=st
+            )
 
-        current_stock_val = inventory_tracker.current_stock
-        st.caption(f"📊 Available: {current_stock_val:,.0f} kg")
+            current_stock_val = inventory_tracker.current_stock
+            st.caption(f"📊 Available: {current_stock_val:,.0f} kg")
 
-        if usage is not None and usage > 0:
-            is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
-            if not is_valid:
-                st.error(msg)
-            elif "Warning" in msg:
-                st.warning(msg)
-            else:
-                st.success(msg)
+            if usage is not None and usage > 0:
+                is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+                if not is_valid:
+                    st.error(msg)
+                elif "Warning" in msg:
+                    st.warning(msg)
+                else:
+                    st.success(msg)
 
-        if st.button("Record Usage", type="primary", key="record_usage_btn"):
-            auth = AuthManager()
-            if not auth.is_authenticated:
-                st.error("🔒 Please login to record usage")
-                return
-            if not auth.check_permission('record_usage'):
-                st.error("⛔ You don't have permission to record usage")
-                return
-
-            if usage is None or usage <= 0:
-                st.error("❌ Please enter a valid quantity")
-                return
-
-            is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
-            if not is_valid:
-                st.error(msg)
-                return
-
-            if usage > 500:
-                if not st.checkbox("☑️ Confirm large usage (>500kg)", key="confirm_large_usage"):
-                    st.warning("⚠️ Please confirm large usage before proceeding")
+            if st.button("Record Usage", type="primary", key="record_usage_btn"):
+                auth = AuthManager()
+                if not auth.is_authenticated:
+                    st.error("🔒 Please login to record usage")
+                    return
+                if not auth.check_permission('record_usage'):
+                    st.error("⛔ You don't have permission to record usage")
                     return
 
-            try:
-                audit = AuditLogger()
-                audit.log(
-                    action='RECORD_USAGE',
-                    details=f"Usage: {usage}kg, Date: {usage_date}",
-                    user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
-                )
+                if usage is None or usage <= 0:
+                    st.error("❌ Please enter a valid quantity")
+                    return
 
-                alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
-                add_transaction_to_history(
-                    "usage", usage, "Daily Consumption", usage_date,
-                    st.session_state.selected_period
-                )
+                is_valid, msg = validate_stock_sufficient(usage, current_stock_val)
+                if not is_valid:
+                    st.error(msg)
+                    return
 
-                if alert is not None:
-                    st.error(alert["message"])
-                else:
+                if usage > 500:
+                    if not st.checkbox("☑️ Confirm large usage (>500kg)", key="confirm_large_usage"):
+                        st.warning("⚠️ Please confirm large usage before proceeding")
+                        return
+
+                try:
+                    audit = AuditLogger()
                     audit.log(
-                        action='RECORD_USAGE_SUCCESS',
-                        details=f"Usage: {usage}kg recorded successfully, New stock: {inventory_tracker.current_stock}kg",
+                        action='RECORD_USAGE',
+                        details=f"Usage: {usage}kg, Date: {usage_date}",
                         user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
                     )
-                    st.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
-                    new_stock_val = inventory_tracker.current_stock
-                    st.info(f"📊 New stock level: {new_stock_val:,.0f} kg")
-                    if new_stock_val < safety_stock:
-                        st.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
 
-            except Exception as e:
-                logger.error(f"Failed to record usage: {e}", exc_info=True)
-                st.error("❌ Failed to record usage. Please try again.")
+                    alert = inventory_tracker.update_stock(usage, "Daily Consumption", usage_date)
+                    add_transaction_to_history(
+                        "usage", usage, "Daily Consumption", usage_date,
+                        st.session_state.selected_period
+                    )
 
-    with st.sidebar.expander("📥 Record Receipt", expanded=False):
-        receipt_date = st.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
+                    if alert is not None:
+                        st.error(alert["message"])
+                    else:
+                        audit.log(
+                            action='RECORD_USAGE_SUCCESS',
+                            details=f"Usage: {usage}kg recorded successfully, New stock: {inventory_tracker.current_stock}kg",
+                            user=auth.current_user['email'] if auth.is_authenticated else 'SYSTEM'
+                        )
+                        st.success(f"✅ Usage of {usage:.0f} kg recorded on {usage_date.strftime('%Y-%m-%d')}.")
+                        new_stock_val = inventory_tracker.current_stock
+                        st.info(f"📊 New stock level: {new_stock_val:,.0f} kg")
+                        if new_stock_val < safety_stock:
+                            st.warning(f"⚠️ Stock below safety stock ({safety_stock:,.0f} kg). Consider reordering.")
 
-        current_stock_val = inventory_tracker.current_stock
-        st.caption(f"📊 Current stock: {current_stock_val:,.0f} kg")
+                except Exception as e:
+                    logger.error(f"Failed to record usage: {e}", exc_info=True)
+                    st.error("❌ Failed to record usage. Please try again.")
 
-        new_stock = safe_number_input(
-            "New Stock Received (kg)",
-            min_value=0.0,
-            max_value=100000.0,
-            value=0.0,
-            step=50.0,
-            validate=True,
-            key="receipt_qty",
-            container=st
-        )
+    if has_permission(Permission.RECORD_RECEIPT):
+        with st.sidebar.expander("📥 Record Receipt", expanded=False):
+            receipt_date = st.date_input("Receipt Date", value=datetime.today(), key="receipt_date")
 
-        if new_stock is not None and new_stock > 0:
-            new_total = current_stock_val + new_stock
-            st.info(f"📊 New stock after receipt: {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
-            if new_stock > 1000:
-                st.warning(f"⚠️ Large receipt: {new_stock:.0f} kg. Please confirm below.")
-            max_recommended = safety_stock * 3
-            if new_total > max_recommended:
-                st.warning(f"⚠️ New stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+            current_stock_val = inventory_tracker.current_stock
+            st.caption(f"📊 Current stock: {current_stock_val:,.0f} kg")
 
-        if receipt_date:
-            is_valid, msg = validate_date(receipt_date, allow_future=False)
-            if not is_valid:
-                st.error(msg)
+            new_stock = safe_number_input(
+                "New Stock Received (kg)",
+                min_value=0.0,
+                max_value=100000.0,
+                value=0.0,
+                step=50.0,
+                validate=True,
+                key="receipt_qty",
+                container=st
+            )
 
-        if st.button("Record Receipt", type="primary", key="record_receipt_btn"):
-            if new_stock is None or new_stock <= 0:
-                st.error("❌ Please enter a valid quantity greater than 0")
-                return
-
-            is_valid, msg = validate_date(receipt_date, allow_future=False)
-            if not is_valid:
-                st.error(msg)
-                return
-
-            if new_stock > 1000:
-                if not st.checkbox("☑️ Confirm large receipt (>1000kg)", key="confirm_large_receipt"):
-                    st.warning("⚠️ Please confirm large receipt before proceeding")
-                    return
-
-            try:
-                correct_period = get_period_from_date(receipt_date)
-                old_stock = inventory_tracker.current_stock
-
-                inventory_tracker.current_stock += new_stock
-                update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
-
-                add_transaction_to_history(
-                    transaction_type="receipt",
-                    quantity=new_stock,
-                    description="Stock Receipt",
-                    date=receipt_date,
-                    period=correct_period
-                )
-
-                st.success(
-                    f"✅ Order for {new_stock:.0f} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
-                    f"It has been automatically assigned to the {correct_period} period."
-                )
-
-                new_total = inventory_tracker.current_stock
-                st.info(f"📊 Stock updated: {old_stock:,.0f} → {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
-
+            if new_stock is not None and new_stock > 0:
+                new_total = current_stock_val + new_stock
+                st.info(f"📊 New stock after receipt: {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+                if new_stock > 1000:
+                    st.warning(f"⚠️ Large receipt: {new_stock:.0f} kg. Please confirm below.")
                 max_recommended = safety_stock * 3
                 if new_total > max_recommended:
-                    st.warning(f"⚠️ Stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
-                    st.info("💡 Consider reducing future orders or increasing usage")
+                    st.warning(f"⚠️ New stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
 
-                if st.session_state.selected_period != correct_period:
-                    st.session_state.selected_period = correct_period
-                    st.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
+            if receipt_date:
+                is_valid, msg = validate_date(receipt_date, allow_future=False)
+                if not is_valid:
+                    st.error(msg)
 
-            except ValidationError as e:
-                st.error(f"❌ Validation Error: {e}")
-            except DatabaseError as e:
-                st.error(f"⚠️ Database Error: {e}")
-                st.info("💡 Your data was saved locally. It will sync when the cloud is available.")
-            except Exception as e:
-                logger.error(f"Failed to record receipt: {e}", exc_info=True)
-                st.error("❌ Failed to record receipt. Please try again.")
-                st.info("💡 If the problem persists, please contact support.")
+            if st.button("Record Receipt", type="primary", key="record_receipt_btn"):
+                if new_stock is None or new_stock <= 0:
+                    st.error("❌ Please enter a valid quantity greater than 0")
+                    return
 
-    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+                is_valid, msg = validate_date(receipt_date, allow_future=False)
+                if not is_valid:
+                    st.error(msg)
+                    return
+
+                if new_stock > 1000:
+                    if not st.checkbox("☑️ Confirm large receipt (>1000kg)", key="confirm_large_receipt"):
+                        st.warning("⚠️ Please confirm large receipt before proceeding")
+                        return
+
+                try:
+                    correct_period = get_period_from_date(receipt_date)
+                    old_stock = inventory_tracker.current_stock
+
+                    inventory_tracker.current_stock += new_stock
+                    update_current_stock_in_db(inventory_tracker.current_stock, receipt_date)
+
+                    add_transaction_to_history(
+                        transaction_type="receipt",
+                        quantity=new_stock,
+                        description="Stock Receipt",
+                        date=receipt_date,
+                        period=correct_period
+                    )
+
+                    st.success(
+                        f"✅ Order for {new_stock:.0f} kg on {receipt_date.strftime('%Y-%m-%d')} recorded. "
+                        f"It has been automatically assigned to the {correct_period} period."
+                    )
+
+                    new_total = inventory_tracker.current_stock
+                    st.info(f"📊 Stock updated: {old_stock:,.0f} → {new_total:,.0f} kg (+{new_stock:,.0f} kg)")
+
+                    max_recommended = safety_stock * 3
+                    if new_total > max_recommended:
+                        st.warning(f"⚠️ Stock ({new_total:,.0f} kg) exceeds recommended maximum ({max_recommended:,.0f} kg)")
+                        st.info("💡 Consider reducing future orders or increasing usage")
+
+                    if st.session_state.selected_period != correct_period:
+                        st.session_state.selected_period = correct_period
+                        st.info(f"📊 Dashboard view switched to {correct_period} to show your new entry.")
+
+                except ValidationError as e:
+                    st.error(f"❌ Validation Error: {e}")
+                except DatabaseError as e:
+                    st.error(f"⚠️ Database Error: {e}")
+                    st.info("💡 Your data was saved locally. It will sync when the cloud is available.")
+                except Exception as e:
+                    logger.error(f"Failed to record receipt: {e}", exc_info=True)
+                    st.error("❌ Failed to record receipt. Please try again.")
+                    st.info("💡 If the problem persists, please contact support.")
+
+        st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================================
     # SECTION 3: MOBILE QUICK ORDER (Container Style)
@@ -6709,8 +6796,9 @@ def main():
         if not auth.is_authenticated:
             st.sidebar.error("🔒 Please login to generate reports")
             return
-        if not auth.check_permission('view_reports'):
+        if not has_permission(Permission.VIEW_REPORTS):
             st.sidebar.error("⛔ You don't have permission to view reports")
+            log_access_denied("generate_report")
             return
         
         with st.spinner(f"Generating {report_type}..."):
@@ -6890,16 +6978,17 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
-    with st.sidebar.expander("Inventory Parameters"):
-        st.write(f"**Price per kg:** KSh {constants.PRICE_PER_KG:.2f}")
-        st.write(f"**Container size:** {constants.CONTAINER_SIZE} kg")
-        st.write(f"**Transport cost:** KSh {constants.TRANSPORT_COST:,.2f}")
-        st.write(f"**Holding rate:** {constants.HOLDING_RATE*100:.1f}%")
-        st.write(f"**Sublimation loss:** {constants.SUB_LOSS_RANGE[0]:.1f}-{constants.SUB_LOSS_RANGE[1]:.1f}%")
-        st.write(f"**Lead time:** {constants.LEAD_TIME_DAYS} day(s)")
-        st.write(f"**Service level:** {constants.SERVICE_LEVEL*100:.0f}%")
+    if has_permission(Permission.EDIT_SYSTEM_PARAMS):
+        with st.sidebar.expander("Inventory Parameters"):
+            st.write(f"**Price per kg:** KSh {constants.PRICE_PER_KG:.2f}")
+            st.write(f"**Container size:** {constants.CONTAINER_SIZE} kg")
+            st.write(f"**Transport cost:** KSh {constants.TRANSPORT_COST:,.2f}")
+            st.write(f"**Holding rate:** {constants.HOLDING_RATE*100:.1f}%")
+            st.write(f"**Sublimation loss:** {constants.SUB_LOSS_RANGE[0]:.1f}-{constants.SUB_LOSS_RANGE[1]:.1f}%")
+            st.write(f"**Lead time:** {constants.LEAD_TIME_DAYS} day(s)")
+            st.write(f"**Service level:** {constants.SERVICE_LEVEL*100:.0f}%")
 
-    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+        st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================================
     # SECTION 8: DATA SUMMARY (Container Style)
@@ -7342,1533 +7431,1541 @@ def main():
         """, unsafe_allow_html=True)
         
         # ALL ITEMS CONTAINER - 5 Tabs
-        tab_inventory, tab_movements, tab_analytics, tab_inventory_visual, tab_advanced = st.tabs([
-            "📦 Inventory",
-            "📊 Stock Movements",
-            "📈 All Items Analytics",
-            "🖼️ Visual Inventory",
-            "🤖 Advanced Analytics"
-        ])
-        
-        with tab_inventory:
-            st.markdown("## 📦 Company Inventory (Google Sheets)")
+        visible_tab_names = filter_tabs(ALL_ITEMS_TAB_REQUIREMENTS)
+        if not visible_tab_names:
+            st.warning("🔒 You don't have permission to view any tabs in this mode.")
+            log_access_denied("view_all_items_mode")
+        else:
+            created_tabs = st.tabs(visible_tab_names)
+            tab_lookup = dict(zip(visible_tab_names, created_tabs))
+            tab_inventory = tab_lookup.get("📦 Inventory")
+            tab_movements = tab_lookup.get("📊 Stock Movements")
+            tab_analytics = tab_lookup.get("📈 All Items Analytics")
+            tab_inventory_visual = tab_lookup.get("🖼️ Visual Inventory")
+            tab_advanced = tab_lookup.get("🤖 Advanced Analytics")
 
-            # --- HIDE SEARCH ONLY IN THIS TAB ---
-            st.markdown("""
-            <style>
-            .stDataFrame [data-testid="stDataFrameSearch"] {
-                display: none !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
+        if tab_inventory:
+            with tab_inventory:
+                st.markdown("## 📦 Company Inventory (Google Sheets)")
 
-            # Refresh button
-            col1, col2 = st.columns([1, 4])
+                # --- HIDE SEARCH ONLY IN THIS TAB ---
+                st.markdown("""
+                <style>
+                .stDataFrame [data-testid="stDataFrameSearch"] {
+                    display: none !important;
+                }
+                </style>
+                """, unsafe_allow_html=True)
 
-            with col1:
-                if st.button("🔄 Refresh", use_container_width=True):
-                    st.cache_data.clear()
-                    
-
-            with col2:
-                st.caption(
-                    f"Data source: Google Sheets | Updated: "
-                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                )
-
-            st.divider()
-
-            @st.cache_data(ttl=300)
-            def load_inventory_data():
-                try:
-                    gsheet = GoogleSheetReader()
-
-                    if gsheet.authenticate():
-                        stock = gsheet.get_stock_with_pricing()
-                        current = gsheet.get_current_stock()
-                        low = gsheet.get_low_stock_items()
-
-                        # Count categories
-                        category_count = (
-                            stock['ITEM_CATEGORY'].nunique()
-                            if 'ITEM_CATEGORY' in stock.columns
-                            else 0
-                        )
-
-                        return stock, current, low, category_count
-
-                except Exception as e:
-                    st.error(f"Inventory loading error: {e}")
-
-                # Fallback if authentication fails
-                return (
-                    pd.DataFrame(),
-                    pd.DataFrame(),
-                    pd.DataFrame(),
-                    0
-                )
-
-            with st.spinner("📊Loading inventory data..."):
-                stock_df, current_df, low_df, category_count = load_inventory_data()
-
-            # Everything below stays INSIDE tab_inventory
-            if not stock_df.empty:
-
-                col1, col2, col3, col4 = st.columns(4)
+                # Refresh button
+                col1, col2 = st.columns([1, 4])
 
                 with col1:
-                    st.metric("📦 Total Items", len(stock_df))
+                    if st.button("🔄 Refresh", use_container_width=True):
+                        st.cache_data.clear()
+                        
 
                 with col2:
-                    st.metric("📂 Categories", category_count)
-
-                with col3:
-                    st.metric(
-                        "📊 Current Stock",
-                        len(current_df) if not current_df.empty else 0
+                    st.caption(
+                        f"Data source: Google Sheets | Updated: "
+                        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
                     )
 
-                with col4:
-                    low_count = len(low_df) if not low_df.empty else 0
-                    st.metric(
-                        "⚠️ Low Stock",
-                        low_count,
-                        delta=f"-{low_count}" if low_count > 0 else None
+                st.divider()
+
+                @st.cache_data(ttl=300)
+                def load_inventory_data():
+                    try:
+                        gsheet = GoogleSheetReader()
+
+                        if gsheet.authenticate():
+                            stock = gsheet.get_stock_with_pricing()
+                            current = gsheet.get_current_stock()
+                            low = gsheet.get_low_stock_items()
+
+                            # Count categories
+                            category_count = (
+                                stock['ITEM_CATEGORY'].nunique()
+                                if 'ITEM_CATEGORY' in stock.columns
+                                else 0
+                            )
+
+                            return stock, current, low, category_count
+
+                    except Exception as e:
+                        st.error(f"Inventory loading error: {e}")
+
+                    # Fallback if authentication fails
+                    return (
+                        pd.DataFrame(),
+                        pd.DataFrame(),
+                        pd.DataFrame(),
+                        0
                     )
 
-                # Price stats
-                if 'UNIT PRICE' in stock_df.columns:
-                    price_count = stock_df['UNIT PRICE'].notna().sum()
+                with st.spinner("📊Loading inventory data..."):
+                    stock_df, current_df, low_df, category_count = load_inventory_data()
 
-                    if price_count > 0:
-                        st.caption(
-                            f"💰 Prices available for "
-                            f"{price_count} out of {len(stock_df)} items"
+                # Everything below stays INSIDE tab_inventory
+                if not stock_df.empty:
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("📦 Total Items", len(stock_df))
+
+                    with col2:
+                        st.metric("📂 Categories", category_count)
+
+                    with col3:
+                        st.metric(
+                            "📊 Current Stock",
+                            len(current_df) if not current_df.empty else 0
                         )
 
-                # --- ABC ANALYSIS (Operationalized) ---
-                if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                    st.divider()
-                    st.markdown("### 📊 ABC Analysis (Pareto Analysis)")
-                    
-                    # Create a copy for ABC analysis
-                    abc_df = stock_df.copy()
-                    
-                    # Convert to numeric, coercing errors to NaN
-                    abc_df['QUANTITY'] = pd.to_numeric(abc_df['QUANTITY'], errors='coerce')
-                    abc_df['UNIT PRICE'] = pd.to_numeric(abc_df['UNIT PRICE'], errors='coerce')
-                    
-                    # Drop rows with missing values
-                    abc_df = abc_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                    
-                    if not abc_df.empty and len(abc_df) > 0:
-                        # Calculate annual value
-                        abc_df['ANNUAL_VALUE'] = abc_df['QUANTITY'] * abc_df['UNIT PRICE']
-                        
-                        # Sort by value and calculate cumulative percentage
-                        abc_df = abc_df.sort_values('ANNUAL_VALUE', ascending=False)
-                        total_value = abc_df['ANNUAL_VALUE'].sum()
-                        
-                        if total_value > 0:
-                            abc_df['CUM_PERCENT'] = abc_df['ANNUAL_VALUE'].cumsum() / total_value
-                            
-                            # Classify items
-                            def get_abc_class(row):
-                                if row['CUM_PERCENT'] <= 0.70:
-                                    return '🔴 A (70% value)'
-                                elif row['CUM_PERCENT'] <= 0.90:
-                                    return '🟡 B (20% value)'
-                                else:
-                                    return '🟢 C (10% value)'
-                            
-                            abc_df['ABC_CLASS'] = abc_df.apply(get_abc_class, axis=1)
-                            
-                            # ============================================================
-                            # 🎯 OPERATIONALIZE ABC ANALYSIS - inFlow Style
-                            # ============================================================
-                            
-                            # Define cycle counting frequencies based on ABC class
-                            cycle_frequencies = {
-                                '🔴 A (70% value)': {
-                                    'frequency': 'Monthly',
-                                    'days': 30,
-                                    'priority': 'High',
-                                    'color': '#dc3545',
-                                    'count_per_year': 12
-                                },
-                                '🟡 B (20% value)': {
-                                    'frequency': 'Quarterly',
-                                    'days': 90,
-                                    'priority': 'Medium',
-                                    'color': '#ffc107',
-                                    'count_per_year': 4
-                                },
-                                '🟢 C (10% value)': {
-                                    'frequency': 'Annually',
-                                    'days': 365,
-                                    'priority': 'Low',
-                                    'color': '#28a745',
-                                    'count_per_year': 1
-                                }
-                            }
-                            
-                            # Create cycle counting schedule
-                            cycle_schedule = []
-                            for _, row in abc_df.iterrows():
-                                class_label = row['ABC_CLASS']
-                                freq_info = cycle_frequencies.get(class_label, cycle_frequencies['🟢 C (10% value)'])
-                                
-                                cycle_schedule.append({
-                                    'Item': row['ITEM_NAME'],
-                                    'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
-                                    'ABC Class': class_label,
-                                    'Annual Value': row['ANNUAL_VALUE'],
-                                    'Count Frequency': freq_info['frequency'],
-                                    'Priority': freq_info['priority'],
-                                    'Counts per Year': freq_info['count_per_year']
-                                })
-                            
-                            cycle_df = pd.DataFrame(cycle_schedule)
-                            
-                            # Display cycle counting schedule summary
-                            st.markdown("#### 🔄 Cycle Counting Recommendations")
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            # Count items by class
-                            a_count = len(abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'])
-                            b_count = len(abc_df[abc_df['ABC_CLASS'] == '🟡 B (20% value)'])
-                            c_count = len(abc_df[abc_df['ABC_CLASS'] == '🟢 C (10% value)'])
-                            
-                            with col1:
-                                st.metric(
-                                    "🔴 A Items (Monthly)",
-                                    a_count,
-                                    delta=f"{a_count * 12} counts/year"
-                                )
-                            with col2:
-                                st.metric(
-                                    "🟡 B Items (Quarterly)",
-                                    b_count,
-                                    delta=f"{b_count * 4} counts/year"
-                                )
-                            with col3:
-                                st.metric(
-                                    "🟢 C Items (Annually)",
-                                    c_count,
-                                    delta=f"{c_count} counts/year"
-                                )
-                            with col4:
-                                total_counts = (a_count * 12) + (b_count * 4) + c_count
-                                st.metric(
-                                    "📊 Total Counts/Year",
-                                    total_counts,
-                                    delta=f"~{total_counts // 12} counts/month"
-                                )
-                            
-                            # Show detailed cycle counting schedule with styling
-                            with st.expander("📋 View Cycle Counting Schedule", expanded=False):
-                                # Style by priority
-                                def style_priority(val):
-                                    if 'High' in val:
-                                        return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
-                                    elif 'Medium' in val:
-                                        return 'background-color: #fff3cd; color: #856404;'
-                                    else:
-                                        return 'background-color: #d4edda; color: #155724;'
-                                
-                                styled_cycle_df = cycle_df.style.applymap(style_priority, subset=['Priority'])
-                                
-                                st.dataframe(
-                                    styled_cycle_df,
-                                    use_container_width=True,
-                                    height=300,
-                                    hide_index=True
-                                )
-                            
-                            # ============================================================
-                            # 🎯 REPLENISHMENT STRATEGY BY ABC CLASS
-                            # ============================================================
-                            st.markdown("#### 📦 Replenishment Strategy by ABC Class")
-                            
-                            # Create replenishment strategies
-                            replenishment_data = []
-                            for _, row in abc_df.iterrows():
-                                class_label = row['ABC_CLASS']
-                                stock = row.get('QUANTITY', 0)
-                                
-                                # Get reorder level (if available, otherwise use 50% of stock)
-                                if 'REORDER LEVEL' in row and pd.notna(row['REORDER LEVEL']):
-                                    reorder = row['REORDER LEVEL']
-                                else:
-                                    reorder = stock * 0.5
-                                
-                                # Set safety stock multiplier based on ABC class
-                                if '🔴 A' in class_label:
-                                    safety_multiplier = 0.3
-                                    order_frequency = 'Monthly'
-                                elif '🟡 B' in class_label:
-                                    safety_multiplier = 0.2
-                                    order_frequency = 'Quarterly'
-                                else:
-                                    safety_multiplier = 0.1
-                                    order_frequency = 'As Needed'
-                                
-                                safety_stock_val = reorder * (1 + safety_multiplier)
-                                
-                                # Check if below safety stock
-                                below_safety = stock < safety_stock_val
-                                
-                                replenishment_data.append({
-                                    'Item': row['ITEM_NAME'],
-                                    'ABC Class': class_label,
-                                    'Current Stock': stock,
-                                    'Reorder Point': round(reorder, 0),
-                                    'Safety Stock': round(safety_stock_val, 0),
-                                    'Order Frequency': order_frequency,
-                                    'Annual Value': row['ANNUAL_VALUE'],
-                                    'Below Safety': '⚠️ Yes' if below_safety else '✅ No'
-                                })
-                            
-                            replenishment_df = pd.DataFrame(replenishment_data)
-                            
-                            # Display replenishment summary
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                # Count items needing immediate attention
-                                urgent_items = len(replenishment_df[replenishment_df['Below Safety'] == '⚠️ Yes'])
-                                st.metric(
-                                    "⚠️ Below Safety Stock",
-                                    urgent_items,
-                                    delta=f"-{urgent_items}" if urgent_items > 0 else None
-                                )
-                            with col2:
-                                # Total value of A items
-                                a_value = replenishment_df[replenishment_df['ABC Class'] == '🔴 A (70% value)']['Annual Value'].sum()
-                                st.metric(
-                                    "💰 A Items Value",
-                                    f"KSh {a_value:,.0f}",
-                                    f"{a_value/total_value*100:.0f}% of total"
-                                )
-                            with col3:
-                                # Most critical items
-                                critical = replenishment_df[
-                                    (replenishment_df['ABC Class'] == '🔴 A (70% value)') &
-                                    (replenishment_df['Below Safety'] == '⚠️ Yes')
-                                ]
-                                st.metric(
-                                    "🎯 Critical A Items",
-                                    len(critical),
-                                    delta="⚠️ Needs Reorder"
-                                )
-                            
-                            # Show detailed replenishment recommendations
-                            with st.expander("📋 View Replenishment Recommendations by ABC Class", expanded=False):
-                                # Color code by ABC class
-                                def style_abc_class(val):
-                                    if '🔴 A' in val:
-                                        return 'background-color: #f8d7da; font-weight: bold;'
-                                    elif '🟡 B' in val:
-                                        return 'background-color: #fff3cd;'
-                                    else:
-                                        return 'background-color: #d4edda;'
-                                
-                                styled_replenishment = replenishment_df.style.applymap(
-                                    style_abc_class, subset=['ABC Class']
-                                )
-                                                                
-                                st.dataframe(
-                                    styled_replenishment,
-                                    use_container_width=True,
-                                    height=300,
-                                    hide_index=True
-                                )
-                            
-                            # ============================================================
-                            # 🎯 DAILY / WEEKLY ACTION PLAN
-                            # ============================================================
-                            st.markdown("#### 📋 Action Plan by ABC Class")
-                            
-                            # Create action plan cards
-                            action_plan = {
-                                '🔴 A (70% value)': {
-                                    'icon': '🔴',
-                                    'actions': [
-                                        '📊 Count weekly (or more frequently)',
-                                        '📦 Maintain higher safety stock',
-                                        '🔄 Reorder more frequently',
-                                        '👀 Monitor daily',
-                                        '📈 Review weekly performance'
-                                    ]
-                                },
-                                '🟡 B (20% value)': {
-                                    'icon': '🟡',
-                                    'actions': [
-                                        '📊 Count monthly',
-                                        '📦 Maintain moderate safety stock',
-                                        '🔄 Reorder as needed',
-                                        '👀 Monitor weekly',
-                                        '📈 Review monthly'
-                                    ]
-                                },
-                                '🟢 C (10% value)': {
-                                    'icon': '🟢',
-                                    'actions': [
-                                        '📊 Count quarterly',
-                                        '📦 Maintain basic safety stock',
-                                        '🔄 Reorder on demand',
-                                        '👀 Monitor monthly',
-                                        '📈 Review quarterly'
-                                    ]
-                                }
-                            }
-                            
-                            # Display action plan as cards
-                            cols = st.columns(3)
-                            for idx, (class_name, plan) in enumerate(action_plan.items()):
-                                with cols[idx]:
-                                    count = len(abc_df[abc_df['ABC_CLASS'] == class_name])
-                                    st.markdown(f"""
-                                    <div style="
-                                        border: 2px solid {cycle_frequencies[class_name]['color']};
-                                        border-radius: 12px;
-                                        padding: 15px;
-                                        margin-bottom: 10px;
-                                        background: rgba(255,255,255,0.05);
-                                        min-height: 200px;
-                                    ">
-                                        <div style="font-size: 16px; font-weight: 700; color: {cycle_frequencies[class_name]['color']};">
-                                            {plan['icon']} {class_name}
-                                            <span style="font-size: 12px; color: #888;">({count} items)</span>
-                                        </div>
-                                        <div style="font-size: 13px; color: #666; margin-top: 8px;">
-                                            <strong>Count:</strong> {cycle_frequencies[class_name]['frequency']}<br>
-                                            <strong>Priority:</strong> {cycle_frequencies[class_name]['priority']}
-                                        </div>
-                                        <div style="margin-top: 8px;">
-                                            <ul style="padding-left: 20px; margin: 0;">
-                                                {''.join([f'<li style="font-size: 12px; color: #555;">{action}</li>' for action in plan['actions']])}
-                                            </ul>
-                                        </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                            
-                            # ============================================================
-                            # 🎯 ABC CLASS BREAKDOWN - Original (Keep this)
-                            # ============================================================
-                            st.markdown("---")
-                            st.markdown("#### 📊 ABC Class Breakdown")
-                            
-                            # Show ABC breakdown
-                            abc_counts = abc_df['ABC_CLASS'].value_counts()
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("🔴 A Items (70% Value)", abc_counts.get('🔴 A (70% value)', 0))
-                            with col2:
-                                st.metric("🟡 B Items (20% Value)", abc_counts.get('🟡 B (20% value)', 0))
-                            with col3:
-                                st.metric("🟢 C Items (10% Value)", abc_counts.get('🟢 C (10% value)', 0))
-                            with col4:
-                                st.metric("💰 Total Inventory Value", f"KSh {total_value:,.2f}")
-                            
-                            # Show ABC summary table
-                            abc_summary = abc_df.groupby('ABC_CLASS').agg({
-                                'ITEM_NAME': 'count',
-                                'ANNUAL_VALUE': 'sum'
-                            }).reset_index()
-                            abc_summary.columns = ['Class', 'Item Count', 'Total Value']
-                            st.dataframe(abc_summary, use_container_width=True, hide_index=True)
-                            
-                            # Show top A items with download
-                            with st.expander("🔍 View Top A Items (70% Value)", expanded=False):
-                                top_a = abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'].head(20)
-                                st.dataframe(
-                                    top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']],
-                                    use_container_width=True,
-                                    hide_index=True
-                                )
-                                
-                                # Add export button for A items
-                                if not top_a.empty:
-                                    csv_a = top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']].to_csv(index=False).encode('utf-8')
-                                    st.download_button(
-                                        label="📥 Download A Items List",
-                                        data=csv_a,
-                                        file_name=f"a_items_{datetime.now().strftime('%Y%m%d')}.csv",
-                                        mime='text/csv'
-                                    )
-                        else:
-                            st.info("Total inventory value is zero. Cannot perform ABC analysis.")
-                    else:
-                        st.info("No valid items with both quantity and price data found for ABC analysis.")
+                    with col4:
+                        low_count = len(low_df) if not low_df.empty else 0
+                        st.metric(
+                            "⚠️ Low Stock",
+                            low_count,
+                            delta=f"-{low_count}" if low_count > 0 else None
+                        )
 
-                # --- CATEGORY-LEVEL INVENTORY SUMMARY (WRAPPED IN EXPANDER) ---
-                if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
-                    st.divider()
-                    
-                    # Wrap Category-Level Inventory Summary in expander - collapsed by default
-                    with st.expander("📊 Category-Level Inventory Summary", expanded=False):
-                        # Convert to numeric
-                        cat_df = stock_df.copy()
-                        cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
-                        cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
+                    # Price stats
+                    if 'UNIT PRICE' in stock_df.columns:
+                        price_count = stock_df['UNIT PRICE'].notna().sum()
+
+                        if price_count > 0:
+                            st.caption(
+                                f"💰 Prices available for "
+                                f"{price_count} out of {len(stock_df)} items"
+                            )
+
+                    # --- ABC ANALYSIS (Operationalized) ---
+                    if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                        st.divider()
+                        st.markdown("### 📊 ABC Analysis (Pareto Analysis)")
+                        
+                        # Create a copy for ABC analysis
+                        abc_df = stock_df.copy()
+                        
+                        # Convert to numeric, coercing errors to NaN
+                        abc_df['QUANTITY'] = pd.to_numeric(abc_df['QUANTITY'], errors='coerce')
+                        abc_df['UNIT PRICE'] = pd.to_numeric(abc_df['UNIT PRICE'], errors='coerce')
                         
                         # Drop rows with missing values
-                        cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                        abc_df = abc_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
                         
-                        if not cat_df.empty:
-                            # Calculate annual value first
-                            cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                        if not abc_df.empty and len(abc_df) > 0:
+                            # Calculate annual value
+                            abc_df['ANNUAL_VALUE'] = abc_df['QUANTITY'] * abc_df['UNIT PRICE']
                             
-                            # Group by category with all aggregations at once
-                            category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
-                                'ITEM_NAME': 'count',
-                                'QUANTITY': 'sum',
-                                'UNIT PRICE': 'mean',
-                                'ANNUAL_VALUE': 'sum'
-                            }).reset_index()
+                            # Sort by value and calculate cumulative percentage
+                            abc_df = abc_df.sort_values('ANNUAL_VALUE', ascending=False)
+                            total_value = abc_df['ANNUAL_VALUE'].sum()
                             
-                            # Rename columns
-                            category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
-                            
-                            # Format currency columns (keep as numbers for chart, format for display)
-                            display_summary = category_summary.copy()
-                            display_summary['Avg Unit Price'] = display_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
-                            display_summary['Total Value'] = display_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
-                            
-                            # Show summary table
-                            st.dataframe(display_summary, use_container_width=True, hide_index=True)
-                            
-                            # Check if category_summary exists and has data
-                            if 'category_summary' in locals() and not category_summary.empty:
-                                fig_category = px.bar(
-                                    category_summary,
-                                    x='Category',
-                                    y='Total Value',
-                                    title='Inventory Value by Category',
-                                    color='Category',
-                                    height=400,
-                                    labels={'Total Value': 'Total Value (KSh)'}
-                                )
-                                fig_category.update_layout(showlegend=False)
-                                st.plotly_chart(fig_category, use_container_width=True)
+                            if total_value > 0:
+                                abc_df['CUM_PERCENT'] = abc_df['ANNUAL_VALUE'].cumsum() / total_value
+                                
+                                # Classify items
+                                def get_abc_class(row):
+                                    if row['CUM_PERCENT'] <= 0.70:
+                                        return '🔴 A (70% value)'
+                                    elif row['CUM_PERCENT'] <= 0.90:
+                                        return '🟡 B (20% value)'
+                                    else:
+                                        return '🟢 C (10% value)'
+                                
+                                abc_df['ABC_CLASS'] = abc_df.apply(get_abc_class, axis=1)
+                                
+                                # ============================================================
+                                # 🎯 OPERATIONALIZE ABC ANALYSIS - inFlow Style
+                                # ============================================================
+                                
+                                # Define cycle counting frequencies based on ABC class
+                                cycle_frequencies = {
+                                    '🔴 A (70% value)': {
+                                        'frequency': 'Monthly',
+                                        'days': 30,
+                                        'priority': 'High',
+                                        'color': '#dc3545',
+                                        'count_per_year': 12
+                                    },
+                                    '🟡 B (20% value)': {
+                                        'frequency': 'Quarterly',
+                                        'days': 90,
+                                        'priority': 'Medium',
+                                        'color': '#ffc107',
+                                        'count_per_year': 4
+                                    },
+                                    '🟢 C (10% value)': {
+                                        'frequency': 'Annually',
+                                        'days': 365,
+                                        'priority': 'Low',
+                                        'color': '#28a745',
+                                        'count_per_year': 1
+                                    }
+                                }
+                                
+                                # Create cycle counting schedule
+                                cycle_schedule = []
+                                for _, row in abc_df.iterrows():
+                                    class_label = row['ABC_CLASS']
+                                    freq_info = cycle_frequencies.get(class_label, cycle_frequencies['🟢 C (10% value)'])
+                                    
+                                    cycle_schedule.append({
+                                        'Item': row['ITEM_NAME'],
+                                        'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                                        'ABC Class': class_label,
+                                        'Annual Value': row['ANNUAL_VALUE'],
+                                        'Count Frequency': freq_info['frequency'],
+                                        'Priority': freq_info['priority'],
+                                        'Counts per Year': freq_info['count_per_year']
+                                    })
+                                
+                                cycle_df = pd.DataFrame(cycle_schedule)
+                                
+                                # Display cycle counting schedule summary
+                                st.markdown("#### 🔄 Cycle Counting Recommendations")
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                # Count items by class
+                                a_count = len(abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'])
+                                b_count = len(abc_df[abc_df['ABC_CLASS'] == '🟡 B (20% value)'])
+                                c_count = len(abc_df[abc_df['ABC_CLASS'] == '🟢 C (10% value)'])
+                                
+                                with col1:
+                                    st.metric(
+                                        "🔴 A Items (Monthly)",
+                                        a_count,
+                                        delta=f"{a_count * 12} counts/year"
+                                    )
+                                with col2:
+                                    st.metric(
+                                        "🟡 B Items (Quarterly)",
+                                        b_count,
+                                        delta=f"{b_count * 4} counts/year"
+                                    )
+                                with col3:
+                                    st.metric(
+                                        "🟢 C Items (Annually)",
+                                        c_count,
+                                        delta=f"{c_count} counts/year"
+                                    )
+                                with col4:
+                                    total_counts = (a_count * 12) + (b_count * 4) + c_count
+                                    st.metric(
+                                        "📊 Total Counts/Year",
+                                        total_counts,
+                                        delta=f"~{total_counts // 12} counts/month"
+                                    )
+                                
+                                # Show detailed cycle counting schedule with styling
+                                with st.expander("📋 View Cycle Counting Schedule", expanded=False):
+                                    # Style by priority
+                                    def style_priority(val):
+                                        if 'High' in val:
+                                            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+                                        elif 'Medium' in val:
+                                            return 'background-color: #fff3cd; color: #856404;'
+                                        else:
+                                            return 'background-color: #d4edda; color: #155724;'
+                                    
+                                    styled_cycle_df = cycle_df.style.map(style_priority, subset=['Priority'])
+                                    
+                                    st.dataframe(
+                                        styled_cycle_df,
+                                        use_container_width=True,
+                                        height=300,
+                                        hide_index=True
+                                    )
+                                
+                                # ============================================================
+                                # 🎯 REPLENISHMENT STRATEGY BY ABC CLASS
+                                # ============================================================
+                                st.markdown("#### 📦 Replenishment Strategy by ABC Class")
+                                
+                                # Create replenishment strategies
+                                replenishment_data = []
+                                for _, row in abc_df.iterrows():
+                                    class_label = row['ABC_CLASS']
+                                    stock = row.get('QUANTITY', 0)
+                                    
+                                    # Get reorder level (if available, otherwise use 50% of stock)
+                                    if 'REORDER LEVEL' in row and pd.notna(row['REORDER LEVEL']):
+                                        reorder = row['REORDER LEVEL']
+                                    else:
+                                        reorder = stock * 0.5
+                                    
+                                    # Set safety stock multiplier based on ABC class
+                                    if '🔴 A' in class_label:
+                                        safety_multiplier = 0.3
+                                        order_frequency = 'Monthly'
+                                    elif '🟡 B' in class_label:
+                                        safety_multiplier = 0.2
+                                        order_frequency = 'Quarterly'
+                                    else:
+                                        safety_multiplier = 0.1
+                                        order_frequency = 'As Needed'
+                                    
+                                    safety_stock_val = reorder * (1 + safety_multiplier)
+                                    
+                                    # Check if below safety stock
+                                    below_safety = stock < safety_stock_val
+                                    
+                                    replenishment_data.append({
+                                        'Item': row['ITEM_NAME'],
+                                        'ABC Class': class_label,
+                                        'Current Stock': stock,
+                                        'Reorder Point': round(reorder, 0),
+                                        'Safety Stock': round(safety_stock_val, 0),
+                                        'Order Frequency': order_frequency,
+                                        'Annual Value': row['ANNUAL_VALUE'],
+                                        'Below Safety': '⚠️ Yes' if below_safety else '✅ No'
+                                    })
+                                
+                                replenishment_df = pd.DataFrame(replenishment_data)
+                                
+                                # Display replenishment summary
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    # Count items needing immediate attention
+                                    urgent_items = len(replenishment_df[replenishment_df['Below Safety'] == '⚠️ Yes'])
+                                    st.metric(
+                                        "⚠️ Below Safety Stock",
+                                        urgent_items,
+                                        delta=f"-{urgent_items}" if urgent_items > 0 else None
+                                    )
+                                with col2:
+                                    # Total value of A items
+                                    a_value = replenishment_df[replenishment_df['ABC Class'] == '🔴 A (70% value)']['Annual Value'].sum()
+                                    st.metric(
+                                        "💰 A Items Value",
+                                        f"KSh {a_value:,.0f}",
+                                        f"{a_value/total_value*100:.0f}% of total"
+                                    )
+                                with col3:
+                                    # Most critical items
+                                    critical = replenishment_df[
+                                        (replenishment_df['ABC Class'] == '🔴 A (70% value)') &
+                                        (replenishment_df['Below Safety'] == '⚠️ Yes')
+                                    ]
+                                    st.metric(
+                                        "🎯 Critical A Items",
+                                        len(critical),
+                                        delta="⚠️ Needs Reorder"
+                                    )
+                                
+                                # Show detailed replenishment recommendations
+                                with st.expander("📋 View Replenishment Recommendations by ABC Class", expanded=False):
+                                    # Color code by ABC class
+                                    def style_abc_class(val):
+                                        if '🔴 A' in val:
+                                            return 'background-color: #f8d7da; font-weight: bold;'
+                                        elif '🟡 B' in val:
+                                            return 'background-color: #fff3cd;'
+                                        else:
+                                            return 'background-color: #d4edda;'
+                                    
+                                    styled_replenishment = replenishment_df.style.map(
+                                        style_abc_class, subset=['ABC Class']
+                                    )
+                                                                    
+                                    st.dataframe(
+                                        styled_replenishment,
+                                        use_container_width=True,
+                                        height=300,
+                                        hide_index=True
+                                    )
+                                
+                                # ============================================================
+                                # 🎯 DAILY / WEEKLY ACTION PLAN
+                                # ============================================================
+                                st.markdown("#### 📋 Action Plan by ABC Class")
+                                
+                                # Create action plan cards
+                                action_plan = {
+                                    '🔴 A (70% value)': {
+                                        'icon': '🔴',
+                                        'actions': [
+                                            '📊 Count weekly (or more frequently)',
+                                            '📦 Maintain higher safety stock',
+                                            '🔄 Reorder more frequently',
+                                            '👀 Monitor daily',
+                                            '📈 Review weekly performance'
+                                        ]
+                                    },
+                                    '🟡 B (20% value)': {
+                                        'icon': '🟡',
+                                        'actions': [
+                                            '📊 Count monthly',
+                                            '📦 Maintain moderate safety stock',
+                                            '🔄 Reorder as needed',
+                                            '👀 Monitor weekly',
+                                            '📈 Review monthly'
+                                        ]
+                                    },
+                                    '🟢 C (10% value)': {
+                                        'icon': '🟢',
+                                        'actions': [
+                                            '📊 Count quarterly',
+                                            '📦 Maintain basic safety stock',
+                                            '🔄 Reorder on demand',
+                                            '👀 Monitor monthly',
+                                            '📈 Review quarterly'
+                                        ]
+                                    }
+                                }
+                                
+                                # Display action plan as cards
+                                cols = st.columns(3)
+                                for idx, (class_name, plan) in enumerate(action_plan.items()):
+                                    with cols[idx]:
+                                        count = len(abc_df[abc_df['ABC_CLASS'] == class_name])
+                                        st.markdown(f"""
+                                        <div style="
+                                            border: 2px solid {cycle_frequencies[class_name]['color']};
+                                            border-radius: 12px;
+                                            padding: 15px;
+                                            margin-bottom: 10px;
+                                            background: rgba(255,255,255,0.05);
+                                            min-height: 200px;
+                                        ">
+                                            <div style="font-size: 16px; font-weight: 700; color: {cycle_frequencies[class_name]['color']};">
+                                                {plan['icon']} {class_name}
+                                                <span style="font-size: 12px; color: #888;">({count} items)</span>
+                                            </div>
+                                            <div style="font-size: 13px; color: #666; margin-top: 8px;">
+                                                <strong>Count:</strong> {cycle_frequencies[class_name]['frequency']}<br>
+                                                <strong>Priority:</strong> {cycle_frequencies[class_name]['priority']}
+                                            </div>
+                                            <div style="margin-top: 8px;">
+                                                <ul style="padding-left: 20px; margin: 0;">
+                                                    {''.join([f'<li style="font-size: 12px; color: #555;">{action}</li>' for action in plan['actions']])}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                
+                                # ============================================================
+                                # 🎯 ABC CLASS BREAKDOWN - Original (Keep this)
+                                # ============================================================
+                                st.markdown("---")
+                                st.markdown("#### 📊 ABC Class Breakdown")
+                                
+                                # Show ABC breakdown
+                                abc_counts = abc_df['ABC_CLASS'].value_counts()
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("🔴 A Items (70% Value)", abc_counts.get('🔴 A (70% value)', 0))
+                                with col2:
+                                    st.metric("🟡 B Items (20% Value)", abc_counts.get('🟡 B (20% value)', 0))
+                                with col3:
+                                    st.metric("🟢 C Items (10% Value)", abc_counts.get('🟢 C (10% value)', 0))
+                                with col4:
+                                    st.metric("💰 Total Inventory Value", f"KSh {total_value:,.2f}")
+                                
+                                # Show ABC summary table
+                                abc_summary = abc_df.groupby('ABC_CLASS').agg({
+                                    'ITEM_NAME': 'count',
+                                    'ANNUAL_VALUE': 'sum'
+                                }).reset_index()
+                                abc_summary.columns = ['Class', 'Item Count', 'Total Value']
+                                st.dataframe(abc_summary, use_container_width=True, hide_index=True)
+                                
+                                # Show top A items with download
+                                with st.expander("🔍 View Top A Items (70% Value)", expanded=False):
+                                    top_a = abc_df[abc_df['ABC_CLASS'] == '🔴 A (70% value)'].head(20)
+                                    st.dataframe(
+                                        top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']],
+                                        use_container_width=True,
+                                        hide_index=True
+                                    )
+                                    
+                                    # Add export button for A items
+                                    if not top_a.empty:
+                                        csv_a = top_a[['ITEM_NAME', 'ITEM_CATEGORY', 'QUANTITY', 'UNIT PRICE', 'ANNUAL_VALUE']].to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="📥 Download A Items List",
+                                            data=csv_a,
+                                            file_name=f"a_items_{datetime.now().strftime('%Y%m%d')}.csv",
+                                            mime='text/csv'
+                                        )
                             else:
-                                st.info("No category data available to display")
-                            
-                            # Show total value
-                            total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
-                            st.metric("💰 Total Inventory Value Across All Categories", f"KSh {total_inventory_value:,.2f}")
+                                st.info("Total inventory value is zero. Cannot perform ABC analysis.")
                         else:
-                            st.info("No valid data available for category summary.")
+                            st.info("No valid items with both quantity and price data found for ABC analysis.")
+
+                    # --- CATEGORY-LEVEL INVENTORY SUMMARY (WRAPPED IN EXPANDER) ---
+                    if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
+                        st.divider()
                         
-                # Search + Filter
-                col1, col2 = st.columns(2)
+                        # Wrap Category-Level Inventory Summary in expander - collapsed by default
+                        with st.expander("📊 Category-Level Inventory Summary", expanded=False):
+                            # Convert to numeric
+                            cat_df = stock_df.copy()
+                            cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
+                            cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
+                            
+                            # Drop rows with missing values
+                            cat_df = cat_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                            
+                            if not cat_df.empty:
+                                # Calculate annual value first
+                                cat_df['ANNUAL_VALUE'] = cat_df['QUANTITY'] * cat_df['UNIT PRICE']
+                                
+                                # Group by category with all aggregations at once
+                                category_summary = cat_df.groupby('ITEM_CATEGORY').agg({
+                                    'ITEM_NAME': 'count',
+                                    'QUANTITY': 'sum',
+                                    'UNIT PRICE': 'mean',
+                                    'ANNUAL_VALUE': 'sum'
+                                }).reset_index()
+                                
+                                # Rename columns
+                                category_summary.columns = ['Category', 'Items', 'Total Quantity', 'Avg Unit Price', 'Total Value']
+                                
+                                # Format currency columns (keep as numbers for chart, format for display)
+                                display_summary = category_summary.copy()
+                                display_summary['Avg Unit Price'] = display_summary['Avg Unit Price'].apply(lambda x: f"KSh {x:,.2f}")
+                                display_summary['Total Value'] = display_summary['Total Value'].apply(lambda x: f"KSh {x:,.2f}")
+                                
+                                # Show summary table
+                                st.dataframe(display_summary, use_container_width=True, hide_index=True)
+                                
+                                # Check if category_summary exists and has data
+                                if 'category_summary' in locals() and not category_summary.empty:
+                                    fig_category = px.bar(
+                                        category_summary,
+                                        x='Category',
+                                        y='Total Value',
+                                        title='Inventory Value by Category',
+                                        color='Category',
+                                        height=400,
+                                        labels={'Total Value': 'Total Value (KSh)'}
+                                    )
+                                    fig_category.update_layout(showlegend=False)
+                                    st.plotly_chart(fig_category, use_container_width=True)
+                                else:
+                                    st.info("No category data available to display")
+                                
+                                # Show total value
+                                total_inventory_value = cat_df['ANNUAL_VALUE'].sum()
+                                st.metric("💰 Total Inventory Value Across All Categories", f"KSh {total_inventory_value:,.2f}")
+                            else:
+                                st.info("No valid data available for category summary.")
+                            
+                    # Search + Filter
+                    col1, col2 = st.columns(2)
 
-                with col1:
-                    search = st.text_input(
-                        "🔍 Search Items",
-                        placeholder="Type item name..."
-                    )
-
-                with col2:
-                    if 'ITEM_CATEGORY' in stock_df.columns:
-                        categories = (
-                            ['All'] +
-                            sorted(
-                                stock_df['ITEM_CATEGORY']
-                                .dropna()
-                                .unique()
-                                .tolist()
-                            )
+                    with col1:
+                        search = st.text_input(
+                            "🔍 Search Items",
+                            placeholder="Type item name..."
                         )
 
-                        category_filter = st.selectbox(
-                            "📂 Category",
-                            categories
-                        )
-                    else:
-                        category_filter = "All"
-
-                # Apply filters
-                filtered_df = stock_df.copy()
-
-                if search:
-                    mask = False
-
-                    for col in ['ITEM_NAME', 'ITEM_SERIAL']:
-                        if col in filtered_df.columns:
-                            mask = (
-                                mask |
-                                filtered_df[col]
-                                .astype(str)
-                                .str.contains(
-                                    search,
-                                    case=False,
-                                    na=False
+                    with col2:
+                        if 'ITEM_CATEGORY' in stock_df.columns:
+                            categories = (
+                                ['All'] +
+                                sorted(
+                                    stock_df['ITEM_CATEGORY']
+                                    .dropna()
+                                    .unique()
+                                    .tolist()
                                 )
                             )
 
-                    filtered_df = filtered_df[mask]
+                            category_filter = st.selectbox(
+                                "📂 Category",
+                                categories
+                            )
+                        else:
+                            category_filter = "All"
 
-                if (
-                    category_filter != "All"
-                    and 'ITEM_CATEGORY' in filtered_df.columns
-                ):
-                    filtered_df = filtered_df[
-                        filtered_df['ITEM_CATEGORY']
-                        == category_filter
-                    ]
+                    # Apply filters
+                    filtered_df = stock_df.copy()
 
-                # Wrap Stock Listing in expander - collapsed by default
-                with st.expander(f"📋 Stock Listing ({len(filtered_df)} items)", expanded=False):
-                    display_cols = [
-                        'ITEM_SERIAL',
-                        'ITEM_CATEGORY',
-                        'ITEM_NAME',
-                        'UNIT_OF_MEASURE',
-                        'QUANTITY',
-                        'UNIT PRICE',
-                        'REORDER LEVEL'
-                    ]
+                    if search:
+                        mask = False
 
-                    display_cols = [
-                        col for col in display_cols
-                        if col in filtered_df.columns
-                    ]
+                        for col in ['ITEM_NAME', 'ITEM_SERIAL']:
+                            if col in filtered_df.columns:
+                                mask = (
+                                    mask |
+                                    filtered_df[col]
+                                    .astype(str)
+                                    .str.contains(
+                                        search,
+                                        case=False,
+                                        na=False
+                                    )
+                                )
 
-                    st.dataframe(
-                        filtered_df[display_cols],
-                        use_container_width=True,
-                        height=400,
-                        hide_index=True
-                    )
+                        filtered_df = filtered_df[mask]
 
-                    # CSV export
-                    if not filtered_df.empty:
-                        csv = (
-                            filtered_df
-                            .to_csv(index=False)
-                            .encode('utf-8')
-                        )
+                    if (
+                        category_filter != "All"
+                        and 'ITEM_CATEGORY' in filtered_df.columns
+                    ):
+                        filtered_df = filtered_df[
+                            filtered_df['ITEM_CATEGORY']
+                            == category_filter
+                        ]
 
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=csv,
-                            file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv"
-                        )
+                    # Wrap Stock Listing in expander - collapsed by default
+                    with st.expander(f"📋 Stock Listing ({len(filtered_df)} items)", expanded=False):
+                        display_cols = [
+                            'ITEM_SERIAL',
+                            'ITEM_CATEGORY',
+                            'ITEM_NAME',
+                            'UNIT_OF_MEASURE',
+                            'QUANTITY',
+                            'UNIT PRICE',
+                            'REORDER LEVEL'
+                        ]
 
-                # Low stock section (already has expander)
-                if not low_df.empty:
-                    st.divider()
+                        display_cols = [
+                            col for col in display_cols
+                            if col in filtered_df.columns
+                        ]
 
-                    st.warning(
-                        f"⚠️ {len(low_df)} items are low in stock and need reordering!"
-                    )
-
-                    with st.expander("📋 View Low Stock Items", expanded=False):
                         st.dataframe(
-                            low_df,
+                            filtered_df[display_cols],
                             use_container_width=True,
-                            height=300
+                            height=400,
+                            hide_index=True
                         )
 
-            else:
-                st.info(
-                "📊 No inventory data found. "
-                "Please check your Google Sheets connection."
-            )  
-        
-        with tab_movements:
-            st.markdown("## 📊 Stock Movements & Stock Take")
-        
-            # Refresh button
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🔄 Refresh Movements", use_container_width=True):
-                    st.cache_data.clear()
-                    
-            with col2:
-                st.caption(f"Data source: Google Sheets | Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            
-            st.divider()
-            
-            @st.cache_data(ttl=300, show_spinner=False)
-            def load_movement_data():
-                gsheet = GoogleSheetReader()
-                if gsheet.authenticate():
-                    check_in = gsheet.get_check_in()
-                    check_out = gsheet.get_check_out()
-                    current_stock = gsheet.get_current_stock()
-                    return check_in, check_out, current_stock
-                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-            
-            with st.spinner("📊 Please wait..."):
-                check_in_df, check_out_df, current_stock_df = load_movement_data()
-        
-            # Show summary metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
-            with col2:
-                st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
-            with col3:
-                st.metric("📊 Current Stock Records", len(current_stock_df) if not current_stock_df.empty else 0)
-            
-            st.divider()
-            
-            # Create tabs for each movement type + Stock Take
-            movement_tab1, movement_tab2, movement_tab3, movement_tab4 = st.tabs([
-                "📥 Check-Ins",
-                "📤 Check-Outs",
-                "📊 Current Stock",
-                "📋 Stock Take"
-            ])
-            
-            with movement_tab1:
-                st.markdown("### 📥 Check-In Records")
-                
-                # Wrap table in expander - collapsed by default
-                with st.expander("📋 View Check-In Records", expanded=False):
-                    if not check_in_df.empty:
-                        st.dataframe(check_in_df, use_container_width=True, height=400)
-                        
-                        # Export
-                        csv = check_in_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Check-Ins CSV",
-                            data=csv,
-                            file_name=f"check_ins_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime='text/csv'
+                        # CSV export
+                        if not filtered_df.empty:
+                            csv = (
+                                filtered_df
+                                .to_csv(index=False)
+                                .encode('utf-8')
+                            )
+
+                            st.download_button(
+                                label="📥 Download CSV",
+                                data=csv,
+                                file_name=f"inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv"
+                            )
+
+                    # Low stock section (already has expander)
+                    if not low_df.empty:
+                        st.divider()
+
+                        st.warning(
+                            f"⚠️ {len(low_df)} items are low in stock and need reordering!"
                         )
-                    else:
-                        st.info("No check-in records found.")
-            
-            with movement_tab2:
-                st.markdown("### 📤 Check-Out Records")
-                
-                # Wrap table in expander - collapsed by default
-                with st.expander("📋 View Check-Out Records", expanded=False):
-                    if not check_out_df.empty:
-                        st.dataframe(check_out_df, use_container_width=True, height=400)
-                        
-                        # Export
-                        csv = check_out_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Check-Outs CSV",
-                            data=csv,
-                            file_name=f"check_outs_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime='text/csv'
-                        )
-                    else:
-                        st.info("No check-out records found.")
-            
-            with movement_tab3:
-                st.markdown("### 📊 Current Stock Levels")
-                
-                # Wrap table in expander - collapsed by default
-                with st.expander("📋 View Current Stock Levels", expanded=False):
-                    if not current_stock_df.empty:
-                        st.dataframe(current_stock_df, use_container_width=True, height=400)
-                        
-                        # Export
-                        csv = current_stock_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Current Stock CSV",
-                            data=csv,
-                            file_name=f"current_stock_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime='text/csv'
-                        )
-                    else:
-                        st.info("No current stock records found.")
-            
-            with movement_tab4:
-                st.markdown("### 📋 Stock Take")
-                
-                # Add description
-                st.markdown("""
-                <div style="
-                    background: rgba(255,255,255,0.05);
-                    backdrop-filter: blur(8px);
-                    border-radius: 12px;
-                    padding: 12px 16px;
-                    margin-bottom: 15px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                ">
-                    <div style="color: #888; font-size: 13px;">
-                        📋 <strong>Stock Take</strong> - Verify physical inventory against system records.
-                        Create counts, assign sheets to team members, and reconcile discrepancies.
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Check if we have inventory items
-                if 'inventory_items' in locals() and inventory_items:
-                    # Call the stock take interface
-                    stock_take_interface(inventory_items)
+
+                        with st.expander("📋 View Low Stock Items", expanded=False):
+                            st.dataframe(
+                                low_df,
+                                use_container_width=True,
+                                height=300
+                            )
+
                 else:
-                    st.warning("⚠️ No inventory data available. Please load inventory from Google Sheets first.")
-                    st.info("Go to the 📦 Inventory tab and refresh to load data.")
-                    
-                    # Option to load sample data
-                    if st.button("📥 Load Sample Inventory Data"):
-                        inventory_items = get_sample_inventory_data()
-        
-        with tab_analytics:
-            st.markdown("## 📈 All Items Analytics")
-            st.markdown("Comprehensive analysis for all inventory items using Google Sheets data")
+                    st.info(
+                    "📊 No inventory data found. "
+                    "Please check your Google Sheets connection."
+                )  
+        if tab_movements:
+            with tab_movements:
+                st.markdown("## 📊 Stock Movements & Stock Take")
             
-            # ============================================================
-            # 🎯 LAZY LOADING FOR HEAVY ANALYTICS DATA
-            # ============================================================
-            
-            # Define the heavy loading function
-            def load_heavy_analytics_data():
-                """Load heavy analytics data only when needed."""
-                try:
-                    logger.info("Loading heavy analytics data...")
+                # Refresh button
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.button("🔄 Refresh Movements", use_container_width=True):
+                        st.cache_data.clear()
+                        
+                with col2:
+                    st.caption(f"Data source: Google Sheets | Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+                
+                st.divider()
+                
+                @st.cache_data(ttl=300, show_spinner=False)
+                def load_movement_data():
                     gsheet = GoogleSheetReader()
                     if gsheet.authenticate():
-                        stock = gsheet.get_stock_with_pricing()
-                        
-                        # ============================================================
-                        # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
-                        # ============================================================
-                        if not stock.empty:
-                            original_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
-                            stock = compress_dataframe(stock)
-                            compressed_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
-                            reduction = ((original_memory - compressed_memory) / original_memory) * 100
-                            logger.info(f"💾 Analytics stock compressed: {original_memory:.1f}MB → {compressed_memory:.1f}MB (↓{reduction:.0f}%)")
-                        
                         check_in = gsheet.get_check_in()
                         check_out = gsheet.get_check_out()
                         current_stock = gsheet.get_current_stock()
-                        
-                        # Compress the other DataFrames too
-                        if not check_in.empty:
-                            check_in = compress_dataframe(check_in)
-                        if not check_out.empty:
-                            check_out = compress_dataframe(check_out)
-                        if not current_stock.empty:
-                            current_stock = compress_dataframe(current_stock)
-                        
-                        logger.info(f"Analytics data loaded: {len(stock)} items")
-                        return stock, check_in, check_out, current_stock
-                    else:
-                        logger.warning("Google Sheets authentication failed for analytics")
-                except Exception as e:
-                    logger.error(f"Error loading analytics data: {e}")
-                    st.error(f"❌ Error loading analytics data: {str(e)}")
-                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-            
-            # Use lazy loader with caching
-            analytics_loader = LazyLoader(
-                load_heavy_analytics_data,
-                cache_ttl=600,  # 10 minute cache
-                key_prefix="analytics"
-            )
-            
-            # Show load status
-            if not analytics_loader.is_loaded:
-                st.info("💡 Click the button below to load analytics data. This may take a moment.")
-            
-            # Render load button (or show loaded status)
-            analytics_loader.render_load_button("📊 Load Analytics Data")
-            
-            # ============================================================
-            # 🎯 DISPLAY ANALYTICS (ONLY WHEN LOADED)
-            # ============================================================
-            if analytics_loader.is_loaded:
-                stock_df, check_in_df, check_out_df, current_stock_df = analytics_loader.data
+                        return check_in, check_out, current_stock
+                    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
                 
-                # Verify data was loaded successfully
-                if stock_df is None or stock_df.empty:
-                    st.warning("⚠️ No analytics data available. Please check your Google Sheets connection.")
-                else:
-                    # ============================================================
-                    # 🎯 SECTION 1: ORDER ANALYSIS FOR ALL ITEMS
-                    # ============================================================
-                    st.divider()
-                    st.markdown("### 📊 Order Analysis for All Items")
+                with st.spinner("📊 Please wait..."):
+                    check_in_df, check_out_df, current_stock_df = load_movement_data()
+            
+                # Show summary metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
+                with col2:
+                    st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
+                with col3:
+                    st.metric("📊 Current Stock Records", len(current_stock_df) if not current_stock_df.empty else 0)
+                
+                st.divider()
+                
+                # Create tabs for each movement type + Stock Take
+                movement_tab1, movement_tab2, movement_tab3, movement_tab4 = st.tabs([
+                    "📥 Check-Ins",
+                    "📤 Check-Outs",
+                    "📊 Current Stock",
+                    "📋 Stock Take"
+                ])
+                
+                with movement_tab1:
+                    st.markdown("### 📥 Check-In Records")
                     
-                    # Show summary metrics
-                    col1, col2, col3, col4, col5 = st.columns(5)
-                    with col1:
-                        st.metric("📦 Total Items", len(stock_df))
-                    with col2:
-                        st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
-                    with col3:
-                        st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
-                    with col4:
-                        st.metric("📊 Current Stock", len(current_stock_df) if not current_stock_df.empty else 0)
-                    with col5:
-                        if not check_in_df.empty and not check_out_df.empty:
-                            net_movement = len(check_in_df) - len(check_out_df)
-                            st.metric("📈 Net Movement", net_movement, delta=f"{net_movement:+d}")
-                    
-                    # Define parse_date_safe function once
-                    def parse_date_safe(date_str):
-                        if pd.isna(date_str) or date_str == '' or date_str == 'nan' or date_str == 'None' or date_str == 'NaT':
-                            return None
-                        try:
-                            return pd.to_datetime(date_str, format='%Y-%m-%d', errors='coerce')
-                        except:
-                            try:
-                                return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S', errors='coerce')
-                            except:
-                                try:
-                                    return pd.to_datetime(date_str, format='mixed', errors='coerce')
-                                except:
-                                    return None
-                    
-                    # --- CHECK-IN ANALYSIS ---
-                    if not check_in_df.empty:
-                        st.markdown("#### 📥 Check-In Analysis")
-                        
-                        # Find date column - try multiple approaches
-                        date_col_in = None
-                        for col in check_in_df.columns:
-                            if 'date' in col.lower():
-                                date_col_in = col
-                                break
-                        
-                        # Find item column
-                        item_col_in = None
-                        for col in check_in_df.columns:
-                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                                item_col_in = col
-                                break
-                        
-                        if date_col_in:
-                            try:
-                                # Parse dates for check-in
-                                check_in_df['DATE_STR'] = check_in_df[date_col_in].astype(str).str.strip()
-                                check_in_df['DATE'] = check_in_df['DATE_STR'].apply(parse_date_safe)
-                                check_in_df = check_in_df.dropna(subset=['DATE'])
-                                
-                                if not check_in_df.empty:
-                                    check_in_df['MONTH'] = check_in_df['DATE'].dt.to_period('M')
-                                    
-                                    # Monthly check-ins
-                                    monthly_checkins = check_in_df.groupby('MONTH').size().reset_index(name='Check-In Count')
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        st.markdown("##### 📈 Monthly Check-In Trends")
-                                        if not monthly_checkins.empty:
-                                            monthly_checkins['MONTH_STR'] = monthly_checkins['MONTH'].astype(str)
-                                            fig_checkin = px.line(
-                                                monthly_checkins,
-                                                x='MONTH_STR',
-                                                y='Check-In Count',
-                                                title='Monthly Check-Ins (Receipts/Incoming)',
-                                                markers=True
-                                            )
-                                            st.plotly_chart(fig_checkin, use_container_width=True)
-                                        else:
-                                            st.info("No monthly check-in data")
-                                    
-                                    with col2:
-                                        st.markdown("##### 🏆 Top Received Items")
-                                        if item_col_in:
-                                            # Get value counts and clean data
-                                            top_checkins = check_in_df[item_col_in].value_counts().head(10)
-                                            top_checkins = top_checkins[top_checkins.index.notna()]
-                                            top_checkins = top_checkins[top_checkins.index != '']
-                                            top_checkins = top_checkins[top_checkins.index != 'nan']
-                                            
-                                            if not top_checkins.empty:
-                                                fig_top_in = px.bar(
-                                                    x=top_checkins.values,
-                                                    y=top_checkins.index,
-                                                    title='Top 10 Most Received Items',
-                                                    labels={'x': 'Receipt Count', 'y': 'Item Name'},
-                                                    orientation='h'
-                                                )
-                                                fig_top_in.update_layout(height=400)
-                                                st.plotly_chart(fig_top_in, use_container_width=True)
-                                            else:
-                                                st.info("No item data available for check-ins")
-                                        else:
-                                            st.warning("No item column found. Available columns: " + ", ".join(list(check_in_df.columns)))
-                            except Exception as e:
-                                st.warning(f"Could not process check-in data: {e}")
-                        else:
-                            st.warning("No date column found in check-in data")
-                    
-                    # --- CHECK-OUT ANALYSIS ---
-                    if not check_out_df.empty:
-                        st.markdown("#### 📤 Check-Out Analysis")
-                        
-                        # Find date and item columns for check-out
-                        date_col_out = None
-                        for col in check_out_df.columns:
-                            if 'date' in col.lower():
-                                date_col_out = col
-                                break
-                        
-                        item_col_out = None
-                        for col in check_out_df.columns:
-                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                                item_col_out = col
-                                break
-                        
-                        if date_col_out:
-                            try:
-                                # Parse dates for check-out
-                                check_out_df['DATE_STR'] = check_out_df[date_col_out].astype(str).str.strip()
-                                check_out_df['DATE'] = check_out_df['DATE_STR'].apply(parse_date_safe)
-                                check_out_df = check_out_df.dropna(subset=['DATE'])
-                                
-                                if not check_out_df.empty:
-                                    check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
-                                    check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
-                                    
-                                    # Monthly check-outs
-                                    monthly_checkouts = check_out_df.groupby('MONTH').size().reset_index(name='Check-Out Count')
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        st.markdown("##### 📈 Monthly Check-Out Trends")
-                                        if not monthly_checkouts.empty:
-                                            monthly_checkouts['MONTH_STR'] = monthly_checkouts['MONTH'].astype(str)
-                                            fig_checkout = px.line(
-                                                monthly_checkouts,
-                                                x='MONTH_STR',
-                                                y='Check-Out Count',
-                                                title='Monthly Check-Outs (Issues/Usage)',
-                                                markers=True
-                                            )
-                                            st.plotly_chart(fig_checkout, use_container_width=True)
-                                        else:
-                                            st.info("No monthly check-out data")
-                                    
-                                    with col2:
-                                        st.markdown("##### 🏆 Top Used Items")
-                                        if item_col_out:
-                                            top_checkouts = check_out_df[item_col_out].value_counts().head(10)
-                                            top_checkouts = top_checkouts[top_checkouts.index.notna()]
-                                            top_checkouts = top_checkouts[top_checkouts.index != '']
-                                            top_checkouts = top_checkouts[top_checkouts.index != 'nan']
-                                            
-                                            if not top_checkouts.empty:
-                                                fig_top_out = px.bar(
-                                                    x=top_checkouts.values,
-                                                    y=top_checkouts.index,
-                                                    title='Top 10 Most Used Items',
-                                                    labels={'x': 'Usage Count', 'y': 'Item Name'},
-                                                    orientation='h'
-                                                )
-                                                fig_top_out.update_layout(height=400)
-                                                st.plotly_chart(fig_top_out, use_container_width=True)
-                                            else:
-                                                st.info("No item data available for check-outs")
-                                        else:
-                                            st.warning("No item column found in check-out data")
-                            except Exception as e:
-                                st.warning(f"Could not process check-out data: {e}")
-                        else:
-                            st.warning("No date column found in check-out data")
-                    
-                    # --- COMPARISON: CHECK-IN vs CHECK-OUT ---
-                    if not check_in_df.empty and not check_out_df.empty and 'MONTH' in check_in_df.columns and 'MONTH' in check_out_df.columns:
-                        st.markdown("#### 📊 Check-In vs Check-Out Comparison")
-                        
-                        try:
-                            checkin_monthly = check_in_df.groupby('MONTH').size().reset_index(name='Check-Ins')
-                            checkout_monthly = check_out_df.groupby('MONTH').size().reset_index(name='Check-Outs')
+                    # Wrap table in expander - collapsed by default
+                    with st.expander("📋 View Check-In Records", expanded=False):
+                        if not check_in_df.empty:
+                            st.dataframe(check_in_df, use_container_width=True, height=400)
                             
-                            comparison = pd.merge(checkin_monthly, checkout_monthly, on='MONTH', how='outer').fillna(0)
-                            comparison['MONTH_STR'] = comparison['MONTH'].astype(str)
-                            comparison['Net'] = comparison['Check-Ins'] - comparison['Check-Outs']
-                            
-                            fig_comparison = go.Figure()
-                            fig_comparison.add_trace(go.Bar(
-                                x=comparison['MONTH_STR'],
-                                y=comparison['Check-Ins'],
-                                name='Check-Ins',
-                                marker_color='#2ecc71'
-                            ))
-                            fig_comparison.add_trace(go.Bar(
-                                x=comparison['MONTH_STR'],
-                                y=comparison['Check-Outs'],
-                                name='Check-Outs',
-                                marker_color='#e74c3c'
-                            ))
-                            fig_comparison.update_layout(
-                                title='Monthly Check-Ins vs Check-Outs',
-                                xaxis_title='Month',
-                                yaxis_title='Count',
-                                barmode='group',
-                                height=400
-                            )
-                            st.plotly_chart(fig_comparison, use_container_width=True)
-                            
-                            total_net = comparison['Net'].sum()
-                            st.metric(
-                                "📊 Net Total Movement",
-                                f"{total_net:+.0f}",
-                                delta=f"{total_net:+.0f}"
-                            )
-                        except Exception as e:
-                            st.warning(f"Could not create comparison chart: {e}")
-                    
-                    # ============================================================
-                    # 🎯 SECTION 2: DEMAND FORECAST FOR ALL ITEMS
-                    # ============================================================
-                    st.divider()
-                    st.markdown("### 🔮 Demand Forecast for All Items")
-                    
-                    if not check_out_df.empty and 'DATE' in check_out_df.columns:
-                        # Find item column
-                        item_col = None
-                        for col in check_out_df.columns:
-                            if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
-                                item_col = col
-                                break
-                        
-                        # Find quantity column
-                        qty_col = None
-                        for col in check_out_df.columns:
-                            if 'quantity' in col.lower() or 'qty' in col.lower():
-                                qty_col = col
-                                break
-                        
-                        if item_col and qty_col:
-                            items_with_history = check_out_df[item_col].dropna().unique().tolist()
-                            items_with_history = [x for x in items_with_history if x != '' and x != 'nan']
-                            
-                            if items_with_history:
-                                selected_item = st.selectbox(
-                                    "Select Item for Demand Forecast",
-                                    sorted(items_with_history),
-                                    key="forecast_item"
-                                )
-                                
-                                if selected_item:
-                                    item_history = check_out_df[check_out_df[item_col] == selected_item].copy()
-                                    
-                                    if not item_history.empty and 'DATE' in item_history.columns and qty_col:
-                                        try:
-                                            item_history[qty_col] = pd.to_numeric(item_history[qty_col], errors='coerce')
-                                            item_history = item_history.dropna(subset=[qty_col])
-                                            
-                                            if not item_history.empty:
-                                                daily_demand = item_history.groupby('DATE')[qty_col].sum().reset_index()
-                                                daily_demand.columns = ['Date', 'Order_Quantity_kg']
-                                                
-                                                daily_demand['Order_Quantity_kg'] = pd.to_numeric(daily_demand['Order_Quantity_kg'], errors='coerce')
-                                                daily_demand = daily_demand.dropna()
-                                                
-                                                if len(daily_demand) >= 5 and daily_demand['Order_Quantity_kg'].sum() > 0:
-                                                    with st.spinner(f"Generating forecast for {selected_item}..."):
-                                                        fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
-                                                            daily_demand,
-                                                            forecast_days=30
-                                                        )
-                                                        
-                                                        if fig_forecast:
-                                                            st.plotly_chart(fig_forecast, use_container_width=True)
-                                                            
-                                                            col1, col2, col3 = st.columns(3)
-                                                            with col1:
-                                                                total_forecast = np.sum(forecast_values) if len(forecast_values) > 0 else 0
-                                                                st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
-                                                            with col2:
-                                                                avg_daily = np.mean(forecast_values) if len(forecast_values) > 0 else 0
-                                                                st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
-                                                            with col3:
-                                                                st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
-                                                            
-                                                            with st.expander("🔬 View Model Performance"):
-                                                                for model_name, daily_avg in model_forecasts.items():
-                                                                    st.metric(model_name, f"{daily_avg:.1f} units/day")
-                                                        else:
-                                                            st.warning("Could not generate forecast for this item.")
-                                                else:
-                                                    st.warning(f"Not enough data for {selected_item}. Need at least 5 positive values.")
-                                            else:
-                                                st.warning("No valid quantity data after cleaning")
-                                        except Exception as e:
-                                            st.warning(f"Error processing data: {e}")
-                                    else:
-                                        st.warning("No quantity data available for this item.")
-                            else:
-                                st.info("No items with check-out history found.")
-                        else:
-                            st.info(f"Missing required columns. Item column: {item_col}, Quantity column: {qty_col}")
-                    else:
-                        st.info("No check-out data available for forecasting.")
-                    
-                    # ============================================================
-                    # 🎯 SECTION 3: COST OPTIMIZATION FOR ALL ITEMS
-                    # ============================================================
-                    st.divider()
-                    st.markdown("### 💰 Cost Optimization for All Items")
-                    
-                    if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                        cost_df = stock_df.copy()
-                        cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
-                        cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
-                        cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                        
-                        if not cost_df.empty:
-                            cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
-                            cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                order_cost = st.number_input(
-                                    "Ordering Cost (KSh)", 
-                                    value=float(constants.TRANSPORT_COST), 
-                                    step=100.0,
-                                    key="cost_analysis_order_cost"
-                                )
-                            with col2:
-                                holding_rate = st.number_input(
-                                    "Holding Rate (%)", 
-                                    value=float(constants.HOLDING_RATE * 100), 
-                                    step=0.5,
-                                    key="cost_analysis_holding_rate"
-                                ) / 100
-                            
-                            if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
-                                cost_results = []
-                                for _, row in cost_df.iterrows():
-                                    try:
-                                        if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0 and row['ANNUAL_DEMAND'] > 0:
-                                            eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
-                                            
-                                            if row['QUANTITY'] > 0 and eoq > 0:
-                                                current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
-                                                optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
-                                                
-                                                cost_results.append({
-                                                    'Item': row.get('ITEM_NAME', 'Unknown'),
-                                                    'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
-                                                    'Current Stock': row['QUANTITY'],
-                                                    'Unit Price': row['UNIT PRICE'],
-                                                    'Annual Demand': row['ANNUAL_DEMAND'],
-                                                    'EOQ': eoq,
-                                                    'Current Cost': current_total_cost,
-                                                    'Optimal Cost': optimal_total_cost,
-                                                    'Potential Savings': current_total_cost - optimal_total_cost if current_total_cost > optimal_total_cost else 0
-                                                })
-                                    except:
-                                        pass
-                                
-                                if cost_results:
-                                    cost_df_results = pd.DataFrame(cost_results)
-                                    
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    with col1:
-                                        st.metric("📦 Items Analyzed", len(cost_df_results))
-                                    with col2:
-                                        total_savings = cost_df_results['Potential Savings'].sum()
-                                        st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
-                                    with col3:
-                                        avg_savings = cost_df_results['Potential Savings'].mean()
-                                        st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
-                                    with col4:
-                                        items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
-                                        st.metric("✅ Items with Savings", items_with_savings)
-                                    
-                                    st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
-                                    
-                                    csv = cost_df_results.to_csv(index=False).encode('utf-8')
-                                    st.download_button(
-                                        label="📥 Download Cost Analysis Results",
-                                        data=csv,
-                                        file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
-                                        mime='text/csv'
-                                    )
-                                    
-                                    st.divider()
-                                    st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
-                                    top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
-                                    if not top_savings.empty:
-                                        st.dataframe(
-                                            top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
-                                            use_container_width=True,
-                                            hide_index=True
-                                        )
-                                    
-                                    st.divider()
-                                    st.markdown("#### 📊 Cost Savings by Category")
-                                    category_cost_summary = cost_df_results.groupby('Category').agg({
-                                        'Item': 'count',
-                                        'Potential Savings': 'sum'
-                                    }).reset_index()
-                                    category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
-                                    st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
-                                    
-                                    fig_savings = px.bar(
-                                        category_cost_summary,
-                                        x='Category',
-                                        y='Total Savings',
-                                        title='Potential Savings by Category',
-                                        color='Category',
-                                        height=400,
-                                        labels={'Total Savings': 'Savings (KSh)'}
-                                    )
-                                    fig_savings.update_layout(showlegend=False)
-                                    st.plotly_chart(fig_savings, use_container_width=True)
-                                else:
-                                    st.warning("No valid cost results generated. Please check your data.")
-                        else:
-                            st.warning("No valid data with both quantity and price found.")
-                    else:
-                        st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
-            else:
-                st.info("💡 Click 'Load Analytics Data' to view the analysis.")
-
-        with tab_inventory_visual:  
-            st.markdown("### 📦 Visual Inventory Dashboard")
-            
-            # Add filters
-            search, category_filter, show_low_stock = inventory_filters(inventory_items)
-            
-            # Apply filters
-            filtered_items = {}
-            for item, details in inventory_items.items():
-                # Search filter
-                if search and search.lower() not in item.lower():
-                    continue
-                
-                # Category filter
-                if category_filter != 'All' and details.get('category', 'Uncategorized') != category_filter:
-                    continue
-                
-                # Low stock filter
-                if show_low_stock and details.get('stock', 0) >= details.get('reorder', 0):
-                    continue
-                
-                filtered_items[item] = details
-
-            # ============================================================
-            # SECTION 1: AI-POWERED RECOMMENDATIONS (TOP)
-            # ============================================================
-            with st.expander("🤖 View AI-Powered Recommendations", expanded=False):
-            # Use inventory_items (all items) for AI recommendations
-                if inventory_items:
-                    ai_powered_recommendations(
-                        inventory_items=inventory_items,
-                        filtered_items=filtered_items,
-                        kpis=kpis
-                    )
-                else:
-                    st.info("No inventory data available for AI recommendations")
-
-            # ============================================================
-            # SECTION 2: STATUS DASHBOARD (Katana Style) - NEW
-            # ============================================================
-            with st.expander("📊 View Real-Time Status Dashboard", expanded=False):
-                st.markdown("""
-                <div style="
-                    background: rgba(255,255,255,0.05);
-                    backdrop-filter: blur(10px);
-                    border-radius: 12px;
-                    padding: 15px;
-                    margin-bottom: 15px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                ">
-                    <div style="color: #888; font-size: 13px;">
-                        Real-time inventory status overview for ALL items.
-                        <span style="color: #4caf50;">🟢 Healthy</span> | 
-                        <span style="color: #ff9800;">🟠 Low Stock</span> | 
-                        <span style="color: #dc3545;">🔴 Critical</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Display the status dashboard for ALL inventory
-                if inventory_items:
-                    inventory_status_dashboard(inventory_items, inventory_tracker)
-                else:
-                    st.info("No inventory data available for status dashboard")  
-            
-            # ============================================================
-            # SECTION 3: GRID VIEW (Expander - Closed by Default)
-            # ============================================================
-            with st.expander("🖼️ View Inventory Grid", expanded=False):
-                # Show stats
-                inventory_stats_summary(filtered_items)
-                
-                st.markdown("---")
-                
-                # Show the grid
-                if filtered_items:
-                    visual_inventory_grid(filtered_items, columns=3)
-                else:
-                    st.info("No items match your filters")
-            
-            # ============================================================
-            # SECTION 4: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
-            # ============================================================
-            with st.expander("🔥 View Inventory Heat Map", expanded=False):
-                st.markdown("""
-                <div style="
-                    background: rgba(255,255,255,0.05);
-                    backdrop-filter: blur(10px);
-                    border-radius: 12px;
-                    padding: 15px;
-                    margin-bottom: 15px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                ">
-                    <div style="color: #888; font-size: 13px;">
-                        Color-coded overview of inventory stock levels. 
-                        <span style="color: #dc3545;">🔴 Critical</span> | 
-                        <span style="color: #ff9800;">🟠 Low Stock</span> | 
-                        <span style="color: #4caf50;">🟢 Good</span> | 
-                        <span style="color: #2196f3;">🔵 Overstocked</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Use the filtered_items from the visual inventory
-                if filtered_items:
-                    # Create heatmap data from filtered items
-                    heatmap_data = []
-                    for item_name, details in filtered_items.items():
-                        stock = details.get('stock', 0)
-                        reorder = details.get('reorder', 0)
-                        eoq = details.get('max', stock * 2)
-                        
-                        if stock <= 0:
-                            status = 'Critical'
-                        elif stock < reorder:
-                            status = 'Low'
-                        elif stock >= reorder and stock < eoq:
-                            status = 'Good'
-                        else:
-                            status = 'Overstocked'
-                        
-                        heatmap_data.append({
-                            'Item': item_name,
-                            'Stock': stock,
-                            'Reorder': reorder,
-                            'EOQ': eoq,
-                            'Status': status,
-                            'Category': details.get('category', 'Uncategorized'),
-                            'Unit': details.get('unit', 'kg')
-                        })
-                    
-                    # Add heat map specific filters
-                    col1, col2, col3 = st.columns([2, 2, 1])
-                    with col1:
-                        heatmap_search = st.text_input(
-                            "🔍 Search Items",
-                            placeholder="Type item name...",
-                            key="heatmap_search"
-                        )
-                    with col2:
-                        # Get unique statuses for filter
-                        status_options = ['All'] + sorted(set(item['Status'] for item in heatmap_data))
-                        heatmap_status = st.selectbox(
-                            "📊 Status",
-                            status_options,
-                            key="heatmap_status_filter"
-                        )
-                    with col3:
-                        # Get unique categories for filter
-                        cat_options = ['All'] + sorted(set(item['Category'] for item in heatmap_data))
-                        heatmap_category = st.selectbox(
-                            "📂 Category",
-                            cat_options,
-                            key="heatmap_category_filter"
-                        )
-                    
-                    # Apply heat map filters
-                    filtered_heatmap = []
-                    for item in heatmap_data:
-                        if heatmap_search and heatmap_search.lower() not in item['Item'].lower():
-                            continue
-                        if heatmap_status != 'All' and item['Status'] != heatmap_status:
-                            continue
-                        if heatmap_category != 'All' and item['Category'] != heatmap_category:
-                            continue
-                        filtered_heatmap.append(item)
-                    
-                    # Convert back to dict
-                    heatmap_items = {}
-                    for item in filtered_heatmap:
-                        heatmap_items[item['Item']] = {
-                            'stock': item['Stock'],
-                            'reorder': item['Reorder'],
-                            'max': item['EOQ'],
-                            'unit': item['Unit'],
-                            'category': item['Category']
-                        }
-                    
-                    if heatmap_items:
-                        inventory_heatmap(heatmap_items, title="Inventory Stock Levels", columns=6)
-                    else:
-                        st.info("No items match your heat map filters")
-                else:
-                    st.info("No inventory items to display in heat map")
-            
-            # ============================================================
-            # SECTION 5: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
-            # ============================================================
-            with st.expander("🛒 View Replenishment Recommendations", expanded=False):
-                st.markdown("""
-                <div style="
-                    background: rgba(255,255,255,0.05);
-                    backdrop-filter: blur(10px);
-                    border-radius: 12px;
-                    padding: 15px;
-                    margin-bottom: 15px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                ">
-                    <div style="color: #888; font-size: 13px;">
-                        Smart replenishment suggestions based on current stock levels.
-                        <span style="color: #dc3545;">🔴 Urgent (≤3 days)</span> | 
-                        <span style="color: #ffc107;">🟡 Medium (4-7 days)</span> | 
-                        <span style="color: #28a745;">🟢 Low (>7 days)</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Use the filtered_items from the visual inventory
-                if filtered_items:
-                    # Generate recommendations
-                    recommendations_df = get_replenishment_recommendations(filtered_items)
-                    
-                    # Show summary and recommendations
-                    if not recommendations_df.empty:
-                        summary = get_replenishment_summary(recommendations_df)
-                        show_replenishment_summary_cards(summary)
-                        st.markdown("---")
-                        show_replenishment_suggestions(recommendations_df)
-                        
-                        # Export button
-                        col1, col2 = st.columns([1, 4])
-                        with col1:
-                            csv = recommendations_df.to_csv(index=False).encode('utf-8')
+                            # Export
+                            csv = check_in_df.to_csv(index=False).encode('utf-8')
                             st.download_button(
-                                label="📥 Download Recommendations",
+                                label="📥 Download Check-Ins CSV",
                                 data=csv,
-                                file_name=f"replenishment_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
+                                file_name=f"check_ins_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime='text/csv'
                             )
-                        with col2:
-                            st.caption("Download recommendations as CSV for offline review or sharing")
+                        else:
+                            st.info("No check-in records found.")
+                
+                with movement_tab2:
+                    st.markdown("### 📤 Check-Out Records")
+                    
+                    # Wrap table in expander - collapsed by default
+                    with st.expander("📋 View Check-Out Records", expanded=False):
+                        if not check_out_df.empty:
+                            st.dataframe(check_out_df, use_container_width=True, height=400)
+                            
+                            # Export
+                            csv = check_out_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="📥 Download Check-Outs CSV",
+                                data=csv,
+                                file_name=f"check_outs_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime='text/csv'
+                            )
+                        else:
+                            st.info("No check-out records found.")
+                
+                with movement_tab3:
+                    st.markdown("### 📊 Current Stock Levels")
+                    
+                    # Wrap table in expander - collapsed by default
+                    with st.expander("📋 View Current Stock Levels", expanded=False):
+                        if not current_stock_df.empty:
+                            st.dataframe(current_stock_df, use_container_width=True, height=400)
+                            
+                            # Export
+                            csv = current_stock_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="📥 Download Current Stock CSV",
+                                data=csv,
+                                file_name=f"current_stock_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime='text/csv'
+                            )
+                        else:
+                            st.info("No current stock records found.")
+                
+                with movement_tab4:
+                    st.markdown("### 📋 Stock Take")
+                    
+                    # Add description
+                    st.markdown("""
+                    <div style="
+                        background: rgba(255,255,255,0.05);
+                        backdrop-filter: blur(8px);
+                        border-radius: 12px;
+                        padding: 12px 16px;
+                        margin-bottom: 15px;
+                        border: 1px solid rgba(255,255,255,0.08);
+                    ">
+                        <div style="color: #888; font-size: 13px;">
+                            📋 <strong>Stock Take</strong> - Verify physical inventory against system records.
+                            Create counts, assign sheets to team members, and reconcile discrepancies.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Check if we have inventory items
+                    if 'inventory_items' in locals() and inventory_items:
+                        # Call the stock take interface
+                        stock_take_interface(inventory_items)
                     else:
-                        st.success("✅ All items are well-stocked. No replenishment needed at this time.")
-                else:
-                    st.info("No inventory items to analyze for replenishment")
+                        st.warning("⚠️ No inventory data available. Please load inventory from Google Sheets first.")
+                        st.info("Go to the 📦 Inventory tab and refresh to load data.")
+                        
+                        # Option to load sample data
+                        if st.button("📥 Load Sample Inventory Data"):
+                            inventory_items = get_sample_inventory_data()
 
-        with tab_advanced:
-            if df is not None and not df.empty and inventory_items:
-                # Pass stock_df as well
-                create_advanced_analytics_tab(analytics, df, inventory_items, stock_df)
-            else:
-                st.warning("No data available for advanced analytics")
+        if tab_analytics:
+            with tab_analytics:
+                st.markdown("## 📈 All Items Analytics")
+                st.markdown("Comprehensive analysis for all inventory items using Google Sheets data")
+                
+                # ============================================================
+                # 🎯 LAZY LOADING FOR HEAVY ANALYTICS DATA
+                # ============================================================
+                
+                # Define the heavy loading function
+                def load_heavy_analytics_data():
+                    """Load heavy analytics data only when needed."""
+                    try:
+                        logger.info("Loading heavy analytics data...")
+                        gsheet = GoogleSheetReader()
+                        if gsheet.authenticate():
+                            stock = gsheet.get_stock_with_pricing()
+                            
+                            # ============================================================
+                            # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
+                            # ============================================================
+                            if not stock.empty:
+                                original_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
+                                stock = compress_dataframe(stock)
+                                compressed_memory = stock.memory_usage(deep=True).sum() / 1024 / 1024
+                                reduction = ((original_memory - compressed_memory) / original_memory) * 100
+                                logger.info(f"💾 Analytics stock compressed: {original_memory:.1f}MB → {compressed_memory:.1f}MB (↓{reduction:.0f}%)")
+                            
+                            check_in = gsheet.get_check_in()
+                            check_out = gsheet.get_check_out()
+                            current_stock = gsheet.get_current_stock()
+                            
+                            # Compress the other DataFrames too
+                            if not check_in.empty:
+                                check_in = compress_dataframe(check_in)
+                            if not check_out.empty:
+                                check_out = compress_dataframe(check_out)
+                            if not current_stock.empty:
+                                current_stock = compress_dataframe(current_stock)
+                            
+                            logger.info(f"Analytics data loaded: {len(stock)} items")
+                            return stock, check_in, check_out, current_stock
+                        else:
+                            logger.warning("Google Sheets authentication failed for analytics")
+                    except Exception as e:
+                        logger.error(f"Error loading analytics data: {e}")
+                        st.error(f"❌ Error loading analytics data: {str(e)}")
+                    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+                
+                # Use lazy loader with caching
+                analytics_loader = LazyLoader(
+                    load_heavy_analytics_data,
+                    cache_ttl=600,  # 10 minute cache
+                    key_prefix="analytics"
+                )
+                
+                # Show load status
+                if not analytics_loader.is_loaded:
+                    st.info("💡 Click the button below to load analytics data. This may take a moment.")
+                
+                # Render load button (or show loaded status)
+                analytics_loader.render_load_button("📊 Load Analytics Data")
+                
+                # ============================================================
+                # 🎯 DISPLAY ANALYTICS (ONLY WHEN LOADED)
+                # ============================================================
+                if analytics_loader.is_loaded:
+                    stock_df, check_in_df, check_out_df, current_stock_df = analytics_loader.data
+                    
+                    # Verify data was loaded successfully
+                    if stock_df is None or stock_df.empty:
+                        st.warning("⚠️ No analytics data available. Please check your Google Sheets connection.")
+                    else:
+                        # ============================================================
+                        # 🎯 SECTION 1: ORDER ANALYSIS FOR ALL ITEMS
+                        # ============================================================
+                        st.divider()
+                        st.markdown("### 📊 Order Analysis for All Items")
+                        
+                        # Show summary metrics
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        with col1:
+                            st.metric("📦 Total Items", len(stock_df))
+                        with col2:
+                            st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
+                        with col3:
+                            st.metric("📤 Check-Outs", len(check_out_df) if not check_out_df.empty else 0)
+                        with col4:
+                            st.metric("📊 Current Stock", len(current_stock_df) if not current_stock_df.empty else 0)
+                        with col5:
+                            if not check_in_df.empty and not check_out_df.empty:
+                                net_movement = len(check_in_df) - len(check_out_df)
+                                st.metric("📈 Net Movement", net_movement, delta=f"{net_movement:+d}")
+                        
+                        # Define parse_date_safe function once
+                        def parse_date_safe(date_str):
+                            if pd.isna(date_str) or date_str == '' or date_str == 'nan' or date_str == 'None' or date_str == 'NaT':
+                                return None
+                            try:
+                                return pd.to_datetime(date_str, format='%Y-%m-%d', errors='coerce')
+                            except:
+                                try:
+                                    return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S', errors='coerce')
+                                except:
+                                    try:
+                                        return pd.to_datetime(date_str, format='mixed', errors='coerce')
+                                    except:
+                                        return None
+                        
+                        # --- CHECK-IN ANALYSIS ---
+                        if not check_in_df.empty:
+                            st.markdown("#### 📥 Check-In Analysis")
+                            
+                            # Find date column - try multiple approaches
+                            date_col_in = None
+                            for col in check_in_df.columns:
+                                if 'date' in col.lower():
+                                    date_col_in = col
+                                    break
+                            
+                            # Find item column
+                            item_col_in = None
+                            for col in check_in_df.columns:
+                                if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                    item_col_in = col
+                                    break
+                            
+                            if date_col_in:
+                                try:
+                                    # Parse dates for check-in
+                                    check_in_df['DATE_STR'] = check_in_df[date_col_in].astype(str).str.strip()
+                                    check_in_df['DATE'] = check_in_df['DATE_STR'].apply(parse_date_safe)
+                                    check_in_df = check_in_df.dropna(subset=['DATE'])
+                                    
+                                    if not check_in_df.empty:
+                                        check_in_df['MONTH'] = check_in_df['DATE'].dt.to_period('M')
+                                        
+                                        # Monthly check-ins
+                                        monthly_checkins = check_in_df.groupby('MONTH').size().reset_index(name='Check-In Count')
+                                        
+                                        col1, col2 = st.columns(2)
+                                        
+                                        with col1:
+                                            st.markdown("##### 📈 Monthly Check-In Trends")
+                                            if not monthly_checkins.empty:
+                                                monthly_checkins['MONTH_STR'] = monthly_checkins['MONTH'].astype(str)
+                                                fig_checkin = px.line(
+                                                    monthly_checkins,
+                                                    x='MONTH_STR',
+                                                    y='Check-In Count',
+                                                    title='Monthly Check-Ins (Receipts/Incoming)',
+                                                    markers=True
+                                                )
+                                                st.plotly_chart(fig_checkin, use_container_width=True)
+                                            else:
+                                                st.info("No monthly check-in data")
+                                        
+                                        with col2:
+                                            st.markdown("##### 🏆 Top Received Items")
+                                            if item_col_in:
+                                                # Get value counts and clean data
+                                                top_checkins = check_in_df[item_col_in].value_counts().head(10)
+                                                top_checkins = top_checkins[top_checkins.index.notna()]
+                                                top_checkins = top_checkins[top_checkins.index != '']
+                                                top_checkins = top_checkins[top_checkins.index != 'nan']
+                                                
+                                                if not top_checkins.empty:
+                                                    fig_top_in = px.bar(
+                                                        x=top_checkins.values,
+                                                        y=top_checkins.index,
+                                                        title='Top 10 Most Received Items',
+                                                        labels={'x': 'Receipt Count', 'y': 'Item Name'},
+                                                        orientation='h'
+                                                    )
+                                                    fig_top_in.update_layout(height=400)
+                                                    st.plotly_chart(fig_top_in, use_container_width=True)
+                                                else:
+                                                    st.info("No item data available for check-ins")
+                                            else:
+                                                st.warning("No item column found. Available columns: " + ", ".join(list(check_in_df.columns)))
+                                except Exception as e:
+                                    st.warning(f"Could not process check-in data: {e}")
+                            else:
+                                st.warning("No date column found in check-in data")
+                        
+                        # --- CHECK-OUT ANALYSIS ---
+                        if not check_out_df.empty:
+                            st.markdown("#### 📤 Check-Out Analysis")
+                            
+                            # Find date and item columns for check-out
+                            date_col_out = None
+                            for col in check_out_df.columns:
+                                if 'date' in col.lower():
+                                    date_col_out = col
+                                    break
+                            
+                            item_col_out = None
+                            for col in check_out_df.columns:
+                                if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                    item_col_out = col
+                                    break
+                            
+                            if date_col_out:
+                                try:
+                                    # Parse dates for check-out
+                                    check_out_df['DATE_STR'] = check_out_df[date_col_out].astype(str).str.strip()
+                                    check_out_df['DATE'] = check_out_df['DATE_STR'].apply(parse_date_safe)
+                                    check_out_df = check_out_df.dropna(subset=['DATE'])
+                                    
+                                    if not check_out_df.empty:
+                                        check_out_df['MONTH'] = check_out_df['DATE'].dt.to_period('M')
+                                        check_out_df['WEEKDAY'] = check_out_df['DATE'].dt.day_name()
+                                        
+                                        # Monthly check-outs
+                                        monthly_checkouts = check_out_df.groupby('MONTH').size().reset_index(name='Check-Out Count')
+                                        
+                                        col1, col2 = st.columns(2)
+                                        
+                                        with col1:
+                                            st.markdown("##### 📈 Monthly Check-Out Trends")
+                                            if not monthly_checkouts.empty:
+                                                monthly_checkouts['MONTH_STR'] = monthly_checkouts['MONTH'].astype(str)
+                                                fig_checkout = px.line(
+                                                    monthly_checkouts,
+                                                    x='MONTH_STR',
+                                                    y='Check-Out Count',
+                                                    title='Monthly Check-Outs (Issues/Usage)',
+                                                    markers=True
+                                                )
+                                                st.plotly_chart(fig_checkout, use_container_width=True)
+                                            else:
+                                                st.info("No monthly check-out data")
+                                        
+                                        with col2:
+                                            st.markdown("##### 🏆 Top Used Items")
+                                            if item_col_out:
+                                                top_checkouts = check_out_df[item_col_out].value_counts().head(10)
+                                                top_checkouts = top_checkouts[top_checkouts.index.notna()]
+                                                top_checkouts = top_checkouts[top_checkouts.index != '']
+                                                top_checkouts = top_checkouts[top_checkouts.index != 'nan']
+                                                
+                                                if not top_checkouts.empty:
+                                                    fig_top_out = px.bar(
+                                                        x=top_checkouts.values,
+                                                        y=top_checkouts.index,
+                                                        title='Top 10 Most Used Items',
+                                                        labels={'x': 'Usage Count', 'y': 'Item Name'},
+                                                        orientation='h'
+                                                    )
+                                                    fig_top_out.update_layout(height=400)
+                                                    st.plotly_chart(fig_top_out, use_container_width=True)
+                                                else:
+                                                    st.info("No item data available for check-outs")
+                                            else:
+                                                st.warning("No item column found in check-out data")
+                                except Exception as e:
+                                    st.warning(f"Could not process check-out data: {e}")
+                            else:
+                                st.warning("No date column found in check-out data")
+                        
+                        # --- COMPARISON: CHECK-IN vs CHECK-OUT ---
+                        if not check_in_df.empty and not check_out_df.empty and 'MONTH' in check_in_df.columns and 'MONTH' in check_out_df.columns:
+                            st.markdown("#### 📊 Check-In vs Check-Out Comparison")
+                            
+                            try:
+                                checkin_monthly = check_in_df.groupby('MONTH').size().reset_index(name='Check-Ins')
+                                checkout_monthly = check_out_df.groupby('MONTH').size().reset_index(name='Check-Outs')
+                                
+                                comparison = pd.merge(checkin_monthly, checkout_monthly, on='MONTH', how='outer').fillna(0)
+                                comparison['MONTH_STR'] = comparison['MONTH'].astype(str)
+                                comparison['Net'] = comparison['Check-Ins'] - comparison['Check-Outs']
+                                
+                                fig_comparison = go.Figure()
+                                fig_comparison.add_trace(go.Bar(
+                                    x=comparison['MONTH_STR'],
+                                    y=comparison['Check-Ins'],
+                                    name='Check-Ins',
+                                    marker_color='#2ecc71'
+                                ))
+                                fig_comparison.add_trace(go.Bar(
+                                    x=comparison['MONTH_STR'],
+                                    y=comparison['Check-Outs'],
+                                    name='Check-Outs',
+                                    marker_color='#e74c3c'
+                                ))
+                                fig_comparison.update_layout(
+                                    title='Monthly Check-Ins vs Check-Outs',
+                                    xaxis_title='Month',
+                                    yaxis_title='Count',
+                                    barmode='group',
+                                    height=400
+                                )
+                                st.plotly_chart(fig_comparison, use_container_width=True)
+                                
+                                total_net = comparison['Net'].sum()
+                                st.metric(
+                                    "📊 Net Total Movement",
+                                    f"{total_net:+.0f}",
+                                    delta=f"{total_net:+.0f}"
+                                )
+                            except Exception as e:
+                                st.warning(f"Could not create comparison chart: {e}")
+                        
+                        # ============================================================
+                        # 🎯 SECTION 2: DEMAND FORECAST FOR ALL ITEMS
+                        # ============================================================
+                        st.divider()
+                        st.markdown("### 🔮 Demand Forecast for All Items")
+                        
+                        if not check_out_df.empty and 'DATE' in check_out_df.columns:
+                            # Find item column
+                            item_col = None
+                            for col in check_out_df.columns:
+                                if 'item' in col.lower() or 'product' in col.lower() or 'name' in col.lower():
+                                    item_col = col
+                                    break
+                            
+                            # Find quantity column
+                            qty_col = None
+                            for col in check_out_df.columns:
+                                if 'quantity' in col.lower() or 'qty' in col.lower():
+                                    qty_col = col
+                                    break
+                            
+                            if item_col and qty_col:
+                                items_with_history = check_out_df[item_col].dropna().unique().tolist()
+                                items_with_history = [x for x in items_with_history if x != '' and x != 'nan']
+                                
+                                if items_with_history:
+                                    selected_item = st.selectbox(
+                                        "Select Item for Demand Forecast",
+                                        sorted(items_with_history),
+                                        key="forecast_item"
+                                    )
+                                    
+                                    if selected_item:
+                                        item_history = check_out_df[check_out_df[item_col] == selected_item].copy()
+                                        
+                                        if not item_history.empty and 'DATE' in item_history.columns and qty_col:
+                                            try:
+                                                item_history[qty_col] = pd.to_numeric(item_history[qty_col], errors='coerce')
+                                                item_history = item_history.dropna(subset=[qty_col])
+                                                
+                                                if not item_history.empty:
+                                                    daily_demand = item_history.groupby('DATE')[qty_col].sum().reset_index()
+                                                    daily_demand.columns = ['Date', 'Order_Quantity_kg']
+                                                    
+                                                    daily_demand['Order_Quantity_kg'] = pd.to_numeric(daily_demand['Order_Quantity_kg'], errors='coerce')
+                                                    daily_demand = daily_demand.dropna()
+                                                    
+                                                    if len(daily_demand) >= 5 and daily_demand['Order_Quantity_kg'].sum() > 0:
+                                                        with st.spinner(f"Generating forecast for {selected_item}..."):
+                                                            fig_forecast, forecast_values, model_forecasts, accuracy = create_ensemble_forecast(
+                                                                daily_demand,
+                                                                forecast_days=30
+                                                            )
+                                                            
+                                                            if fig_forecast:
+                                                                st.plotly_chart(fig_forecast, use_container_width=True)
+                                                                
+                                                                col1, col2, col3 = st.columns(3)
+                                                                with col1:
+                                                                    total_forecast = np.sum(forecast_values) if len(forecast_values) > 0 else 0
+                                                                    st.metric("📊 Total Forecasted Demand (30 days)", f"{total_forecast:,.0f}")
+                                                                with col2:
+                                                                    avg_daily = np.mean(forecast_values) if len(forecast_values) > 0 else 0
+                                                                    st.metric("📈 Average Daily Demand", f"{avg_daily:.1f}")
+                                                                with col3:
+                                                                    st.metric("🎯 Forecast Accuracy", f"{100-accuracy*100:.1f}%")
+                                                                
+                                                                with st.expander("🔬 View Model Performance"):
+                                                                    for model_name, daily_avg in model_forecasts.items():
+                                                                        st.metric(model_name, f"{daily_avg:.1f} units/day")
+                                                            else:
+                                                                st.warning("Could not generate forecast for this item.")
+                                                    else:
+                                                        st.warning(f"Not enough data for {selected_item}. Need at least 5 positive values.")
+                                                else:
+                                                    st.warning("No valid quantity data after cleaning")
+                                            except Exception as e:
+                                                st.warning(f"Error processing data: {e}")
+                                        else:
+                                            st.warning("No quantity data available for this item.")
+                                else:
+                                    st.info("No items with check-out history found.")
+                            else:
+                                st.info(f"Missing required columns. Item column: {item_col}, Quantity column: {qty_col}")
+                        else:
+                            st.info("No check-out data available for forecasting.")
+                        
+                        # ============================================================
+                        # 🎯 SECTION 3: COST OPTIMIZATION FOR ALL ITEMS
+                        # ============================================================
+                        st.divider()
+                        st.markdown("### 💰 Cost Optimization for All Items")
+                        
+                        if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                            cost_df = stock_df.copy()
+                            cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
+                            cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
+                            cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                            
+                            if not cost_df.empty:
+                                cost_df['TOTAL_VALUE'] = cost_df['QUANTITY'] * cost_df['UNIT PRICE']
+                                cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    order_cost = st.number_input(
+                                        "Ordering Cost (KSh)", 
+                                        value=float(constants.TRANSPORT_COST), 
+                                        step=100.0,
+                                        key="cost_analysis_order_cost"
+                                    )
+                                with col2:
+                                    holding_rate = st.number_input(
+                                        "Holding Rate (%)", 
+                                        value=float(constants.HOLDING_RATE * 100), 
+                                        step=0.5,
+                                        key="cost_analysis_holding_rate"
+                                    ) / 100
+                                
+                                if st.button("📊 Run Cost Analysis", key="run_cost_analysis"):
+                                    cost_results = []
+                                    for _, row in cost_df.iterrows():
+                                        try:
+                                            if row['UNIT PRICE'] > 0 and row['QUANTITY'] > 0 and row['ANNUAL_DEMAND'] > 0:
+                                                eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
+                                                
+                                                if row['QUANTITY'] > 0 and eoq > 0:
+                                                    current_total_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
+                                                    optimal_total_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
+                                                    
+                                                    cost_results.append({
+                                                        'Item': row.get('ITEM_NAME', 'Unknown'),
+                                                        'Category': row.get('ITEM_CATEGORY', 'Uncategorized'),
+                                                        'Current Stock': row['QUANTITY'],
+                                                        'Unit Price': row['UNIT PRICE'],
+                                                        'Annual Demand': row['ANNUAL_DEMAND'],
+                                                        'EOQ': eoq,
+                                                        'Current Cost': current_total_cost,
+                                                        'Optimal Cost': optimal_total_cost,
+                                                        'Potential Savings': current_total_cost - optimal_total_cost if current_total_cost > optimal_total_cost else 0
+                                                    })
+                                        except:
+                                            pass
+                                    
+                                    if cost_results:
+                                        cost_df_results = pd.DataFrame(cost_results)
+                                        
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.metric("📦 Items Analyzed", len(cost_df_results))
+                                        with col2:
+                                            total_savings = cost_df_results['Potential Savings'].sum()
+                                            st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
+                                        with col3:
+                                            avg_savings = cost_df_results['Potential Savings'].mean()
+                                            st.metric("📊 Avg Savings per Item", f"KSh {avg_savings:,.0f}")
+                                        with col4:
+                                            items_with_savings = len(cost_df_results[cost_df_results['Potential Savings'] > 0])
+                                            st.metric("✅ Items with Savings", items_with_savings)
+                                        
+                                        st.dataframe(cost_df_results, use_container_width=True, hide_index=True)
+                                        
+                                        csv = cost_df_results.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="📥 Download Cost Analysis Results",
+                                            data=csv,
+                                            file_name=f"cost_analysis_all_items_{datetime.now().strftime('%Y%m%d')}.csv",
+                                            mime='text/csv'
+                                        )
+                                        
+                                        st.divider()
+                                        st.markdown("#### 🏆 Top 10 Items with Highest Potential Savings")
+                                        top_savings = cost_df_results.sort_values('Potential Savings', ascending=False).head(10)
+                                        if not top_savings.empty:
+                                            st.dataframe(
+                                                top_savings[['Item', 'Category', 'Current Cost', 'Optimal Cost', 'Potential Savings']],
+                                                use_container_width=True,
+                                                hide_index=True
+                                            )
+                                        
+                                        st.divider()
+                                        st.markdown("#### 📊 Cost Savings by Category")
+                                        category_cost_summary = cost_df_results.groupby('Category').agg({
+                                            'Item': 'count',
+                                            'Potential Savings': 'sum'
+                                        }).reset_index()
+                                        category_cost_summary.columns = ['Category', 'Items', 'Total Savings']
+                                        st.dataframe(category_cost_summary, use_container_width=True, hide_index=True)
+                                        
+                                        fig_savings = px.bar(
+                                            category_cost_summary,
+                                            x='Category',
+                                            y='Total Savings',
+                                            title='Potential Savings by Category',
+                                            color='Category',
+                                            height=400,
+                                            labels={'Total Savings': 'Savings (KSh)'}
+                                        )
+                                        fig_savings.update_layout(showlegend=False)
+                                        st.plotly_chart(fig_savings, use_container_width=True)
+                                    else:
+                                        st.warning("No valid cost results generated. Please check your data.")
+                            else:
+                                st.warning("No valid data with both quantity and price found.")
+                        else:
+                            st.warning("Required columns (UNIT PRICE, QUANTITY) not found in stock data.")
+                else:
+                    st.info("💡 Click 'Load Analytics Data' to view the analysis.")
+
+        if tab_inventory_visual:
+            with tab_inventory_visual:  
+                st.markdown("### 📦 Visual Inventory Dashboard")
+                
+                # Add filters
+                search, category_filter, show_low_stock = inventory_filters(inventory_items)
+                
+                # Apply filters
+                filtered_items = {}
+                for item, details in inventory_items.items():
+                    # Search filter
+                    if search and search.lower() not in item.lower():
+                        continue
+                    
+                    # Category filter
+                    if category_filter != 'All' and details.get('category', 'Uncategorized') != category_filter:
+                        continue
+                    
+                    # Low stock filter
+                    if show_low_stock and details.get('stock', 0) >= details.get('reorder', 0):
+                        continue
+                    
+                    filtered_items[item] = details
+
+                # ============================================================
+                # SECTION 1: AI-POWERED RECOMMENDATIONS (TOP)
+                # ============================================================
+                with st.expander("🤖 View AI-Powered Recommendations", expanded=False):
+                # Use inventory_items (all items) for AI recommendations
+                    if inventory_items:
+                        ai_powered_recommendations(
+                            inventory_items=inventory_items,
+                            filtered_items=filtered_items,
+                            kpis=kpis
+                        )
+                    else:
+                        st.info("No inventory data available for AI recommendations")
+
+                # ============================================================
+                # SECTION 2: STATUS DASHBOARD (Katana Style) - NEW
+                # ============================================================
+                with st.expander("📊 View Real-Time Status Dashboard", expanded=False):
+                    st.markdown("""
+                    <div style="
+                        background: rgba(255,255,255,0.05);
+                        backdrop-filter: blur(10px);
+                        border-radius: 12px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                        border: 1px solid rgba(255,255,255,0.08);
+                    ">
+                        <div style="color: #888; font-size: 13px;">
+                            Real-time inventory status overview for ALL items.
+                            <span style="color: #4caf50;">🟢 Healthy</span> | 
+                            <span style="color: #ff9800;">🟠 Low Stock</span> | 
+                            <span style="color: #dc3545;">🔴 Critical</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Display the status dashboard for ALL inventory
+                    if inventory_items:
+                        inventory_status_dashboard(inventory_items, inventory_tracker)
+                    else:
+                        st.info("No inventory data available for status dashboard")  
+                
+                # ============================================================
+                # SECTION 3: GRID VIEW (Expander - Closed by Default)
+                # ============================================================
+                with st.expander("🖼️ View Inventory Grid", expanded=False):
+                    # Show stats
+                    inventory_stats_summary(filtered_items)
+                    
+                    st.markdown("---")
+                    
+                    # Show the grid
+                    if filtered_items:
+                        visual_inventory_grid(filtered_items, columns=3)
+                    else:
+                        st.info("No items match your filters")
+                
+                # ============================================================
+                # SECTION 4: HEAT MAP EXPANDER (SIBLING - NOT NESTED)
+                # ============================================================
+                with st.expander("🔥 View Inventory Heat Map", expanded=False):
+                    st.markdown("""
+                    <div style="
+                        background: rgba(255,255,255,0.05);
+                        backdrop-filter: blur(10px);
+                        border-radius: 12px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                        border: 1px solid rgba(255,255,255,0.08);
+                    ">
+                        <div style="color: #888; font-size: 13px;">
+                            Color-coded overview of inventory stock levels. 
+                            <span style="color: #dc3545;">🔴 Critical</span> | 
+                            <span style="color: #ff9800;">🟠 Low Stock</span> | 
+                            <span style="color: #4caf50;">🟢 Good</span> | 
+                            <span style="color: #2196f3;">🔵 Overstocked</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Use the filtered_items from the visual inventory
+                    if filtered_items:
+                        # Create heatmap data from filtered items
+                        heatmap_data = []
+                        for item_name, details in filtered_items.items():
+                            stock = details.get('stock', 0)
+                            reorder = details.get('reorder', 0)
+                            eoq = details.get('max', stock * 2)
+                            
+                            if stock <= 0:
+                                status = 'Critical'
+                            elif stock < reorder:
+                                status = 'Low'
+                            elif stock >= reorder and stock < eoq:
+                                status = 'Good'
+                            else:
+                                status = 'Overstocked'
+                            
+                            heatmap_data.append({
+                                'Item': item_name,
+                                'Stock': stock,
+                                'Reorder': reorder,
+                                'EOQ': eoq,
+                                'Status': status,
+                                'Category': details.get('category', 'Uncategorized'),
+                                'Unit': details.get('unit', 'kg')
+                            })
+                        
+                        # Add heat map specific filters
+                        col1, col2, col3 = st.columns([2, 2, 1])
+                        with col1:
+                            heatmap_search = st.text_input(
+                                "🔍 Search Items",
+                                placeholder="Type item name...",
+                                key="heatmap_search"
+                            )
+                        with col2:
+                            # Get unique statuses for filter
+                            status_options = ['All'] + sorted(set(item['Status'] for item in heatmap_data))
+                            heatmap_status = st.selectbox(
+                                "📊 Status",
+                                status_options,
+                                key="heatmap_status_filter"
+                            )
+                        with col3:
+                            # Get unique categories for filter
+                            cat_options = ['All'] + sorted(set(item['Category'] for item in heatmap_data))
+                            heatmap_category = st.selectbox(
+                                "📂 Category",
+                                cat_options,
+                                key="heatmap_category_filter"
+                            )
+                        
+                        # Apply heat map filters
+                        filtered_heatmap = []
+                        for item in heatmap_data:
+                            if heatmap_search and heatmap_search.lower() not in item['Item'].lower():
+                                continue
+                            if heatmap_status != 'All' and item['Status'] != heatmap_status:
+                                continue
+                            if heatmap_category != 'All' and item['Category'] != heatmap_category:
+                                continue
+                            filtered_heatmap.append(item)
+                        
+                        # Convert back to dict
+                        heatmap_items = {}
+                        for item in filtered_heatmap:
+                            heatmap_items[item['Item']] = {
+                                'stock': item['Stock'],
+                                'reorder': item['Reorder'],
+                                'max': item['EOQ'],
+                                'unit': item['Unit'],
+                                'category': item['Category']
+                            }
+                        
+                        if heatmap_items:
+                            inventory_heatmap(heatmap_items, title="Inventory Stock Levels", columns=6)
+                        else:
+                            st.info("No items match your heat map filters")
+                    else:
+                        st.info("No inventory items to display in heat map")
+                
+                # ============================================================
+                # SECTION 5: REPLENISHMENT RECOMMENDATIONS EXPANDER (SIBLING - NOT NESTED)
+                # ============================================================
+                with st.expander("🛒 View Replenishment Recommendations", expanded=False):
+                    st.markdown("""
+                    <div style="
+                        background: rgba(255,255,255,0.05);
+                        backdrop-filter: blur(10px);
+                        border-radius: 12px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                        border: 1px solid rgba(255,255,255,0.08);
+                    ">
+                        <div style="color: #888; font-size: 13px;">
+                            Smart replenishment suggestions based on current stock levels.
+                            <span style="color: #dc3545;">🔴 Urgent (≤3 days)</span> | 
+                            <span style="color: #ffc107;">🟡 Medium (4-7 days)</span> | 
+                            <span style="color: #28a745;">🟢 Low (>7 days)</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Use the filtered_items from the visual inventory
+                    if filtered_items:
+                        # Generate recommendations
+                        recommendations_df = get_replenishment_recommendations(filtered_items)
+                        
+                        # Show summary and recommendations
+                        if not recommendations_df.empty:
+                            summary = get_replenishment_summary(recommendations_df)
+                            show_replenishment_summary_cards(summary)
+                            st.markdown("---")
+                            show_replenishment_suggestions(recommendations_df)
+                            
+                            # Export button
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                csv = recommendations_df.to_csv(index=False).encode('utf-8')
+                                st.download_button(
+                                    label="📥 Download Recommendations",
+                                    data=csv,
+                                    file_name=f"replenishment_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
+                                    mime='text/csv'
+                                )
+                            with col2:
+                                st.caption("Download recommendations as CSV for offline review or sharing")
+                        else:
+                            st.success("✅ All items are well-stocked. No replenishment needed at this time.")
+                    else:
+                        st.info("No inventory items to analyze for replenishment")
+        if tab_advanced:
+            with tab_advanced:
+                if df is not None and not df.empty and inventory_items:
+                    # Pass stock_df as well
+                    create_advanced_analytics_tab(analytics, df, inventory_items, stock_df)
+                else:
+                    st.warning("No data available for advanced analytics")
 
     # ============================================================
     # CONTAINER 2: DRY ICE MODE (7 TABS)
@@ -8915,1503 +9012,1513 @@ def main():
         """, unsafe_allow_html=True)
         
         # DRY ICE CONTAINER - 7 Tabs
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-            "📊 Order Analysis",
-            "🔮 Demand Forecast",
-            "📦 Inventory Management",
-            "💰 Cost Optimization",
-            "📋 Recommendations",
-            "🛠️ Maintenance",
-            "📜 Transaction History"
-        ])
-        
-        with tab1:
-            if not df.empty:
-                st.markdown("""
-                <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px;'>
-                Order Pattern & Cost Analysis
-                </h2>
-                """, unsafe_allow_html=True)
-                with st.expander("Visual Analysis", expanded=not mobile_ui.should_collapse_advanced()):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        fig_orders = mobile_ui.optimize_chart_for_mobile(fig_orders)
-                        st.plotly_chart(fig_orders, use_container_width=True,
-                            config=mobile_ui.get_mobile_chart_config())
-                    with col2:
-                        fig_cost_overview = mobile_ui.optimize_chart_for_mobile(fig_cost_overview)
-                        st.plotly_chart(fig_cost_overview, use_container_width=True,
-                            config=mobile_ui.get_mobile_chart_config())
+        visible_tab_names = filter_tabs(DRY_ICE_TAB_REQUIREMENTS)
+        if not visible_tab_names:
+            st.warning("🔒 You don't have permission to view any tabs in this mode.")
+            log_access_denied("view_dry_ice_mode")
+        else:
+            created_tabs = st.tabs(visible_tab_names)
+            tab_lookup = dict(zip(visible_tab_names, created_tabs))
+            tab1 = tab_lookup.get("📊 Order Analysis")
+            tab2 = tab_lookup.get("🔮 Demand Forecast")
+            tab3 = tab_lookup.get("📦 Inventory Management")
+            tab4 = tab_lookup.get("💰 Cost Optimization")
+            tab5 = tab_lookup.get("📋 Recommendations")
+            tab6 = tab_lookup.get("🛠️ Maintenance")
+            tab7 = tab_lookup.get("📜 Transaction History")
 
-                st.markdown("""
-                <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-top: 30px;'>
-                Order Statistics
-                </h2>
-                """, unsafe_allow_html=True)
+        if tab1:
+            with tab1:
+                if not df.empty:
+                    st.markdown("""
+                    <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px;'>
+                    Order Pattern & Cost Analysis
+                    </h2>
+                    """, unsafe_allow_html=True)
+                    with st.expander("Visual Analysis", expanded=not mobile_ui.should_collapse_advanced()):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            fig_orders = mobile_ui.optimize_chart_for_mobile(fig_orders)
+                            st.plotly_chart(fig_orders, use_container_width=True,
+                                config=mobile_ui.get_mobile_chart_config())
+                        with col2:
+                            fig_cost_overview = mobile_ui.optimize_chart_for_mobile(fig_cost_overview)
+                            st.plotly_chart(fig_cost_overview, use_container_width=True,
+                                config=mobile_ui.get_mobile_chart_config())
 
-                stat_cols = st.columns(4)
-                metric_style = """<style>.stMetric {border-left: 3px solid #4e79a7;padding: 10px 15px;border-radius: 5px;background-color: #f9f9f9;}</style>"""
-                st.markdown(metric_style, unsafe_allow_html=True)
+                    st.markdown("""
+                    <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-top: 30px;'>
+                    Order Statistics
+                    </h2>
+                    """, unsafe_allow_html=True)
 
-                metrics = [
-                    ("Average Order", f"{kpis.get('avg_order_size', 0):.1f} kg", "Average order quantity"),
-                    ("Order Std Dev", f"{kpis.get('std_order_size', 0):.1f} kg", "Variability in order sizes"),
-                    ("Monthly Orders", f"{kpis.get('order_frequency', 0):.1f}", "Total orders per month"),
-                    ("Avg Cost/Order", f"KSh {kpis.get('avg_cost_per_order', 0):,.0f}", "Average cost per order")
-                ]
+                    stat_cols = st.columns(4)
+                    metric_style = """<style>.stMetric {border-left: 3px solid #4e79a7;padding: 10px 15px;border-radius: 5px;background-color: #f9f9f9;}</style>"""
+                    st.markdown(metric_style, unsafe_allow_html=True)
 
-                for i, (label, value, help_text) in enumerate(metrics):
-                    with stat_cols[i]:
-                        st.metric(label, value, help=help_text)
+                    metrics = [
+                        ("Average Order", f"{kpis.get('avg_order_size', 0):.1f} kg", "Average order quantity"),
+                        ("Order Std Dev", f"{kpis.get('std_order_size', 0):.1f} kg", "Variability in order sizes"),
+                        ("Monthly Orders", f"{kpis.get('order_frequency', 0):.1f}", "Total orders per month"),
+                        ("Avg Cost/Order", f"KSh {kpis.get('avg_cost_per_order', 0):,.0f}", "Average cost per order")
+                    ]
 
-                st.markdown("""
-                <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-top: 30px;'>
-                Additional Insights
-                </h2>
-                """, unsafe_allow_html=True)
+                    for i, (label, value, help_text) in enumerate(metrics):
+                        with stat_cols[i]:
+                            st.metric(label, value, help=help_text)
 
-                insights_cols = st.columns([1, 1, 1], gap="large")
+                    st.markdown("""
+                    <h2 style='border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-top: 30px;'>
+                    Additional Insights
+                    </h2>
+                    """, unsafe_allow_html=True)
 
-                with insights_cols[0]:
-                    with st.container():
-                        st.markdown("#### 📊 Order Pattern Analysis")
-                        order_counts = df['Order_Quantity_kg'].value_counts().sort_index()
-                        most_common_order = order_counts.idxmax()
-                        st.metric("Most common order size", f"{most_common_order:.0f} kg", f"{order_counts.max()} orders")
+                    insights_cols = st.columns([1, 1, 1], gap="large")
 
-                        df['Weekday'] = df['Date'].dt.day_name()
-                        weekday_pattern = df.groupby('Weekday')['Order_Quantity_kg'].count().sort_values(ascending=False)
-                        st.metric("Busiest day", weekday_pattern.index[0], f"{weekday_pattern.iloc[0]} orders")
+                    with insights_cols[0]:
+                        with st.container():
+                            st.markdown("#### 📊 Order Pattern Analysis")
+                            order_counts = df['Order_Quantity_kg'].value_counts().sort_index()
+                            most_common_order = order_counts.idxmax()
+                            st.metric("Most common order size", f"{most_common_order:.0f} kg", f"{order_counts.max()} orders")
 
-                with insights_cols[1]:
-                    with st.container():
-                        st.markdown("#### ⚙️ Efficiency Metrics")
-                        avg_containers_per_order = df['Containers_Used'].mean()
-                        container_efficiency = (df['Order_Quantity_kg'].sum() / (df['Containers_Used'].sum() * constants.CONTAINER_SIZE)) * 100
-                        st.metric("Avg containers per order", f"{avg_containers_per_order:.1f}")
-                        st.metric("Container fill rate", f"{container_efficiency:.1f}%")
+                            df['Weekday'] = df['Date'].dt.day_name()
+                            weekday_pattern = df.groupby('Weekday')['Order_Quantity_kg'].count().sort_values(ascending=False)
+                            st.metric("Busiest day", weekday_pattern.index[0], f"{weekday_pattern.iloc[0]} orders")
 
-                        product_cost = constants.PRICE_PER_KG
-                        transport_cost = (kpis.get('order_frequency', 0) * constants.TRANSPORT_COST) / kpis.get('current_monthly_volume', 1)
-                        holding_cost = (kpis.get('avg_order_size', 0)/2) * constants.HOLDING_RATE * constants.PRICE_PER_KG / kpis.get('current_monthly_volume', 1)
+                    with insights_cols[1]:
+                        with st.container():
+                            st.markdown("#### ⚙️ Efficiency Metrics")
+                            avg_containers_per_order = df['Containers_Used'].mean()
+                            container_efficiency = (df['Order_Quantity_kg'].sum() / (df['Containers_Used'].sum() * constants.CONTAINER_SIZE)) * 100
+                            st.metric("Avg containers per order", f"{avg_containers_per_order:.1f}")
+                            st.metric("Container fill rate", f"{container_efficiency:.1f}%")
+
+                            product_cost = constants.PRICE_PER_KG
+                            transport_cost = (kpis.get('order_frequency', 0) * constants.TRANSPORT_COST) / kpis.get('current_monthly_volume', 1)
+                            holding_cost = (kpis.get('avg_order_size', 0)/2) * constants.HOLDING_RATE * constants.PRICE_PER_KG / kpis.get('current_monthly_volume', 1)
+                            
+                            avg_sublimation_rate = sum(constants.SUB_LOSS_RANGE) / 2 / 100
+                            sublimation_cost_per_kg = constants.PRICE_PER_KG * avg_sublimation_rate
+                            
+                            current_cost_per_kg = product_cost + transport_cost + holding_cost + sublimation_cost_per_kg
+                            st.metric("Current cost per kg", f"KSh {current_cost_per_kg:.2f}", delta=None)
+
+                    with insights_cols[2]:
+                        with st.container():
+                            st.markdown("#### 📈 Optimization Impact")
+                            if eoq > 0:
+                                order_frequency_reduction = ((kpis.get('order_frequency', 0) - (kpis.get('current_monthly_volume', 0) / eoq)) / kpis.get('order_frequency', 1) * 100)
+                                st.metric("Order frequency reduction", f"{order_frequency_reduction:.1f}%")
+
+                                current_turns = kpis.get('current_monthly_volume', 0) / (kpis.get('avg_order_size', 1)/2)
+                                eoq_turns = 1.3
+                                inventory_turns_improvement = eoq_turns - current_turns
+                                st.metric("Inventory Turns Change", f"{inventory_turns_improvement:+.1f}x")
+
+                            annual_savings = monthly_savings * 12
+                            implementation_cost = 5000
+                            roi = (annual_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
+                            st.metric("Estimated ROI", f"{roi:.0f}%", help="Return on investment from implementing optimizations")
+                else:
+                    st.warning("📊 No order data exists for this analysis period.")
+                    st.info("Use the 'Record Receipt' button in the sidebar to add the first order for this period.")
+        if tab2:
+            with tab2:
+                if not df.empty:
+                    st.markdown("### 🔮 30-Day Demand Forecast")
+                    
+                    # ============================================================
+                    # MODEL SELECTION CONTROLS (Inside Tab 2)
+                    # ============================================================
+                    with st.expander("⚙️ Model Configuration", expanded=False):
+                        st.markdown("#### Select Active Models")
+                        st.caption("Choose which models to use in the ensemble forecast")
+                        st.caption("ℹ️ NeuralProphet is currently disabled (dependency unavailable)")
                         
-                        avg_sublimation_rate = sum(constants.SUB_LOSS_RANGE) / 2 / 100
-                        sublimation_cost_per_kg = constants.PRICE_PER_KG * avg_sublimation_rate
+                        # Model selection with defaults
+                        model_options = {
+                            'Prophet': True,
+                            'ARIMA': True,
+                            'LSTM': True,
+                            'Monte Carlo': True,
+                            'XGBoost': True,
+                            'LightGBM': True,
+                            'RandomForest': True,
+                        }
                         
-                        current_cost_per_kg = product_cost + transport_cost + holding_cost + sublimation_cost_per_kg
-                        st.metric("Current cost per kg", f"KSh {current_cost_per_kg:.2f}", delta=None)
-
-                with insights_cols[2]:
-                    with st.container():
-                        st.markdown("#### 📈 Optimization Impact")
-                        if eoq > 0:
-                            order_frequency_reduction = ((kpis.get('order_frequency', 0) - (kpis.get('current_monthly_volume', 0) / eoq)) / kpis.get('order_frequency', 1) * 100)
-                            st.metric("Order frequency reduction", f"{order_frequency_reduction:.1f}%")
-
-                            current_turns = kpis.get('current_monthly_volume', 0) / (kpis.get('avg_order_size', 1)/2)
-                            eoq_turns = 1.3
-                            inventory_turns_improvement = eoq_turns - current_turns
-                            st.metric("Inventory Turns Change", f"{inventory_turns_improvement:+.1f}x")
-
-                        annual_savings = monthly_savings * 12
-                        implementation_cost = 5000
-                        roi = (annual_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
-                        st.metric("Estimated ROI", f"{roi:.0f}%", help="Return on investment from implementing optimizations")
-            else:
-                st.warning("📊 No order data exists for this analysis period.")
-                st.info("Use the 'Record Receipt' button in the sidebar to add the first order for this period.")
-
-        with tab2:
-            if not df.empty:
-                st.markdown("### 🔮 30-Day Demand Forecast")
-                
-                # ============================================================
-                # MODEL SELECTION CONTROLS (Inside Tab 2)
-                # ============================================================
-                with st.expander("⚙️ Model Configuration", expanded=False):
-                    st.markdown("#### Select Active Models")
-                    st.caption("Choose which models to use in the ensemble forecast")
-                    st.caption("ℹ️ NeuralProphet is currently disabled (dependency unavailable)")
+                        selected_models = []
+                        cols = st.columns(4)
+                        
+                        for idx, (model_name, default) in enumerate(model_options.items()):
+                            with cols[idx % 4]:
+                                if st.checkbox(
+                                    model_name, 
+                                    value=default, 
+                                    key=f"tab_model_{model_name}",
+                                    help=f"Enable/disable {model_name} model"
+                                ):
+                                    internal_name = model_name.lower().replace(' ', '_')
+                                    selected_models.append(internal_name)
+                        
+                        col1, col2, col3 = st.columns([1, 1, 2])
+                        with col1:
+                            if st.button("✅ Select All", use_container_width=True, key="select_all_models"):
+                                for model in model_options.keys():
+                                    st.session_state[f"tab_model_{model}"] = True
+                                st.rerun()
+                        with col2:
+                            if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_models"):
+                                for model in model_options.keys():
+                                    st.session_state[f"tab_model_{model}"] = False
+                                st.rerun()
+                        with col3:
+                            if st.button("🔄 Update Models", use_container_width=True, type="primary", key="update_models_btn"):
+                                st.session_state.selected_models = selected_models
+                                st.session_state.selected_models_count = len(selected_models)
+                                st.cache_data.clear()
+                                
+                                if selected_models:
+                                    st.success(f"✅ Active models: {len(selected_models)}/7")
+                                    st.info(f"📋 {', '.join([m.replace('_', ' ').title() for m in selected_models])}")
+                                else:
+                                    st.warning("⚠️ No models selected! Using all models as fallback.")
+                                
+                                st.rerun()
                     
-                    # Model selection with defaults
-                    model_options = {
-                        'Prophet': True,
-                        'ARIMA': True,
-                        'LSTM': True,
-                        'Monte Carlo': True,
-                        'XGBoost': True,
-                        'LightGBM': True,
-                        'RandomForest': True,
-                    }
+                    st.markdown("---")
                     
-                    selected_models = []
-                    cols = st.columns(4)
+                    # Real-time status
+                    from app.core.realtime_forecast import get_realtime_forecaster
+                    rt_forecaster = get_realtime_forecaster()
                     
-                    for idx, (model_name, default) in enumerate(model_options.items()):
-                        with cols[idx % 4]:
-                            if st.checkbox(
-                                model_name, 
-                                value=default, 
-                                key=f"tab_model_{model_name}",
-                                help=f"Enable/disable {model_name} model"
-                            ):
-                                internal_name = model_name.lower().replace(' ', '_')
-                                selected_models.append(internal_name)
-                    
-                    col1, col2, col3 = st.columns([1, 1, 2])
+                    col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
-                        if st.button("✅ Select All", use_container_width=True, key="select_all_models"):
-                            for model in model_options.keys():
-                                st.session_state[f"tab_model_{model}"] = True
-                            st.rerun()
+                        rt_forecaster.render_realtime_status()
                     with col2:
-                        if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_models"):
-                            for model in model_options.keys():
-                                st.session_state[f"tab_model_{model}"] = False
+                        if st.button("▶️ Start Live Updates"):
+                            rt_forecaster.start(df, 30)
                             st.rerun()
                     with col3:
-                        if st.button("🔄 Update Models", use_container_width=True, type="primary", key="update_models_btn"):
-                            st.session_state.selected_models = selected_models
-                            st.session_state.selected_models_count = len(selected_models)
-                            st.cache_data.clear()
-                            
-                            if selected_models:
-                                st.success(f"✅ Active models: {len(selected_models)}/7")
-                                st.info(f"📋 {', '.join([m.replace('_', ' ').title() for m in selected_models])}")
-                            else:
-                                st.warning("⚠️ No models selected! Using all models as fallback.")
-                            
+                        if st.button("⏹️ Stop Live Updates"):
+                            rt_forecaster.stop()
                             st.rerun()
-                
-                st.markdown("---")
-                
-                # Real-time status
-                from app.core.realtime_forecast import get_realtime_forecaster
-                rt_forecaster = get_realtime_forecaster()
-                
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    rt_forecaster.render_realtime_status()
-                with col2:
-                    if st.button("▶️ Start Live Updates"):
-                        rt_forecaster.start(df, 30)
-                        st.rerun()
-                with col3:
-                    if st.button("⏹️ Stop Live Updates"):
-                        rt_forecaster.stop()
-                        st.rerun()
-                
-                st.markdown("---")
-                
-                # ============================================================
-                # 🔧 FIX: Use create_ensemble_forecast() instead of forecaster.forecast()
-                # ============================================================
-                with st.spinner("Generating ensemble forecast with 7 models..."):
-                    # Aggregate multi-invoice daily data before forecasting
-                    daily_df_tab2 = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
-                    
-                    # Pull the model selection saved by the "Update Models" button
-                    selected_for_forecast = st.session_state.get('selected_models', None)
-                    
-                    # ✅ This sets session state variables automatically
-                    fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
-                        daily_df_tab2, 30, selected_models=selected_for_forecast
-                    )
-                    
-                    # Get ensemble forecast from the returned values
-                    ensemble_forecast = ensemble_forecast_values
-                    
-                    # ============================================================
-                    # Model Performance Dashboard
-                    # ============================================================
-                    st.markdown("---")
-                    st.markdown("#### 📊 Model Performance Dashboard")
-                    
-                    # ✅ Now these session state variables are set!
-                    if 'active_models' in st.session_state and 'model_comparison' in st.session_state:
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric(
-                                "🧠 Active Models",
-                                f"{st.session_state.active_models}/7",
-                                delta=f"{st.session_state.active_models} models"
-                            )
-                        
-                        with col2:
-                            if 'best_model' in st.session_state:
-                                st.metric(
-                                    "🏆 Best Model",
-                                    st.session_state.best_model['name'],
-                                    f"Score: {st.session_state.best_model['score']}"
-                                )
-                            else:
-                                st.metric("🏆 Best Model", "Calculating...")
-                        
-                        with col3:
-                            if 'best_model' in st.session_state:
-                                st.metric(
-                                    "🎯 Accuracy",
-                                    st.session_state.best_model['accuracy'],
-                                    "Auto-selected"
-                                )
-                            else:
-                                st.metric("🎯 Accuracy", "Calculating...")
-                        
-                        with col4:
-                            if 'active_models_list' in st.session_state:
-                                model_list = st.session_state.active_models_list
-                                display_text = ", ".join(model_list[:3])
-                                if len(model_list) > 3:
-                                    display_text += f" +{len(model_list)-3} more"
-                                st.metric("📋 Models", display_text)
-                    
-                    # ============================================================
-                    # Detailed Model Comparison Table
-                    # ============================================================
-                    if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
-                        with st.expander("🔬 View Detailed Model Comparison", expanded=False):
-                            st.dataframe(
-                                st.session_state.model_comparison,
-                                use_container_width=True,
-                                hide_index=True,
-                                height=250
-                            )
-                            
-                            csv = st.session_state.model_comparison.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="📥 Download Model Comparison",
-                                data=csv,
-                                file_name=f"model_comparison_{datetime.now().strftime('%Y%m%d')}.csv",
-                                mime='text/csv'
-                            )
-                    
-                    # ============================================================
-                    # Model Comparison Chart
-                    # ============================================================
-                    if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
-                        try:
-                            chart_data = []
-                            for _, row in st.session_state.model_comparison.iterrows():
-                                try:
-                                    avg = float(row['Avg Forecast (kg)'].replace(',', ''))
-                                    chart_data.append({
-                                        'Model': row['Model'],
-                                        'Avg Forecast': avg,
-                                        'Status': row['Status']
-                                    })
-                                except:
-                                    continue
-                            
-                            if chart_data:
-                                chart_df = pd.DataFrame(chart_data)
-                                
-                                import plotly.express as px
-                                fig_models = px.bar(
-                                    chart_df,
-                                    x='Model',
-                                    y='Avg Forecast',
-                                    title='📊 Model Comparison - Average Forecast',
-                                    color='Status',
-                                    color_discrete_map={'✅ Active': '#28a745'},
-                                    text='Avg Forecast'
-                                )
-                                fig_models.update_traces(
-                                    texttemplate='%{text:.1f} kg',
-                                    textposition='outside'
-                                )
-                                fig_models.update_layout(
-                                    height=350,
-                                    yaxis_title='Average Forecast (kg)',
-                                    showlegend=False,
-                                    xaxis_tickangle=-45
-                                )
-                                st.plotly_chart(fig_models, use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Could not display model comparison chart: {e}")
                     
                     st.markdown("---")
                     
                     # ============================================================
-                    # Scenario Analysis
+                    # 🔧 FIX: Use create_ensemble_forecast() instead of forecaster.forecast()
                     # ============================================================
-                    scenario_results = create_scenario_analysis(ensemble_forecast, df)
-                    
-                    scenario_fig = render_scenario_analysis(scenario_results, 30)
-                    st.plotly_chart(scenario_fig, use_container_width=True)
-                    
-                    st.markdown("#### 📊 Scenario Summary")
-                    render_scenario_summary(scenario_results)
-                    
-                    # ============================================================
-                    # Model Performance Details
-                    # ============================================================
-                    with st.expander("🔬 Model Performance Details", expanded=False):
-                        st.markdown("#### 📈 Individual Model Forecasts")
+                    with st.spinner("Generating ensemble forecast with 7 models..."):
+                        # Aggregate multi-invoice daily data before forecasting
+                        daily_df_tab2 = df.set_index('Date').resample('D')['Order_Quantity_kg'].sum().reset_index()
                         
-                        model_cols = st.columns(4)
-                        col_idx = 0
+                        # Pull the model selection saved by the "Update Models" button
+                        selected_for_forecast = st.session_state.get('selected_models', None)
                         
-                        # Get results from the returned values
-                        # We need to re-run forecast to get individual model results
-                        # Or we can use the model_forecasts from create_ensemble_forecast
-                        if model_forecasts:
-                            for name, stats in model_forecasts.items():
-                                if name != 'External Factors' and isinstance(stats, dict):
-                                    with model_cols[col_idx % 4]:
-                                        st.metric(
-                                            name,
-                                            f"{stats['avg']:.1f} kg/day",
-                                            f"min: {stats['min']:.1f} | max: {stats['max']:.1f}"
-                                        )
-                                    col_idx += 1
-                        
-                        # Show metrics
-                        st.markdown("#### 📈 Accuracy Metrics (Backtest)")
-                        st.caption(
-                            "Trains on all data except the last 30 days, forecasts those 30 days, "
-                            "then compares against what actually happened. This is separate from "
-                            "the live 30-day-ahead forecast above, which has no ground truth yet."
+                        # ✅ This sets session state variables automatically
+                        fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy = create_ensemble_forecast(
+                            daily_df_tab2, 30, selected_models=selected_for_forecast
                         )
                         
-                        if len(daily_df_tab2) <= 60:
-                            st.info("Need more than 60 days of history to run a reliable backtest.")
-                        else:
-                            run_backtest = st.button(
-                                "🧪 Run Backtest",
-                                key="run_backtest_btn",
-                                help="Retrains all selected models on held-out data. Takes as long as the main forecast."
+                        # Get ensemble forecast from the returned values
+                        ensemble_forecast = ensemble_forecast_values
+                        
+                        # ============================================================
+                        # Model Performance Dashboard
+                        # ============================================================
+                        st.markdown("---")
+                        st.markdown("#### 📊 Model Performance Dashboard")
+                        
+                        # ✅ Now these session state variables are set!
+                        if 'active_models' in st.session_state and 'model_comparison' in st.session_state:
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric(
+                                    "🧠 Active Models",
+                                    f"{st.session_state.active_models}/7",
+                                    delta=f"{st.session_state.active_models} models"
+                                )
+                            
+                            with col2:
+                                if 'best_model' in st.session_state:
+                                    st.metric(
+                                        "🏆 Best Model",
+                                        st.session_state.best_model['name'],
+                                        f"Score: {st.session_state.best_model['score']}"
+                                    )
+                                else:
+                                    st.metric("🏆 Best Model", "Calculating...")
+                            
+                            with col3:
+                                if 'best_model' in st.session_state:
+                                    st.metric(
+                                        "🎯 Accuracy",
+                                        st.session_state.best_model['accuracy'],
+                                        "Auto-selected"
+                                    )
+                                else:
+                                    st.metric("🎯 Accuracy", "Calculating...")
+                            
+                            with col4:
+                                if 'active_models_list' in st.session_state:
+                                    model_list = st.session_state.active_models_list
+                                    display_text = ", ".join(model_list[:3])
+                                    if len(model_list) > 3:
+                                        display_text += f" +{len(model_list)-3} more"
+                                    st.metric("📋 Models", display_text)
+                        
+                        # ============================================================
+                        # Detailed Model Comparison Table
+                        # ============================================================
+                        if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
+                            with st.expander("🔬 View Detailed Model Comparison", expanded=False):
+                                st.dataframe(
+                                    st.session_state.model_comparison,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    height=250
+                                )
+                                
+                                csv = st.session_state.model_comparison.to_csv(index=False).encode('utf-8')
+                                st.download_button(
+                                    label="📥 Download Model Comparison",
+                                    data=csv,
+                                    file_name=f"model_comparison_{datetime.now().strftime('%Y%m%d')}.csv",
+                                    mime='text/csv'
+                                )
+                        
+                        # ============================================================
+                        # Model Comparison Chart
+                        # ============================================================
+                        if 'model_comparison' in st.session_state and not st.session_state.model_comparison.empty:
+                            try:
+                                chart_data = []
+                                for _, row in st.session_state.model_comparison.iterrows():
+                                    try:
+                                        avg = float(row['Avg Forecast (kg)'].replace(',', ''))
+                                        chart_data.append({
+                                            'Model': row['Model'],
+                                            'Avg Forecast': avg,
+                                            'Status': row['Status']
+                                        })
+                                    except:
+                                        continue
+                                
+                                if chart_data:
+                                    chart_df = pd.DataFrame(chart_data)
+                                    
+                                    import plotly.express as px
+                                    fig_models = px.bar(
+                                        chart_df,
+                                        x='Model',
+                                        y='Avg Forecast',
+                                        title='📊 Model Comparison - Average Forecast',
+                                        color='Status',
+                                        color_discrete_map={'✅ Active': '#28a745'},
+                                        text='Avg Forecast'
+                                    )
+                                    fig_models.update_traces(
+                                        texttemplate='%{text:.1f} kg',
+                                        textposition='outside'
+                                    )
+                                    fig_models.update_layout(
+                                        height=350,
+                                        yaxis_title='Average Forecast (kg)',
+                                        showlegend=False,
+                                        xaxis_tickangle=-45
+                                    )
+                                    st.plotly_chart(fig_models, use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"Could not display model comparison chart: {e}")
+                        
+                        st.markdown("---")
+                        
+                        # ============================================================
+                        # Scenario Analysis
+                        # ============================================================
+                        scenario_results = create_scenario_analysis(ensemble_forecast, df)
+                        
+                        scenario_fig = render_scenario_analysis(scenario_results, 30)
+                        st.plotly_chart(scenario_fig, use_container_width=True)
+                        
+                        st.markdown("#### 📊 Scenario Summary")
+                        render_scenario_summary(scenario_results)
+                        
+                        # ============================================================
+                        # Model Performance Details
+                        # ============================================================
+                        with st.expander("🔬 Model Performance Details", expanded=False):
+                            st.markdown("#### 📈 Individual Model Forecasts")
+                            
+                            model_cols = st.columns(4)
+                            col_idx = 0
+                            
+                            # Get results from the returned values
+                            # We need to re-run forecast to get individual model results
+                            # Or we can use the model_forecasts from create_ensemble_forecast
+                            if model_forecasts:
+                                for name, stats in model_forecasts.items():
+                                    if name != 'External Factors' and isinstance(stats, dict):
+                                        with model_cols[col_idx % 4]:
+                                            st.metric(
+                                                name,
+                                                f"{stats['avg']:.1f} kg/day",
+                                                f"min: {stats['min']:.1f} | max: {stats['max']:.1f}"
+                                            )
+                                        col_idx += 1
+                            
+                            # Show metrics
+                            st.markdown("#### 📈 Accuracy Metrics (Backtest)")
+                            st.caption(
+                                "Trains on all data except the last 30 days, forecasts those 30 days, "
+                                "then compares against what actually happened. This is separate from "
+                                "the live 30-day-ahead forecast above, which has no ground truth yet."
                             )
                             
-                            if run_backtest:
-                                try:
-                                    backtest_train = daily_df_tab2.iloc[:-30].reset_index(drop=True)
-                                    backtest_actual = daily_df_tab2.iloc[-30:]['Order_Quantity_kg'].values
-                                    
-                                    with st.spinner("Running backtest (retraining models on held-out data)..."):
-                                        _, backtest_forecast, _, _ = create_ensemble_forecast(
-                                            backtest_train, 30, selected_models=selected_for_forecast
-                                        )
-                                    
-                                    historical_values = backtest_actual
-                                    forecast_values = np.array(backtest_forecast[:len(historical_values)])
-                                    
-                                    wape = np.sum(np.abs(historical_values - forecast_values)) / max(np.sum(historical_values), 1) * 100
-                                    mae = np.mean(np.abs(historical_values - forecast_values))
-                                    
-                                    ss_res = np.sum((historical_values - forecast_values) ** 2)
-                                    ss_tot = np.sum((historical_values - np.mean(historical_values)) ** 2)
-                                    r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                                    
-                                    actual_direction = np.sign(np.diff(historical_values))
-                                    pred_direction = np.sign(np.diff(forecast_values[:len(historical_values)]))
-                                    direction_accuracy = np.mean(actual_direction == pred_direction) * 100
-                                    
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    with col1:
-                                        st.metric("📊 WAPE", f"{wape:.1f}%")
-                                    with col2:
-                                        st.metric("📉 MAE", f"{mae:.1f}")
-                                    with col3:
-                                        st.metric("📈 R²", f"{r2:.2f}")
-                                    with col4:
-                                        st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
-                                    
-                                    metrics_valid = all(np.isfinite(v) for v in [wape, mae, r2, direction_accuracy])
-                                    if not metrics_valid:
-                                        quality_score = 0.0
-                                        st.markdown("#### 📊 Forecast Quality Score")
-                                        st.progress(0.0, text="0% — invalid metrics")
-                                        st.error("⚠️ Backtest produced NaN metrics — one of the ensemble models "
-                                                "(check NeuralProphet) likely returned NaN forecasts. "
-                                                "Quality score forced to 0 instead of falsely showing 100%.")
-                                    else:
-                                        mean_actual = max(np.mean(historical_values), 1)
-                                        mae_normalized = min(mae / mean_actual, 1)
-                                        r2_normalized = 0 if r2 < 0 else min(r2, 1)
-                                        direction_normalized = direction_accuracy / 100
-                                        wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
-
-                                        quality_score = (
-                                            0.4 * (1 - mae_normalized) +
-                                            0.3 * r2_normalized +
-                                            0.3 * direction_normalized
-                                        ) * wape_penalty * 100
-                                        quality_score = round(max(0, min(100, quality_score)), 1)
-
-                                        st.markdown("#### 📊 Forecast Quality Score")
-                                        st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
-
-                                        if quality_score < 30:
-                                            st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
-                                        elif quality_score < 50:
-                                            st.info("📊 Forecast quality is moderate. Some models may need tuning.")
-                                        else:
-                                            st.success("✅ Forecast quality is good.")
-                                        
-                                except Exception as e:
-                                    st.warning(f"Could not run backtest: {e}")
-            else:
-                st.warning("📊 No order data found for this period")
-
-        with tab3:
-            if not df.empty:
-                st.markdown("### 📦 Proactive Inventory Policy")
-                st.success("✅ Inventory policy is dynamically calculated using the live forecast data from Tab 2.")
-                
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.markdown("#### Economic Order Quantity (EOQ)")
-                    st.markdown("**Where:**")
-                    st.markdown(f"<span style='color:green;'>- D = Forecasted Monthly Demand = {monthly_demand_input:,.1f} kg</span>", unsafe_allow_html=True)
-                    st.write(f"- S = Ordering Cost = KSh {constants.TRANSPORT_COST:,.2f}")
-                    st.write(f"- H = Holding Rate = {constants.HOLDING_RATE*100:.1f}%")
-                    st.write(f"- C = Unit Cost = KSh {constants.PRICE_PER_KG:.2f}/kg")
-                    st.markdown(f"<p style='color:green; font-weight:bold;'>Result: EOQ = {eoq:.1f} kg</p>", unsafe_allow_html=True)
-
-                with col2:
-                    st.markdown("#### Safety Stock")
-                    st.markdown("**Where:**")
-                    st.write(f"- z = Z-score ({constants.SERVICE_LEVEL*100:.0f}%) = {z_score:.2f}")
-                    st.markdown(f"<span style='color:green;'>- σ = Forecast Demand Std Dev = {demand_stddev_input:,.1f} kg</span>", unsafe_allow_html=True)
-                    st.write(f"- LT = Lead Time = {constants.LEAD_TIME_DAYS} days")
-                    st.write(f"- Sublimation Rate = {avg_sublimation:.2%}")
-                    st.markdown(f"<p style='color:green; font-weight:bold;'>Result: Safety Stock = {safety_stock:.1f} kg</p>", unsafe_allow_html=True)
-
-                st.markdown("### 🔄 Reorder Point")
-                st.markdown(f"**Reorder Point = ({adjusted_demand:.1f}/30 × {constants.LEAD_TIME_DAYS}) + {safety_stock:.1f} = {reorder_point:.1f} kg**")
-                st.caption("*This policy is now dynamically updated based on the 30-day demand forecast.*")
-
-                st.markdown("### 📊 Recommended Inventory Policy")
-                policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
-                st.dataframe(policy_data, use_container_width=True, height=180)
-
-                st.markdown("### 🎯 EOQ Implementation Impact")
-                # The savings are now calculated in the main block. We just display them here.
-                annual_savings_percentage = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
-
-                impact_cols = st.columns(4)
-                with impact_cols[0]:
-                    order_freq_delta_percent = ((eoq_monthly_orders - current_monthly_orders) / current_monthly_orders) * 100 if current_monthly_orders > 0 else 0
-                    st.metric("Order Frequency Change", f"{eoq_monthly_orders:.1f} orders/month", f"{order_freq_delta_percent:.1f}%")
-                with impact_cols[1]:
-                    # THIS VALUE IS NOW CONSISTENT
-                    st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", f"{annual_savings_percentage:.1f}% of total")
-
-                implementation_cost = constants.IMPLEMENTATION_COST
-                payback_period = implementation_cost / (annual_transport_savings / 12) if annual_transport_savings > 0 else 0
-                roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else 0
-                with impact_cols[2]:
-                    st.metric("Payback Period", f"{payback_period:.1f} months")
-                with impact_cols[3]:
-                    st.metric("Implementation ROI", f"{roi_percentage:.0f}%")
-
-                st.markdown("### 🔄 Current vs. Forecast-Driven System Comparison")
-                comparison_data = {
-                    'Metric': ['Orders per Month', 'Avg. Order Size (kg)', 'Monthly Transport Cost (KSh)', 'Annual Transport Cost (KSh)'],
-                    'Current System (Historical)': [
-                        f"{current_monthly_orders:.1f}", f"{kpis.get('avg_order_size', 0):.0f}",
-                        f"{current_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{annual_transport_cost:,.0f}"
-                    ],
-                    'EOQ System (Forecast-Driven)': [
-                        f"{eoq_monthly_orders:.1f}", f"{eoq:.0f}",
-                        f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
-                    ]
-                }
-                st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, height=185, hide_index=True)
-
-                st.markdown("#### 📈 5-Year Cumulative Savings Projection")
-                years = list(range(1, 6))
-                cumulative_savings = [annual_transport_savings * year for year in years]
-                fig_savings = go.Figure()
-                fig_savings.add_trace(go.Scatter(x=years, y=cumulative_savings, name="Cumulative Savings", line=dict(color='#3498db', width=3), mode='lines+markers'))
-                fig_savings.add_hline(y=implementation_cost, line_dash="dot", annotation_text="Implementation Cost", line_color="red")
-                fig_savings.update_layout(title="Projected Savings from Adopting Forecast-Driven EOQ", xaxis_title="Year", yaxis_title="Cumulative Savings (KSh)", height=mobile_ui.get_chart_height())
-                fig_savings = mobile_ui.optimize_chart_for_mobile(fig_savings)
-                st.plotly_chart(fig_savings, use_container_width=True,
-                    config=mobile_ui.get_mobile_chart_config())
-                            # --- ITEM-LEVEL OPTIMIZATION FOR ALL INVENTORY ---
-                st.divider()
-                st.markdown("### 📦 Item-Level Optimization for All Inventory")
-                
-                with st.expander("🔧 Calculate EOQ for Selected Items", expanded=False):
-                    # Get stock data with pricing
-                    try:
-                        gsheet = GoogleSheetReader()
-                        if gsheet.authenticate():
-                            stock_df = gsheet.get_stock_with_pricing()
-                            
-                            if not stock_df.empty and 'ITEM_NAME' in stock_df.columns and 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                                # Convert to numeric
-                                stock_df['QUANTITY'] = pd.to_numeric(stock_df['QUANTITY'], errors='coerce')
-                                stock_df['UNIT PRICE'] = pd.to_numeric(stock_df['UNIT PRICE'], errors='coerce')
-                                
-                                # Drop rows with missing values
-                                stock_df = stock_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
-                                
-                                if not stock_df.empty:
-                                    # Let user select a category or item
-                                    cat_options = ['All Categories'] + sorted(stock_df['ITEM_CATEGORY'].dropna().unique().tolist())
-                                    selected_cat = st.selectbox("Select Category", cat_options, key="eoq_category")
-                                    
-                                    # Filter items
-                                    if selected_cat != 'All Categories':
-                                        items_df = stock_df[stock_df['ITEM_CATEGORY'] == selected_cat]
-                                    else:
-                                        items_df = stock_df
-                                    
-                                    # Show items with EOQ calculation
-                                    st.markdown("#### EOQ for Selected Items")
-                                    
-                                    # Let user set ordering cost and holding rate
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        order_cost = st.number_input(
-                                            "Ordering Cost (KSh)", 
-                                            value=float(constants.TRANSPORT_COST), 
-                                            step=100.0, 
-                                            key="eoq_order_cost"
-                                        )
-                                    with col2:
-                                        holding_rate = st.number_input(
-                                            "Holding Rate (%)", 
-                                            value=float(constants.HOLDING_RATE * 100), 
-                                            step=0.5, 
-                                            key="eoq_holding_rate"
-                                        ) / 100
-                                    
-                                    # Calculate EOQ for items
-                                    if st.button("Calculate EOQ for Items", key="calc_eoq"):
-                                        eoq_results = []
-                                        for _, row in items_df.iterrows():
-                                            if pd.notna(row['UNIT PRICE']) and pd.notna(row['QUANTITY']) and row['QUANTITY'] > 0:
-                                                # Estimate annual demand (assuming current stock is monthly demand)
-                                                annual_demand = row['QUANTITY'] * 12
-                                                unit_price = row['UNIT PRICE']
-                                                
-                                                if unit_price > 0 and holding_rate > 0:
-                                                    try:
-                                                        eoq_val = math.sqrt((2 * annual_demand * order_cost) / (holding_rate * unit_price))
-                                                        eoq_results.append({
-                                                            'Item': row['ITEM_NAME'],
-                                                            'Category': row['ITEM_CATEGORY'],
-                                                            'Annual Demand': annual_demand,
-                                                            'Unit Price': unit_price,
-                                                            'EOQ': eoq_val,
-                                                            'Orders/Year': annual_demand / eoq_val if eoq_val > 0 else 0
-                                                        })
-                                                    except:
-                                                        pass
-                                        
-                                        if eoq_results:
-                                            eoq_df = pd.DataFrame(eoq_results)
-                                            st.dataframe(eoq_df, use_container_width=True, hide_index=True)
-                                            
-                                            # Download EOQ results
-                                            csv = eoq_df.to_csv(index=False).encode('utf-8')
-                                            st.download_button(
-                                                label="📥 Download EOQ Results",
-                                                data=csv,
-                                                file_name=f"eoq_results_{datetime.now().strftime('%Y%m%d')}.csv",
-                                                mime='text/csv'
-                                            )
-                                            
-                                            # Show summary stats
-                                            st.markdown("#### EOQ Summary")
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric("Total Items", len(eoq_df))
-                                            with col2:
-                                                avg_eoq = eoq_df['EOQ'].mean()
-                                                st.metric("Avg EOQ", f"{avg_eoq:.0f}")
-                                            with col3:
-                                                avg_orders = eoq_df['Orders/Year'].mean()
-                                                st.metric("Avg Orders/Year", f"{avg_orders:.1f}")
-                                        else:
-                                            st.warning("No items with valid price and quantity data found.")
-                                else:
-                                    st.warning("No valid inventory data found. Please check Google Sheets connection.")
+                            if len(daily_df_tab2) <= 60:
+                                st.info("Need more than 60 days of history to run a reliable backtest.")
                             else:
-                                st.warning("Inventory data missing required columns (ITEM_NAME, UNIT PRICE, QUANTITY).")
-                    except Exception as e:
-                        st.error(f"Error loading inventory data for EOQ calculation: {e}")
-                
-                # --- BULK EOQ CALCULATION FOR ALL ITEMS ---
-                st.divider()
-                st.markdown("### 📊 Bulk EOQ Calculation for All Items")
-                
-                with st.expander("📊 Calculate EOQ for All Inventory Items", expanded=False):
-                    try:
-                        gsheet = GoogleSheetReader()
-                        if gsheet.authenticate():
-                            stock_df = gsheet.get_stock_with_pricing()
-                            
-                            if not stock_df.empty and 'ITEM_NAME' in stock_df.columns and 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                                # Convert to numeric
-                                stock_df['QUANTITY'] = pd.to_numeric(stock_df['QUANTITY'], errors='coerce')
-                                stock_df['UNIT PRICE'] = pd.to_numeric(stock_df['UNIT PRICE'], errors='coerce')
-                                stock_df = stock_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                                run_backtest = st.button(
+                                    "🧪 Run Backtest",
+                                    key="run_backtest_btn",
+                                    help="Retrains all selected models on held-out data. Takes as long as the main forecast."
+                                )
                                 
-                                if not stock_df.empty:
-                                    # Parameters
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        order_cost = st.number_input(
-                                            "Ordering Cost (KSh)", 
-                                            value=float(constants.TRANSPORT_COST), 
-                                            step=100.0, 
-                                            key="bulk_order_cost"
-                                        )
-                                    with col2:
-                                        holding_rate = st.number_input(
-                                            "Holding Rate (%)", 
-                                            value=float(constants.HOLDING_RATE * 100), 
-                                            step=0.5, 
-                                            key="bulk_holding_rate"
-                                        ) / 100
-                                    
-                                    # Category filter
-                                    cat_options = ['All Categories'] + sorted(stock_df['ITEM_CATEGORY'].dropna().unique().tolist())
-                                    selected_cat = st.selectbox("Filter by Category", cat_options, key="bulk_category")
-                                    
-                                    # Filter items
-                                    if selected_cat != 'All Categories':
-                                        items_df = stock_df[stock_df['ITEM_CATEGORY'] == selected_cat]
-                                    else:
-                                        items_df = stock_df
-                                    
-                                    st.caption(f"📊 Calculating EOQ for {len(items_df)} items")
-                                    
-                                    if st.button("🚀 Calculate EOQ for All Items", key="bulk_calc_eoq"):
-                                        results = []
-                                        for _, row in items_df.iterrows():
-                                            if row['QUANTITY'] > 0 and row['UNIT PRICE'] > 0 and holding_rate > 0:
-                                                annual_demand = row['QUANTITY'] * 12
-                                                eoq_val = math.sqrt((2 * annual_demand * order_cost) / (holding_rate * row['UNIT PRICE']))
-                                                current_orders = annual_demand / row['QUANTITY'] if row['QUANTITY'] > 0 else 0
-                                                optimal_orders = annual_demand / eoq_val if eoq_val > 0 else 0
-                                                
-                                                results.append({
-                                                    'Item': row['ITEM_NAME'],
-                                                    'Category': row['ITEM_CATEGORY'],
-                                                    'Current Stock': row['QUANTITY'],
-                                                    'Unit Price': row['UNIT PRICE'],
-                                                    'Annual Demand': annual_demand,
-                                                    'EOQ': eoq_val,
-                                                    'Current Orders/Year': current_orders,
-                                                    'Optimal Orders/Year': optimal_orders,
-                                                    'Potential Savings': (current_orders - optimal_orders) * order_cost if eoq_val > 0 else 0
-                                                })
+                                if run_backtest:
+                                    try:
+                                        backtest_train = daily_df_tab2.iloc[:-30].reset_index(drop=True)
+                                        backtest_actual = daily_df_tab2.iloc[-30:]['Order_Quantity_kg'].values
                                         
-                                        if results:
-                                            eoq_df = pd.DataFrame(results)
-                                            
-                                            # Summary metrics
-                                            st.divider()
-                                            st.markdown("#### 📊 EOQ Summary")
-                                            col1, col2, col3, col4 = st.columns(4)
-                                            with col1:
-                                                st.metric("📦 Total Items", len(eoq_df))
-                                            with col2:
-                                                total_savings = eoq_df['Potential Savings'].sum()
-                                                st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
-                                            with col3:
-                                                avg_eoq = eoq_df['EOQ'].mean()
-                                                st.metric("📊 Average EOQ", f"{avg_eoq:.0f}")
-                                            with col4:
-                                                items_below = len(eoq_df[eoq_df['Current Stock'] < eoq_df['EOQ']])
-                                                st.metric("⚠️ Items Below EOQ", items_below)
-                                            
-                                            # Show full table
-                                            st.markdown("#### 📋 Detailed EOQ Results")
-                                            st.dataframe(eoq_df, use_container_width=True, hide_index=True)
-                                            
-                                            # Download button
-                                            csv = eoq_df.to_csv(index=False).encode('utf-8')
-                                            st.download_button(
-                                                label="📥 Download EOQ Results CSV",
-                                                data=csv,
-                                                file_name=f"bulk_eoq_results_{datetime.now().strftime('%Y%m%d')}.csv",
-                                                mime='text/csv'
+                                        with st.spinner("Running backtest (retraining models on held-out data)..."):
+                                            _, backtest_forecast, _, _ = create_ensemble_forecast(
+                                                backtest_train, 30, selected_models=selected_for_forecast
                                             )
-                                            
-                                            # Recommendations
-                                            st.divider()
-                                            st.markdown("#### 📋 Recommendations")
-                                            
-                                            if items_below > 0:
-                                                st.warning(f"⚠️ {items_below} items have stock below EOQ level")
-                                                
-                                                # Show top 10 items needing attention
-                                                low_items = eoq_df[eoq_df['Current Stock'] < eoq_df['EOQ']].sort_values('Potential Savings', ascending=False).head(10)
-                                                st.markdown("**Top 10 Items Needing Reorder:**")
-                                                st.dataframe(
-                                                    low_items[['Item', 'Category', 'Current Stock', 'EOQ', 'Potential Savings']],
-                                                    use_container_width=True,
-                                                    hide_index=True
-                                                )
+                                        
+                                        historical_values = backtest_actual
+                                        forecast_values = np.array(backtest_forecast[:len(historical_values)])
+                                        
+                                        wape = np.sum(np.abs(historical_values - forecast_values)) / max(np.sum(historical_values), 1) * 100
+                                        mae = np.mean(np.abs(historical_values - forecast_values))
+                                        
+                                        ss_res = np.sum((historical_values - forecast_values) ** 2)
+                                        ss_tot = np.sum((historical_values - np.mean(historical_values)) ** 2)
+                                        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                                        
+                                        actual_direction = np.sign(np.diff(historical_values))
+                                        pred_direction = np.sign(np.diff(forecast_values[:len(historical_values)]))
+                                        direction_accuracy = np.mean(actual_direction == pred_direction) * 100
+                                        
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.metric("📊 WAPE", f"{wape:.1f}%")
+                                        with col2:
+                                            st.metric("📉 MAE", f"{mae:.1f}")
+                                        with col3:
+                                            st.metric("📈 R²", f"{r2:.2f}")
+                                        with col4:
+                                            st.metric("🎯 Direction Accuracy", f"{direction_accuracy:.1f}%")
+                                        
+                                        metrics_valid = all(np.isfinite(v) for v in [wape, mae, r2, direction_accuracy])
+                                        if not metrics_valid:
+                                            quality_score = 0.0
+                                            st.markdown("#### 📊 Forecast Quality Score")
+                                            st.progress(0.0, text="0% — invalid metrics")
+                                            st.error("⚠️ Backtest produced NaN metrics — one of the ensemble models "
+                                                    "(check NeuralProphet) likely returned NaN forecasts. "
+                                                    "Quality score forced to 0 instead of falsely showing 100%.")
+                                        else:
+                                            mean_actual = max(np.mean(historical_values), 1)
+                                            mae_normalized = min(mae / mean_actual, 1)
+                                            r2_normalized = 0 if r2 < 0 else min(r2, 1)
+                                            direction_normalized = direction_accuracy / 100
+                                            wape_penalty = max(0, min(1, 1 - (wape - 50) / 150)) if wape > 50 else 1
+
+                                            quality_score = (
+                                                0.4 * (1 - mae_normalized) +
+                                                0.3 * r2_normalized +
+                                                0.3 * direction_normalized
+                                            ) * wape_penalty * 100
+                                            quality_score = round(max(0, min(100, quality_score)), 1)
+
+                                            st.markdown("#### 📊 Forecast Quality Score")
+                                            st.progress(quality_score / 100, text=f"{quality_score:.0f}%")
+
+                                            if quality_score < 30:
+                                                st.warning("⚠️ Forecast quality is low. Consider retraining models with more data.")
+                                            elif quality_score < 50:
+                                                st.info("📊 Forecast quality is moderate. Some models may need tuning.")
                                             else:
-                                                st.success("✅ All items have stock above EOQ level")
-                                                
-                                            # Category breakdown
-                                            st.divider()
-                                            st.markdown("#### 📊 Category Breakdown")
-                                            category_summary = eoq_df.groupby('Category').agg({
-                                                'Item': 'count',
-                                                'Potential Savings': 'sum'
-                                            }).reset_index()
-                                            category_summary.columns = ['Category', 'Items', 'Total Savings']
-                                            st.dataframe(category_summary, use_container_width=True, hide_index=True)
+                                                st.success("✅ Forecast quality is good.")
+                                            
+                                    except Exception as e:
+                                        st.warning(f"Could not run backtest: {e}")
+                else:
+                    st.warning("📊 No order data found for this period")
+
+        if tab3:
+            with tab3:
+                if not df.empty:
+                    st.markdown("### 📦 Proactive Inventory Policy")
+                    st.success("✅ Inventory policy is dynamically calculated using the live forecast data from Tab 2.")
+                    
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown("#### Economic Order Quantity (EOQ)")
+                        st.markdown("**Where:**")
+                        st.markdown(f"<span style='color:green;'>- D = Forecasted Monthly Demand = {monthly_demand_input:,.1f} kg</span>", unsafe_allow_html=True)
+                        st.write(f"- S = Ordering Cost = KSh {constants.TRANSPORT_COST:,.2f}")
+                        st.write(f"- H = Holding Rate = {constants.HOLDING_RATE*100:.1f}%")
+                        st.write(f"- C = Unit Cost = KSh {constants.PRICE_PER_KG:.2f}/kg")
+                        st.markdown(f"<p style='color:green; font-weight:bold;'>Result: EOQ = {eoq:.1f} kg</p>", unsafe_allow_html=True)
+
+                    with col2:
+                        st.markdown("#### Safety Stock")
+                        st.markdown("**Where:**")
+                        st.write(f"- z = Z-score ({constants.SERVICE_LEVEL*100:.0f}%) = {z_score:.2f}")
+                        st.markdown(f"<span style='color:green;'>- σ = Forecast Demand Std Dev = {demand_stddev_input:,.1f} kg</span>", unsafe_allow_html=True)
+                        st.write(f"- LT = Lead Time = {constants.LEAD_TIME_DAYS} days")
+                        st.write(f"- Sublimation Rate = {avg_sublimation:.2%}")
+                        st.markdown(f"<p style='color:green; font-weight:bold;'>Result: Safety Stock = {safety_stock:.1f} kg</p>", unsafe_allow_html=True)
+
+                    st.markdown("### 🔄 Reorder Point")
+                    st.markdown(f"**Reorder Point = ({adjusted_demand:.1f}/30 × {constants.LEAD_TIME_DAYS}) + {safety_stock:.1f} = {reorder_point:.1f} kg**")
+                    st.caption("*This policy is now dynamically updated based on the 30-day demand forecast.*")
+
+                    st.markdown("### 📊 Recommended Inventory Policy")
+                    policy_data = pd.DataFrame({'Metric': ['Economic Order Quantity', 'Safety Stock', 'Reorder Point', 'Maximum Inventory'], 'Value (kg)': [eoq, safety_stock, reorder_point, eoq + safety_stock]})
+                    st.dataframe(policy_data, use_container_width=True, height=180)
+
+                    st.markdown("### 🎯 EOQ Implementation Impact")
+                    # The savings are now calculated in the main block. We just display them here.
+                    annual_savings_percentage = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
+
+                    impact_cols = st.columns(4)
+                    with impact_cols[0]:
+                        order_freq_delta_percent = ((eoq_monthly_orders - current_monthly_orders) / current_monthly_orders) * 100 if current_monthly_orders > 0 else 0
+                        st.metric("Order Frequency Change", f"{eoq_monthly_orders:.1f} orders/month", f"{order_freq_delta_percent:.1f}%")
+                    with impact_cols[1]:
+                        # THIS VALUE IS NOW CONSISTENT
+                        st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", f"{annual_savings_percentage:.1f}% of total")
+
+                    implementation_cost = constants.IMPLEMENTATION_COST
+                    payback_period = implementation_cost / (annual_transport_savings / 12) if annual_transport_savings > 0 else 0
+                    roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else 0
+                    with impact_cols[2]:
+                        st.metric("Payback Period", f"{payback_period:.1f} months")
+                    with impact_cols[3]:
+                        st.metric("Implementation ROI", f"{roi_percentage:.0f}%")
+
+                    st.markdown("### 🔄 Current vs. Forecast-Driven System Comparison")
+                    comparison_data = {
+                        'Metric': ['Orders per Month', 'Avg. Order Size (kg)', 'Monthly Transport Cost (KSh)', 'Annual Transport Cost (KSh)'],
+                        'Current System (Historical)': [
+                            f"{current_monthly_orders:.1f}", f"{kpis.get('avg_order_size', 0):.0f}",
+                            f"{current_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{annual_transport_cost:,.0f}"
+                        ],
+                        'EOQ System (Forecast-Driven)': [
+                            f"{eoq_monthly_orders:.1f}", f"{eoq:.0f}",
+                            f"{eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}", f"{eoq_monthly_orders * 12 * constants.TRANSPORT_COST:,.0f}"
+                        ]
+                    }
+                    st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, height=185, hide_index=True)
+
+                    st.markdown("#### 📈 5-Year Cumulative Savings Projection")
+                    years = list(range(1, 6))
+                    cumulative_savings = [annual_transport_savings * year for year in years]
+                    fig_savings = go.Figure()
+                    fig_savings.add_trace(go.Scatter(x=years, y=cumulative_savings, name="Cumulative Savings", line=dict(color='#3498db', width=3), mode='lines+markers'))
+                    fig_savings.add_hline(y=implementation_cost, line_dash="dot", annotation_text="Implementation Cost", line_color="red")
+                    fig_savings.update_layout(title="Projected Savings from Adopting Forecast-Driven EOQ", xaxis_title="Year", yaxis_title="Cumulative Savings (KSh)", height=mobile_ui.get_chart_height())
+                    fig_savings = mobile_ui.optimize_chart_for_mobile(fig_savings)
+                    st.plotly_chart(fig_savings, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
+                                # --- ITEM-LEVEL OPTIMIZATION FOR ALL INVENTORY ---
+                    st.divider()
+                    st.markdown("### 📦 Item-Level Optimization for All Inventory")
+                    
+                    with st.expander("🔧 Calculate EOQ for Selected Items", expanded=False):
+                        # Get stock data with pricing
+                        try:
+                            gsheet = GoogleSheetReader()
+                            if gsheet.authenticate():
+                                stock_df = gsheet.get_stock_with_pricing()
+                                
+                                if not stock_df.empty and 'ITEM_NAME' in stock_df.columns and 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                                    # Convert to numeric
+                                    stock_df['QUANTITY'] = pd.to_numeric(stock_df['QUANTITY'], errors='coerce')
+                                    stock_df['UNIT PRICE'] = pd.to_numeric(stock_df['UNIT PRICE'], errors='coerce')
+                                    
+                                    # Drop rows with missing values
+                                    stock_df = stock_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                                    
+                                    if not stock_df.empty:
+                                        # Let user select a category or item
+                                        cat_options = ['All Categories'] + sorted(stock_df['ITEM_CATEGORY'].dropna().unique().tolist())
+                                        selected_cat = st.selectbox("Select Category", cat_options, key="eoq_category")
+                                        
+                                        # Filter items
+                                        if selected_cat != 'All Categories':
+                                            items_df = stock_df[stock_df['ITEM_CATEGORY'] == selected_cat]
                                         else:
-                                            st.warning("No items with valid price and quantity data found.")
+                                            items_df = stock_df
+                                        
+                                        # Show items with EOQ calculation
+                                        st.markdown("#### EOQ for Selected Items")
+                                        
+                                        # Let user set ordering cost and holding rate
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            order_cost = st.number_input(
+                                                "Ordering Cost (KSh)", 
+                                                value=float(constants.TRANSPORT_COST), 
+                                                step=100.0, 
+                                                key="eoq_order_cost"
+                                            )
+                                        with col2:
+                                            holding_rate = st.number_input(
+                                                "Holding Rate (%)", 
+                                                value=float(constants.HOLDING_RATE * 100), 
+                                                step=0.5, 
+                                                key="eoq_holding_rate"
+                                            ) / 100
+                                        
+                                        # Calculate EOQ for items
+                                        if st.button("Calculate EOQ for Items", key="calc_eoq"):
+                                            eoq_results = []
+                                            for _, row in items_df.iterrows():
+                                                if pd.notna(row['UNIT PRICE']) and pd.notna(row['QUANTITY']) and row['QUANTITY'] > 0:
+                                                    # Estimate annual demand (assuming current stock is monthly demand)
+                                                    annual_demand = row['QUANTITY'] * 12
+                                                    unit_price = row['UNIT PRICE']
+                                                    
+                                                    if unit_price > 0 and holding_rate > 0:
+                                                        try:
+                                                            eoq_val = math.sqrt((2 * annual_demand * order_cost) / (holding_rate * unit_price))
+                                                            eoq_results.append({
+                                                                'Item': row['ITEM_NAME'],
+                                                                'Category': row['ITEM_CATEGORY'],
+                                                                'Annual Demand': annual_demand,
+                                                                'Unit Price': unit_price,
+                                                                'EOQ': eoq_val,
+                                                                'Orders/Year': annual_demand / eoq_val if eoq_val > 0 else 0
+                                                            })
+                                                        except:
+                                                            pass
+                                            
+                                            if eoq_results:
+                                                eoq_df = pd.DataFrame(eoq_results)
+                                                st.dataframe(eoq_df, use_container_width=True, hide_index=True)
+                                                
+                                                # Download EOQ results
+                                                csv = eoq_df.to_csv(index=False).encode('utf-8')
+                                                st.download_button(
+                                                    label="📥 Download EOQ Results",
+                                                    data=csv,
+                                                    file_name=f"eoq_results_{datetime.now().strftime('%Y%m%d')}.csv",
+                                                    mime='text/csv'
+                                                )
+                                                
+                                                # Show summary stats
+                                                st.markdown("#### EOQ Summary")
+                                                col1, col2, col3 = st.columns(3)
+                                                with col1:
+                                                    st.metric("Total Items", len(eoq_df))
+                                                with col2:
+                                                    avg_eoq = eoq_df['EOQ'].mean()
+                                                    st.metric("Avg EOQ", f"{avg_eoq:.0f}")
+                                                with col3:
+                                                    avg_orders = eoq_df['Orders/Year'].mean()
+                                                    st.metric("Avg Orders/Year", f"{avg_orders:.1f}")
+                                            else:
+                                                st.warning("No items with valid price and quantity data found.")
+                                    else:
+                                        st.warning("No valid inventory data found. Please check Google Sheets connection.")
                                 else:
-                                    st.warning("No valid inventory data found.")
-                            else:
-                                st.warning("Inventory data missing required columns.")
-                    except Exception as e:
-                        st.error(f"Error loading inventory data for bulk EOQ calculation: {e}")
-                        
-            else:
-                st.warning("📦 Cannot calculate inventory policy without historical data for this period.")
-                st.info("Please record some receipts to build up an order history for inventory optimization.")
-
-        with tab4:
-            if not df.empty:
-                st.markdown("### 🧮 Detailed Annual Cost Breakdown")
-                
-                # 1. Core Cost Components Table
-                st.markdown("#### 📋 Annual Cost Component Details")
-                avg_inventory_for_display = (kpis.get('avg_order_size', 0) / 2) + safety_stock
-                cost_components_data = {
-                    'Component': ['Product Purchase', 'Transport', 'Holding', 'Sublimation Loss', 'Total'],
-                    'Calculation': [
-                        f"{annual_volume:,.0f} kg × KSh {constants.PRICE_PER_KG:.2f}",
-                        f"{kpis.get('total_orders', 0):,} orders × KSh {constants.TRANSPORT_COST:,.0f}",
-                        f"({avg_inventory_for_display:,.1f} kg avg inv) × KSh {constants.PRICE_PER_KG:.2f} × {constants.HOLDING_RATE * 100:.1f}%",
-                        f"{annual_volume:,.0f} kg × {sum(constants.SUB_LOSS_RANGE) / 2:.2f}% loss × KSh {constants.PRICE_PER_KG:.2f}",
-                        "Sum of all components"
-                    ],
-                    'Annual Cost (KSh)': [
-                        annual_product_cost, annual_transport_cost, annual_holding_cost,
-                        annual_sublimation_loss, total_annual_spending
-                    ],
-                    '% of Total': [
-                        (annual_product_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
-                        (annual_transport_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
-                        (annual_holding_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
-                        (annual_sublimation_loss / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
-                        100
-                    ]
-                }
-                cost_components = pd.DataFrame(cost_components_data)
-                st.dataframe(
-                        cost_components.style
-                        .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-                        .applymap(lambda x: 'font-weight: bold', subset=['Component'])
-                        .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
-                        use_container_width=True,
-                        height=220,
-                        hide_index=True
-                        )
-
-                st.markdown("---")
-                st.markdown("#### 📊 Cost Structure Visualization")
-                fig_cost_breakdown = make_subplots(
-                    rows=1, cols=2,
-                    specs=[[{"type": "pie"}, {"type": "bar"}]],
-                    subplot_titles=("Cost Distribution", "Cost per kg Analysis"),
-                    column_widths=[0.5, 0.5]       
-                )
-
-                # Trace 1: Pie Chart with labels and percentages
-                fig_cost_breakdown.add_trace(go.Pie(
-                    labels=cost_components['Component'][:-1],
-                    values=cost_components['Annual Cost (KSh)'][:-1],
-                    marker_colors=['#3498db','#e74c3c','#f39c12','#2ecc71'],
-                    textinfo='label+percent',  # Show both label and percentage
-                    textposition='inside',    # Place text inside slices
-                    insidetextorientation='radial',  # Curve the text
-                    textfont=dict(size=12),   # Adjust font size
-                    hoverinfo='label+percent+value',  # Show details on hover
-                    domain={'x': [0, 0.45]}
-                ), row=1, col=1)
-
-                # Trace 2: Bar Chart (Cost per kg)
-                cost_per_kg_data = {
-                    'Metric': ['Product Cost', 'Transport Cost', 'Holding Cost', 'Sublimation'],
-                    'Cost per kg (KSh)': [
-                        constants.PRICE_PER_KG,
-                        annual_transport_cost / annual_volume if annual_volume > 0 else 0,
-                        annual_holding_cost / annual_volume if annual_volume > 0 else 0,
-                        annual_sublimation_loss / annual_volume if annual_volume > 0 else 0
-                    ]
-                }
-                cost_per_kg = pd.DataFrame(cost_per_kg_data)
-                fig_cost_breakdown.add_trace(go.Bar(
-                    x=cost_per_kg['Metric'],
-                    y=cost_per_kg['Cost per kg (KSh)'],
-                    marker_color=['#3498db','#e74c3c','#f39c12','#2ecc71'],
-                    text=cost_per_kg['Cost per kg (KSh)'].round(2),
-                    textposition='auto'
-                ), row=1, col=2)
-
-                fig_cost_breakdown.update_layout(height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
-                fig_cost_breakdown = mobile_ui.optimize_chart_for_mobile(fig_cost_breakdown)
-                st.plotly_chart(fig_cost_breakdown, use_container_width=True,
-                    config=mobile_ui.get_mobile_chart_config())
-
-
-                st.markdown("---")
-                st.markdown("#### 📈 Monthly Cost Trends (KSh)")
-                
-                df_monthly = df.copy()
-                df_monthly['Date'] = pd.to_datetime(df_monthly['Date'])
-                df_monthly['Month'] = df_monthly['Date'].dt.to_period('M').dt.strftime('%Y-%b')
-
-                monthly_data = df_monthly.groupby('Month').agg(
-                    product_cost_ksh=('Total_Cost', 'sum'),
-                    transport_cost_ksh=('Transport_Cost', 'sum'),
-                    product_volume_kg=('Order_Quantity_kg', 'sum')
-                ).reset_index()
-
-                monthly_data['holding_cost_ksh'] = (monthly_data['product_volume_kg'] / 2) * constants.HOLDING_RATE * constants.PRICE_PER_KG
-                monthly_data['sublimation_loss_ksh'] = monthly_data['product_volume_kg'] * avg_sublimation * constants.PRICE_PER_KG
-                monthly_data['sublimation_loss_kg'] = monthly_data['product_volume_kg'] * avg_sublimation
-                
-                monthly_data['Month_dt'] = pd.to_datetime(monthly_data['Month'], format='%Y-%b')
-                monthly_data = monthly_data.sort_values('Month_dt')
-                
-                cost_cols = ['product_cost_ksh', 'transport_cost_ksh', 'holding_cost_ksh', 'sublimation_loss_ksh']
-                colors = ['#3498db', '#e74c3c', '#f39c12', '#2ecc71']
-                color_map = {col: color for col, color in zip(cost_cols, colors)}
-
-                fig_monthly_cost = px.area(
-                    monthly_data, x='Month', y=cost_cols,
-                    title="Monthly Cost Fluctuations (KSh)", 
-                    labels={'value': 'Cost (KSh)', 'variable': 'Cost Type'},
-                    color_discrete_map=color_map,
-                    height=mobile_ui.get_chart_height()  # Use consistent height
-                    )
-
-                for col, color in zip(cost_cols, colors):
-                    avg_value = monthly_data[col].mean()
-                    annotation_label = col.replace('_ksh', '').replace('_', ' ').title()
-                    fig_monthly_cost.add_hline(y=avg_value, line_dash="dot", line_color=color,
-                                            annotation_text=f"Avg {annotation_label}: {avg_value:,.0f}",
-                                            annotation_position="bottom right")
-
-                fig_monthly_cost.update_traces(
-                    mode="lines+markers",
-                    hovertemplate="<b>%{x}</b><br>%{y:,.0f} KSh<extra></extra>"
-                )
-                fig_monthly_cost.update_layout(
-                    hovermode="x unified",
-                    xaxis_title=None,
-                    yaxis_title="Cost (KSh)",
-                    legend_title="Cost Type"
-                )
-
-                fig_monthly_cost = mobile_ui.optimize_chart_for_mobile(fig_monthly_cost)
-                st.plotly_chart(fig_monthly_cost, use_container_width=True,
-                    config=mobile_ui.get_mobile_chart_config())
-                
-
-
-                st.markdown("---")
-                st.markdown("#### 📊 Monthly Physical Quantities (kg)")
-                fig_monthly_volume = px.bar(
-                monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
-                title="Monthly Dry Ice Quantities (kg)", labels={'value': 'Quantity (kg)', 'variable': 'Quantity Type'},
-                height=400
-                )
-                fig_monthly_volume = mobile_ui.optimize_chart_for_mobile(fig_monthly_volume)
-                st.plotly_chart(fig_monthly_volume, use_container_width=True,
-                    config=mobile_ui.get_mobile_chart_config())
-
-
-                # 4. Savings Summary (5-COLUMN LAYOUT)
-                st.markdown("---")
-                st.markdown("### 💰 Savings Summary")
-                
-                monthly_transport_savings = annual_transport_savings / 12
-                current_monthly_transport_cost = current_monthly_orders * constants.TRANSPORT_COST
-                
-                monthly_savings_percent = (monthly_transport_savings / current_monthly_transport_cost) * 100 if current_monthly_transport_cost > 0 else 0
-                annual_savings_percent = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
-                implementation_cost = constants.IMPLEMENTATION_COST
-                roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
-
-                savings_cols = st.columns(5)
-                with savings_cols[0]:
-                    st.metric("Monthly Savings", f"KSh {monthly_transport_savings:,.0f}")
-                with savings_cols[1]:
-                    st.metric("Annual Savings", f"KSh {annual_transport_savings:,.0f}")
-                with savings_cols[2]:
-                    st.metric("Monthly Savings %", f"{monthly_savings_percent:.1f}%")
-                with savings_cols[3]:
-                    st.metric("Annual Savings %", f"{annual_savings_percent:.1f}%")
-                with savings_cols[4]:
-                    st.metric("ROI", f"{roi_percentage:.0f}%")
-
-                # ----------------------------------
-                # 5. Key Insights & Recommendations
-                # ----------------------------------
-
-
-                st.markdown("---")
-                st.markdown("#### 📋 Key Insights & Recommendations")
-                st.markdown(f"""
-                - **EOQ Implementation**: Save KSh {annual_transport_savings:,.0f} annually on transport costs.
-                - **Order Frequency**: Reduce from {current_monthly_orders:.1f} to {eoq_monthly_orders:.1f} orders/month.
-                - **Payback Period**: {payback_period:.1f} months to recover implementation costs.
-                - **Largest Cost**: Product cost ({(annual_product_cost/total_annual_spending)*100:.1f}% of total).
-                - **Loss Prevention**: Sublimation losses cost KSh {annual_sublimation_loss:,.0f} annually.
-                """)
-            else:
-                st.warning("🧮 Cost analysis requires historical order data.")
-                st.info("Please add the first order for this period using the 'Record Receipt' button in the sidebar to see the cost breakdown.")
-
-        with tab5:
-            st.markdown("### 📋 Strategic Recommendations")
-
-            # Immediate actions
-            st.markdown("#### 🎯 Recommended Actions")
-
-            recommendations = [
-            f"**Implement optimized ordering quantity:** Order {eoq:.0f} kg per shipment (accounts for {avg_sublimation*100:.2f}% sublimation losses)",
-            f"**Maintain safety stock:** Keep minimum inventory of {safety_stock:.0f} kg to buffer against demand variability and sublimation",
-            f"**Set reorder point:** Initiate new orders when inventory reaches {reorder_point:.0f} kg",
-            f"**Optimize order frequency:** Target {eoq_monthly_orders:.1f} orders per month based on demand patterns"
-    ]
-
-            for recommendation in recommendations:
-                st.markdown(f"- {recommendation}", unsafe_allow_html=True)
-            for i, rec in enumerate(recommendations, 1):
-                st.markdown(f"{i}. {rec}")
-
-            # Medium-term improvements
-            st.markdown("#### 🔄 Medium-term Improvements")
-
-            medium_term = [
-                "**Demand forecasting:** Implement automated forecasting for better demand planning",
-                "**Supplier negotiations:** Leverage consistent ordering patterns for better transport rates",
-                "**Container optimization:** Standardize orders to maximize container utilization",
-                "**Inventory tracking:** Implement real-time inventory monitoring system"
-            ]
-
-            for i, rec in enumerate(medium_term, 1):
-                st.markdown(f"{i}. {rec}")
-
-            # Key metrics to monitor (now matching the Current vs EOQ Comparison calculations)
-            st.markdown("#### 📊 Key Metrics to Monitor")
-
-            avg_order_size = kpis.get('avg_order_size', 0)
-            current_monthly_volume = kpis.get('current_monthly_volume', 0)
-
-            if avg_order_size > 0:
-                current_inventory_turnover = f"{current_monthly_volume / (avg_order_size/2):.1f}x/month"
-            else:
-                current_inventory_turnover = "N/A"
-
-            if eoq > 0:
-                target_inventory_turnover = f"{current_monthly_volume / eoq:.1f}x/month"
-            else:
-                target_inventory_turnover = "N/A"
-
-            metrics_to_track = pd.DataFrame({
-                'Metric': [
-                    'Service Level',
-                    'Inventory Turnover',
-                    'Stockout Frequency',
-                    'Order Frequency',
-                    'Container Utilization',
-                    'Total Transport Cost'
-                ],
-                'Current Value': [
-                    f"{constants.SERVICE_LEVEL*100:.0f}%",
-                    current_inventory_turnover,  # <-- FIXED LINE
-                    "Monitor",
-                    f"{current_monthly_orders:.1f}/month",
-                    f"{kpis.get('container_utilization', 0)*100:.1f}%",
-                    f"KSh {current_monthly_orders * constants.TRANSPORT_COST:,.0f}/month"
-                ],
-                'Target Value': [
-                    f"{constants.SERVICE_LEVEL*100:.0f}%",
-                    target_inventory_turnover,  # <-- ALSO FIXED
-                    "<5%",
-                    f"{eoq_monthly_orders:.1f}/month",
-                    ">85%",
-                    f"KSh {eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}/month"
-                ]
-            })
-
-            st.dataframe(metrics_to_track, use_container_width=True, height=250, hide_index=True)
-
-            # Implementation timeline
-            st.markdown("#### 📅 Implementation Timeline")
-
-            timeline_data = pd.DataFrame({
-                'Week': ['Week 1-2', 'Week 3-4', 'Month 2', 'Month 3', 'Ongoing'],
-                'Activities': [
-                    'Calculate EOQ and safety stock, Set reorder points',
-                    'Implement new ordering policy, Train staff',
-                    'Monitor performance, Adjust parameters',
-                    'Evaluate results, Optimize further',
-                    'Regular review and adjustment'
-                ],
-                'Expected Outcome': [
-                    'Clear inventory targets established',
-                    'New system operational',
-                    'Initial cost savings realized',
-                    'Full optimization achieved',
-                    'Continuous improvement'
-                ]
-            })
-
-            st.dataframe(timeline_data, use_container_width=True, height=220, hide_index=True)
-
-            st.markdown("#### 🌍 Long-term Improvements")
-            st.markdown("""
-            1. **Supply Chain Diversification**
-            - Develop relationships with multiple dry ice suppliers
-            - Establish backup transportation routes
-
-            2. **Sustainability Initiatives**
-            - Implement CO₂ capture system from fermentation processes
-            - Explore renewable energy-powered production
-
-            3. **Automated Replenishment System**
-            - IoT sensors with real-time inventory tracking
-            - AI-driven predictive ordering
-
-            4. **Carbon Credit Program**
-            - Monetize emission reductions from optimized logistics
-            - Achieve carbon-neutral certification by 2027
-            """)
-
-            # Key metrics dashboard
-            st.subheader("📊 Performance Targets")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Supplier Risk Reduction", "40%", "15% achieved")
-            with col2:
-                st.metric("Stockout Reduction", "30%", "8% improvement")
-            with col3:
-                st.metric("Carbon Footprint", "-15%", "-5% YoY")
-            with col4:
-                st.metric("Automation Level", "95%", "25% current")
-
-            # Interactive Plotly timeline
-            st.subheader("⏱️ Implementation Timeline")
-            fig_timeline = go.Figure()
-            fig_timeline.add_trace(go.Scatter(
-                x=[0, 1, 2, 3],
-                y=[1, 2, 3, 4],
-                mode='markers+lines+text',
-                marker=dict(size=16, color='#3498db'),
-                line=dict(color='#2c3e50', width=4),
-                text=['Supplier Program', 'IoT Pilot', 'CO₂ Study', 'Full Rollout'],
-                textposition='top center',
-                name='Milestones'
-            ))
-            fig_timeline.update_layout(
-                height=mobile_ui.get_chart_height(),
-                showlegend=False,
-                yaxis=dict(showticklabels=False, title=None),
-                xaxis=dict(
-                    title='Implementation Quarters',
-                    tickmode='array',
-                    tickvals=[0, 1, 2, 3],
-                    ticktext=['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+']
-                ),
-                plot_bgcolor='rgba(0,0,0,0)'
-            )
-            fig_timeline = mobile_ui.optimize_chart_for_mobile(fig_timeline)
-            st.plotly_chart(fig_timeline, use_container_width=True,
-                config=mobile_ui.get_mobile_chart_config())
-
-            # Roadmap dataframe with original content
-            roadmap_data = {
-                'Timeline': ['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+'],
-                'Initiative': [
-                    'Supplier diversification program',
-                    'IoT sensor pilot in 2 facilities',
-                    'CO₂ capture feasibility study',
-                    'Full automation rollout'
-                ],
-                'Target': [
-                    'Reduce supplier risk by 40%',
-                    'Cut stockouts by 30%',
-                    'Decrease carbon footprint by 15%',
-                    'Achieve 95% automated ordering'
-                ]
-            }
-
-            roadmap = pd.DataFrame(roadmap_data)
-
-            # Styled dataframe with highlighting
-            st.dataframe(
-            roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
-            .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
-            use_container_width=True,
-            height=200,
-            hide_index=True
-            )
-
-            # Expandable implementation details
-            with st.expander("🔍 Detailed Implementation Plans", expanded=False):
-                selected_quarter = st.selectbox(
-                    "Select Quarter",
-                    roadmap['Timeline'].tolist(),
-                    key='quarter_selector'
-                )
-                filtered_info = roadmap[roadmap['Timeline'] == selected_quarter]
-
-                st.subheader(f"{selected_quarter} Implementation Plan")
-                st.markdown(f"**Initiative:** {filtered_info['Initiative'].values[0]}")
-                st.markdown(f"**Target:** {filtered_info['Target'].values[0]}")
-
-                # Quarter-specific details
-                if selected_quarter == 'Q3 2025':
-                    st.markdown("""
-                    - Identify 3 new dry ice suppliers
-                    - Negotiate backup transportation contracts
-                    - Develop risk assessment framework
-                    """)
-                    st.progress(30)
-                elif selected_quarter == 'Q4 2025':
-                    st.markdown("""
-                    - Install IoT sensors in Midwest facilities
-                    - Develop predictive ordering algorithms
-                    - Train operations team on new system
-                    """)
-                    st.progress(15)
-                elif selected_quarter == 'Q1 2026':
-                    st.markdown("""
-                    - Technical assessment of CO₂ capture systems
-                    - Calculate ROI for sustainability investments
-                    - Partner identification for implementation
-                    """)
-                    st.progress(5)
+                                    st.warning("Inventory data missing required columns (ITEM_NAME, UNIT PRICE, QUANTITY).")
+                        except Exception as e:
+                            st.error(f"Error loading inventory data for EOQ calculation: {e}")
+                    
+                    # --- BULK EOQ CALCULATION FOR ALL ITEMS ---
+                    st.divider()
+                    st.markdown("### 📊 Bulk EOQ Calculation for All Items")
+                    
+                    with st.expander("📊 Calculate EOQ for All Inventory Items", expanded=False):
+                        try:
+                            gsheet = GoogleSheetReader()
+                            if gsheet.authenticate():
+                                stock_df = gsheet.get_stock_with_pricing()
+                                
+                                if not stock_df.empty and 'ITEM_NAME' in stock_df.columns and 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                                    # Convert to numeric
+                                    stock_df['QUANTITY'] = pd.to_numeric(stock_df['QUANTITY'], errors='coerce')
+                                    stock_df['UNIT PRICE'] = pd.to_numeric(stock_df['UNIT PRICE'], errors='coerce')
+                                    stock_df = stock_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+                                    
+                                    if not stock_df.empty:
+                                        # Parameters
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            order_cost = st.number_input(
+                                                "Ordering Cost (KSh)", 
+                                                value=float(constants.TRANSPORT_COST), 
+                                                step=100.0, 
+                                                key="bulk_order_cost"
+                                            )
+                                        with col2:
+                                            holding_rate = st.number_input(
+                                                "Holding Rate (%)", 
+                                                value=float(constants.HOLDING_RATE * 100), 
+                                                step=0.5, 
+                                                key="bulk_holding_rate"
+                                            ) / 100
+                                        
+                                        # Category filter
+                                        cat_options = ['All Categories'] + sorted(stock_df['ITEM_CATEGORY'].dropna().unique().tolist())
+                                        selected_cat = st.selectbox("Filter by Category", cat_options, key="bulk_category")
+                                        
+                                        # Filter items
+                                        if selected_cat != 'All Categories':
+                                            items_df = stock_df[stock_df['ITEM_CATEGORY'] == selected_cat]
+                                        else:
+                                            items_df = stock_df
+                                        
+                                        st.caption(f"📊 Calculating EOQ for {len(items_df)} items")
+                                        
+                                        if st.button("🚀 Calculate EOQ for All Items", key="bulk_calc_eoq"):
+                                            results = []
+                                            for _, row in items_df.iterrows():
+                                                if row['QUANTITY'] > 0 and row['UNIT PRICE'] > 0 and holding_rate > 0:
+                                                    annual_demand = row['QUANTITY'] * 12
+                                                    eoq_val = math.sqrt((2 * annual_demand * order_cost) / (holding_rate * row['UNIT PRICE']))
+                                                    current_orders = annual_demand / row['QUANTITY'] if row['QUANTITY'] > 0 else 0
+                                                    optimal_orders = annual_demand / eoq_val if eoq_val > 0 else 0
+                                                    
+                                                    results.append({
+                                                        'Item': row['ITEM_NAME'],
+                                                        'Category': row['ITEM_CATEGORY'],
+                                                        'Current Stock': row['QUANTITY'],
+                                                        'Unit Price': row['UNIT PRICE'],
+                                                        'Annual Demand': annual_demand,
+                                                        'EOQ': eoq_val,
+                                                        'Current Orders/Year': current_orders,
+                                                        'Optimal Orders/Year': optimal_orders,
+                                                        'Potential Savings': (current_orders - optimal_orders) * order_cost if eoq_val > 0 else 0
+                                                    })
+                                            
+                                            if results:
+                                                eoq_df = pd.DataFrame(results)
+                                                
+                                                # Summary metrics
+                                                st.divider()
+                                                st.markdown("#### 📊 EOQ Summary")
+                                                col1, col2, col3, col4 = st.columns(4)
+                                                with col1:
+                                                    st.metric("📦 Total Items", len(eoq_df))
+                                                with col2:
+                                                    total_savings = eoq_df['Potential Savings'].sum()
+                                                    st.metric("💰 Total Potential Savings", f"KSh {total_savings:,.0f}")
+                                                with col3:
+                                                    avg_eoq = eoq_df['EOQ'].mean()
+                                                    st.metric("📊 Average EOQ", f"{avg_eoq:.0f}")
+                                                with col4:
+                                                    items_below = len(eoq_df[eoq_df['Current Stock'] < eoq_df['EOQ']])
+                                                    st.metric("⚠️ Items Below EOQ", items_below)
+                                                
+                                                # Show full table
+                                                st.markdown("#### 📋 Detailed EOQ Results")
+                                                st.dataframe(eoq_df, use_container_width=True, hide_index=True)
+                                                
+                                                # Download button
+                                                csv = eoq_df.to_csv(index=False).encode('utf-8')
+                                                st.download_button(
+                                                    label="📥 Download EOQ Results CSV",
+                                                    data=csv,
+                                                    file_name=f"bulk_eoq_results_{datetime.now().strftime('%Y%m%d')}.csv",
+                                                    mime='text/csv'
+                                                )
+                                                
+                                                # Recommendations
+                                                st.divider()
+                                                st.markdown("#### 📋 Recommendations")
+                                                
+                                                if items_below > 0:
+                                                    st.warning(f"⚠️ {items_below} items have stock below EOQ level")
+                                                    
+                                                    # Show top 10 items needing attention
+                                                    low_items = eoq_df[eoq_df['Current Stock'] < eoq_df['EOQ']].sort_values('Potential Savings', ascending=False).head(10)
+                                                    st.markdown("**Top 10 Items Needing Reorder:**")
+                                                    st.dataframe(
+                                                        low_items[['Item', 'Category', 'Current Stock', 'EOQ', 'Potential Savings']],
+                                                        use_container_width=True,
+                                                        hide_index=True
+                                                    )
+                                                else:
+                                                    st.success("✅ All items have stock above EOQ level")
+                                                    
+                                                # Category breakdown
+                                                st.divider()
+                                                st.markdown("#### 📊 Category Breakdown")
+                                                category_summary = eoq_df.groupby('Category').agg({
+                                                    'Item': 'count',
+                                                    'Potential Savings': 'sum'
+                                                }).reset_index()
+                                                category_summary.columns = ['Category', 'Items', 'Total Savings']
+                                                st.dataframe(category_summary, use_container_width=True, hide_index=True)
+                                            else:
+                                                st.warning("No items with valid price and quantity data found.")
+                                    else:
+                                        st.warning("No valid inventory data found.")
+                                else:
+                                    st.warning("Inventory data missing required columns.")
+                        except Exception as e:
+                            st.error(f"Error loading inventory data for bulk EOQ calculation: {e}")
+                            
                 else:
-                    st.markdown("""
-                    - System-wide automation deployment
-                    - Process optimization across all facilities
-                    - Integration with finance systems
-                    """)
-                    st.progress(0)
+                    st.warning("📦 Cannot calculate inventory policy without historical data for this period.")
+                    st.info("Please record some receipts to build up an order history for inventory optimization.")
 
-                st.caption(f"Current status of {selected_quarter} initiatives")
-
-        with tab6:
-            st.markdown("### 🛠️ Predictive Maintenance Dashboard")
-            # Container Health Assessment
-            st.markdown("#### 📦 Container Health Assessment")
-
-            # Container data
-            containers_data = {
-                'CTN-001': {'insulation_efficiency': 75, 'seal_integrity': 65, 'structural_condition': 85, 'usage_cycles': 42, 'location': 'Storage Unit #1'},
-                'CTN-002': {'insulation_efficiency': 88, 'seal_integrity': 92, 'structural_condition': 90, 'usage_cycles': 28, 'location': 'Storage Unit #2'},
-                'CTN-003': {'insulation_efficiency': 60, 'seal_integrity': 55, 'structural_condition': 70, 'usage_cycles': 67, 'location': 'Transport Container #A'}
-            }
-
-            # Container selection
-            selected_container = st.selectbox(
-                "Select Container for Analysis",
-                list(containers_data.keys()),
-                format_func=lambda x: f"{x} - {containers_data[x]['location']}",
-                key="maintenance_container_select" # Added key to avoid widget duplication errors
-            )
-            container_data = containers_data[selected_container]
-
-            # Calculate health metrics
-            health_score = (container_data['insulation_efficiency'] + container_data['seal_integrity'] + container_data['structural_condition']) / 3
-            failure_risk = "High" if health_score < 70 else "Medium" if health_score < 85 else "Low"
-
-            # Display health metrics
-            health_cols = st.columns(5)
-            metrics = [
-                ("Insulation Efficiency", f"{container_data['insulation_efficiency']}%"),
-                ("Seal Integrity", f"{container_data['seal_integrity']}%"),
-                ("Structural Condition", f"{container_data['structural_condition']}%"),
-                ("Usage Cycles", container_data['usage_cycles']),
-                ("Health Score", f"{health_score:.1f}%")
-            ]
-
-            for col, (label, value) in zip(health_cols, metrics):
-                with col:
-                    st.metric(label, value)
-
-            # Risk assessment
-            st.markdown("---")
-            st.markdown("#### 📊 Risk Assessment")
-            risk_color = "🔴" if failure_risk == "High" else "🟡" if failure_risk == "Medium" else "🟢"
-            st.metric("Failure Risk Level", f"{risk_color} {failure_risk}")
-
-            # Maintenance recommendations
-            st.markdown("---")
-            st.markdown("#### 🔧 Maintenance Recommendations")
-            recommendations = []
-            if container_data['insulation_efficiency'] < 70:
-                recommendations.append("📋 Schedule insulation inspection")
-            if container_data['seal_integrity'] < 70:
-                recommendations.append("🔧 Replace door seals and gaskets")
-            if container_data['structural_condition'] < 80:
-                recommendations.append("🔨 Conduct structural assessment")
-            if container_data['usage_cycles'] > 50:
-                recommendations.append("📋 Consider container rotation")
-            if not recommendations:
-                recommendations.append("✅ Continue regular maintenance")
-
-            for i, action in enumerate(recommendations, 1):
-                st.markdown(f"{i}. {action}")
-
-            # System overview
-            st.markdown("---")
-            st.markdown("#### 📊 System Overview")
-
-            overview_cols = st.columns(4)
-            overview_metrics = [
-                ("Equipment Uptime", "98.2%", "0.5%"),
-                ("Temperature Stability", "±0.5°C", "-0.2°C"),
-                ("Last Maintenance", "12 days ago", None),
-                ("Next Service Due", "18 days", None)
-            ]
-
-            for col, (label, value, delta) in zip(overview_cols, overview_metrics):
-                with col:
-                    st.metric(label, value, delta=delta)
-
-            # Maintenance schedule
-            st.markdown("---")
-            st.markdown("#### 📅 Maintenance Schedule")
-            maintenance_data = pd.DataFrame({
-                'Equipment': ['Storage Unit #1', 'Storage Unit #2', 'Container CTN-001', 'Container CTN-002', 'Container CTN-003', 'Monitoring System'],
-                'Last Service': ['2024-06-15', '2024-06-10', '2024-06-05', '2024-06-01', '2024-05-28', '2024-06-20'],
-                'Next Service': ['2024-07-15', '2024-07-10', '2024-06-25', '2024-07-01', '2024-06-28', '2024-07-20'],
-                'Status': ['Good', 'Good', 'Fair', 'Good', 'Needs Attention', 'Excellent'],
-                'Priority': ['Medium', 'Medium', 'High', 'Low', 'High', 'Low']
-            })
-
-            maintenance_data['Last Service'] = pd.to_datetime(maintenance_data['Last Service'])
-            maintenance_data['Next Service'] = pd.to_datetime(maintenance_data['Next Service'])
-            maintenance_data['Days Overdue'] = (pd.Timestamp.today().normalize() - maintenance_data['Next Service']).dt.days
-
-            def style_status(val):
-                colors = {'Needs Attention': 'background-color: #fff3cd', 'Excellent': 'background-color: #d4edda',
-                        'Good': 'background-color: #d1ecf1', 'Fair': 'background-color: #f8d7da'}
-                return colors.get(val, '')
-
-            def style_priority(val):
-                colors = {'High': 'background-color: #f8d7da', 'Medium': 'background-color: #fff3cd', 'Low': 'background-color: #d4edda'}
-                return colors.get(val, '')
-
-            # Pre-format the date columns BEFORE passing to styler
-            maintenance_data['Last Service'] = maintenance_data['Last Service'].dt.strftime('%Y-%m-%d')
-            maintenance_data['Next Service'] = maintenance_data['Next Service'].dt.strftime('%Y-%m-%d')
-            maintenance_data['Days Overdue'] = maintenance_data['Days Overdue'].apply(
-            lambda x: f"{x} days" if x > 0 else "On schedule"
-            )
-
-            st.dataframe(
-            maintenance_data.style
-            .applymap(style_status, subset=['Status'])
-            .applymap(style_priority, subset=['Priority']),
-            use_container_width=True,
-            height=250,
-            hide_index=True
-            )
-
-            # Cost tracking
-            st.markdown("---")
-            st.markdown("#### 💰 Maintenance Costs")
-            cost_data = pd.DataFrame({
-                'Month': pd.date_range('2024-01-01', periods=6, freq='M'),
-                'Preventive': [2500, 3200, 2800, 4100, 2900, 3500],
-                'Reactive': [1200, 800, 2100, 600, 1800, 900],
-                'Emergency': [0, 0, 1500, 0, 0, 2200]
-            })
-
-            fig_maintenance_cost = px.bar(
-                cost_data.melt(id_vars=['Month'], var_name='Type', value_name='Cost'),
-                x='Month', y='Cost', color='Type',
-                title="Monthly Maintenance Costs (KSh)",
-                color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'}
-            )
-            fig_maintenance_cost = mobile_ui.optimize_chart_for_mobile(fig_maintenance_cost)
-            st.plotly_chart(fig_maintenance_cost, use_container_width=True,
-                config=mobile_ui.get_mobile_chart_config())
-
-            # ROI calculator
-            st.markdown("#### 📈 Maintenance ROI")
-            with st.container():
-                roi_cols = st.columns(3)
-            with roi_cols[0]:
-                preventive_cost = st.number_input("Annual Preventive Cost (KSh)", value=40000, step=5000, key="preventive_cost")
-            with roi_cols[1]:
-                avoided_cost = st.number_input("Avoided Reactive Cost (KSh)", value=75000, step=5000, key="avoided_cost")
-            with roi_cols[2]:
-                downtime_cost = st.number_input("Avoided Downtime Cost (KSh)", value=150000, step=10000, key="downtime_cost")
-
-            total_savings = avoided_cost + downtime_cost
-            roi = ((total_savings - preventive_cost) / preventive_cost) * 100 if preventive_cost > 0 else 0
-
-            st.metric("Maintenance ROI", f"{roi:.1f}%")
-            if roi > 0:
-                st.success(f"💡 Every KSh 1 spent on preventive maintenance saves KSh {total_savings/preventive_cost:.2f} in other costs.")
-            else:
-                st.warning("⚠️ Consider optimizing maintenance strategy.")
-
-        with tab7:
-            st.markdown("## 📜 Inventory Transaction History")
-
-            # --- SECTION 1: PERIOD-SPECIFIC TRANSACTION HISTORY ---
-            if not st.session_state.transactions:
-                st.info("No transactions recorded for this period yet. Use the sidebar to record usage or receipts.")
-            else:
-                trans_df = pd.DataFrame(st.session_state.transactions)
-                trans_df['date'] = pd.to_datetime(trans_df['date'])
-                trans_df = trans_df.sort_values('date', ascending=False)
-                
-                # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
-                # ============================================================
-                trans_df = compress_dataframe(trans_df)
-                logger.info(f"Transactions loaded and compressed: {len(trans_df)} records")
-                # ============================================================
-                # 🎯 FILTERS (BEFORE PAGINATION)
-                # ============================================================
-                filter_col1, filter_col2, filter_col3 = st.columns(3)
-                with filter_col1:
-                    transaction_type = st.selectbox("Transaction Type", ["All", "usage", "receipt"], key="trans_type_filter")
-                with filter_col2:
-                    date_min = trans_df['date'].min().date()
-                    date_max = trans_df['date'].max().date()
-                    selected_dates = st.date_input("Date Range", [date_min, date_max], min_value=date_min, max_value=date_max, key="date_range_filter")
-                with filter_col3:
-                    show_limit = st.selectbox("Show Last", ["All", "10", "25", "50", "100"], key="show_limit_filter")
-                
-                # Apply filters
-                filtered_df = trans_df.copy()
-                if transaction_type != "All":
-                    filtered_df = filtered_df[filtered_df['type'] == transaction_type]
-                if len(selected_dates) == 2:
-                    start_date, end_date = selected_dates
-                    filtered_df = filtered_df[(filtered_df['date'].dt.date >= start_date) & (filtered_df['date'].dt.date <= end_date)]
-                if show_limit != "All":
-                    filtered_df = filtered_df.head(int(show_limit))
-
-                # ============================================================
-                # 🎯 DISPLAY WITH PAGINATION (FOR LARGE DATASETS)
-                # ============================================================
-                with st.expander("📋 View Transaction Records", expanded=not mobile_ui.should_collapse_advanced()):
-                    # Paginate the filtered data (only if more than 100 rows)
-                    if len(filtered_df) > 100:
-                        paginated_df, paginator = paginate_dataframe(
-                            filtered_df,
-                            page_size=50,  # Show 50 per page
-                            key_prefix="transactions",
-                            show_controls=True,
-                            compact=False
-                        )
-                        display_df = paginated_df
-                        show_pagination = True
-                    else:
-                        display_df = filtered_df
-                        show_pagination = False
+        if tab4:
+            with tab4:
+                if not df.empty:
+                    st.markdown("### 🧮 Detailed Annual Cost Breakdown")
                     
-                    # Prepare display DataFrame
-                    display_df_display = display_df.copy()
-                    display_df_display['Date'] = display_df_display['date'].dt.strftime('%Y-%m-%d %H:%M')
-                    display_df_display['Type'] = display_df_display['type'].str.title()
-                    display_df_display['Quantity (kg)'] = display_df_display['quantity'].apply(lambda x: f"{x:,.2f}")
-                    
-                    # Show optimized table
+                    # 1. Core Cost Components Table
+                    st.markdown("#### 📋 Annual Cost Component Details")
+                    avg_inventory_for_display = (kpis.get('avg_order_size', 0) / 2) + safety_stock
+                    cost_components_data = {
+                        'Component': ['Product Purchase', 'Transport', 'Holding', 'Sublimation Loss', 'Total'],
+                        'Calculation': [
+                            f"{annual_volume:,.0f} kg × KSh {constants.PRICE_PER_KG:.2f}",
+                            f"{kpis.get('total_orders', 0):,} orders × KSh {constants.TRANSPORT_COST:,.0f}",
+                            f"({avg_inventory_for_display:,.1f} kg avg inv) × KSh {constants.PRICE_PER_KG:.2f} × {constants.HOLDING_RATE * 100:.1f}%",
+                            f"{annual_volume:,.0f} kg × {sum(constants.SUB_LOSS_RANGE) / 2:.2f}% loss × KSh {constants.PRICE_PER_KG:.2f}",
+                            "Sum of all components"
+                        ],
+                        'Annual Cost (KSh)': [
+                            annual_product_cost, annual_transport_cost, annual_holding_cost,
+                            annual_sublimation_loss, total_annual_spending
+                        ],
+                        '% of Total': [
+                            (annual_product_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
+                            (annual_transport_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
+                            (annual_holding_cost / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
+                            (annual_sublimation_loss / total_annual_spending) * 100 if total_annual_spending > 0 else 0,
+                            100
+                        ]
+                    }
+                    cost_components = pd.DataFrame(cost_components_data)
                     st.dataframe(
-                        display_df_display[['Date', 'Type', 'Quantity (kg)', 'description']],
-                        use_container_width=True,
-                        height=400,
-                        hide_index=True
+                            cost_components.style
+                            .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
+                            .map(lambda x: 'font-weight: bold', subset=['Component'])
+                            .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
+                            use_container_width=True,
+                            height=220,
+                            hide_index=True
+                            )
+
+                    st.markdown("---")
+                    st.markdown("#### 📊 Cost Structure Visualization")
+                    fig_cost_breakdown = make_subplots(
+                        rows=1, cols=2,
+                        specs=[[{"type": "pie"}, {"type": "bar"}]],
+                        subplot_titles=("Cost Distribution", "Cost per kg Analysis"),
+                        column_widths=[0.5, 0.5]       
                     )
+
+                    # Trace 1: Pie Chart with labels and percentages
+                    fig_cost_breakdown.add_trace(go.Pie(
+                        labels=cost_components['Component'][:-1],
+                        values=cost_components['Annual Cost (KSh)'][:-1],
+                        marker_colors=['#3498db','#e74c3c','#f39c12','#2ecc71'],
+                        textinfo='label+percent',  # Show both label and percentage
+                        textposition='inside',    # Place text inside slices
+                        insidetextorientation='radial',  # Curve the text
+                        textfont=dict(size=12),   # Adjust font size
+                        hoverinfo='label+percent+value',  # Show details on hover
+                        domain={'x': [0, 0.45]}
+                    ), row=1, col=1)
+
+                    # Trace 2: Bar Chart (Cost per kg)
+                    cost_per_kg_data = {
+                        'Metric': ['Product Cost', 'Transport Cost', 'Holding Cost', 'Sublimation'],
+                        'Cost per kg (KSh)': [
+                            constants.PRICE_PER_KG,
+                            annual_transport_cost / annual_volume if annual_volume > 0 else 0,
+                            annual_holding_cost / annual_volume if annual_volume > 0 else 0,
+                            annual_sublimation_loss / annual_volume if annual_volume > 0 else 0
+                        ]
+                    }
+                    cost_per_kg = pd.DataFrame(cost_per_kg_data)
+                    fig_cost_breakdown.add_trace(go.Bar(
+                        x=cost_per_kg['Metric'],
+                        y=cost_per_kg['Cost per kg (KSh)'],
+                        marker_color=['#3498db','#e74c3c','#f39c12','#2ecc71'],
+                        text=cost_per_kg['Cost per kg (KSh)'].round(2),
+                        textposition='auto'
+                    ), row=1, col=2)
+
+                    fig_cost_breakdown.update_layout(height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
+                    fig_cost_breakdown = mobile_ui.optimize_chart_for_mobile(fig_cost_breakdown)
+                    st.plotly_chart(fig_cost_breakdown, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
+
+
+                    st.markdown("---")
+                    st.markdown("#### 📈 Monthly Cost Trends (KSh)")
                     
-                    # Show pagination info
-                    if show_pagination:
-                        st.caption(f"📊 Page {paginator.current_page} of {paginator.total_pages} | Showing {len(display_df):,} of {len(filtered_df):,} records")
-                    else:
-                        st.caption(f"📊 Showing {len(filtered_df):,} records")
-                
-                # ============================================================
-                # 🎯 TRANSACTION SUMMARY
-                # ============================================================
-                st.markdown("### 📈 Transaction Summary (Filtered Period)")
-                total_used = filtered_df[filtered_df['type']=='usage']['quantity'].sum()
-                total_received = filtered_df[filtered_df['type']=='receipt']['quantity'].sum()
-                net_change = total_received - total_used
+                    df_monthly = df.copy()
+                    df_monthly['Date'] = pd.to_datetime(df_monthly['Date'])
+                    df_monthly['Month'] = df_monthly['Date'].dt.to_period('M').dt.strftime('%Y-%b')
 
-                stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-                stat_col1.metric("Total Used", f"{total_used:,.1f} kg")
-                stat_col2.metric("Total Received", f"{total_received:,.1f} kg")
-                stat_col3.metric("Net Change", f"{net_change:,.1f} kg", delta=f"{net_change:,.1f} kg")
-                stat_col4.metric("Total Transactions", len(filtered_df))
+                    monthly_data = df_monthly.groupby('Month').agg(
+                        product_cost_ksh=('Total_Cost', 'sum'),
+                        transport_cost_ksh=('Transport_Cost', 'sum'),
+                        product_volume_kg=('Order_Quantity_kg', 'sum')
+                    ).reset_index()
 
-                # ============================================================
-                # 🎯 EXPORT DATA SECTION
-                # ============================================================
-                st.markdown("### 📥 Export Filtered Data")
-                if not filtered_df.empty:
-                    csv = filtered_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download CSV",
-                        data=csv,
-                        file_name=f"transaction_history_{st.session_state.selected_period.replace('/', '-')}_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime='text/csv',
-                        use_container_width=True
+                    monthly_data['holding_cost_ksh'] = (monthly_data['product_volume_kg'] / 2) * constants.HOLDING_RATE * constants.PRICE_PER_KG
+                    monthly_data['sublimation_loss_ksh'] = monthly_data['product_volume_kg'] * avg_sublimation * constants.PRICE_PER_KG
+                    monthly_data['sublimation_loss_kg'] = monthly_data['product_volume_kg'] * avg_sublimation
+                    
+                    monthly_data['Month_dt'] = pd.to_datetime(monthly_data['Month'], format='%Y-%b')
+                    monthly_data = monthly_data.sort_values('Month_dt')
+                    
+                    cost_cols = ['product_cost_ksh', 'transport_cost_ksh', 'holding_cost_ksh', 'sublimation_loss_ksh']
+                    colors = ['#3498db', '#e74c3c', '#f39c12', '#2ecc71']
+                    color_map = {col: color for col, color in zip(cost_cols, colors)}
+
+                    fig_monthly_cost = px.area(
+                        monthly_data, x='Month', y=cost_cols,
+                        title="Monthly Cost Fluctuations (KSh)", 
+                        labels={'value': 'Cost (KSh)', 'variable': 'Cost Type'},
+                        color_discrete_map=color_map,
+                        height=mobile_ui.get_chart_height()  # Use consistent height
+                        )
+
+                    for col, color in zip(cost_cols, colors):
+                        avg_value = monthly_data[col].mean()
+                        annotation_label = col.replace('_ksh', '').replace('_', ' ').title()
+                        fig_monthly_cost.add_hline(y=avg_value, line_dash="dot", line_color=color,
+                                                annotation_text=f"Avg {annotation_label}: {avg_value:,.0f}",
+                                                annotation_position="bottom right")
+
+                    fig_monthly_cost.update_traces(
+                        mode="lines+markers",
+                        hovertemplate="<b>%{x}</b><br>%{y:,.0f} KSh<extra></extra>"
                     )
+                    fig_monthly_cost.update_layout(
+                        hovermode="x unified",
+                        xaxis_title=None,
+                        yaxis_title="Cost (KSh)",
+                        legend_title="Cost Type"
+                    )
+
+                    fig_monthly_cost = mobile_ui.optimize_chart_for_mobile(fig_monthly_cost)
+                    st.plotly_chart(fig_monthly_cost, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
+                    
+
+
+                    st.markdown("---")
+                    st.markdown("#### 📊 Monthly Physical Quantities (kg)")
+                    fig_monthly_volume = px.bar(
+                    monthly_data, x='Month', y=['product_volume_kg', 'sublimation_loss_kg'],
+                    title="Monthly Dry Ice Quantities (kg)", labels={'value': 'Quantity (kg)', 'variable': 'Quantity Type'},
+                    height=400
+                    )
+                    fig_monthly_volume = mobile_ui.optimize_chart_for_mobile(fig_monthly_volume)
+                    st.plotly_chart(fig_monthly_volume, use_container_width=True,
+                        config=mobile_ui.get_mobile_chart_config())
+
+
+                    # 4. Savings Summary (5-COLUMN LAYOUT)
+                    st.markdown("---")
+                    st.markdown("### 💰 Savings Summary")
+                    
+                    monthly_transport_savings = annual_transport_savings / 12
+                    current_monthly_transport_cost = current_monthly_orders * constants.TRANSPORT_COST
+                    
+                    monthly_savings_percent = (monthly_transport_savings / current_monthly_transport_cost) * 100 if current_monthly_transport_cost > 0 else 0
+                    annual_savings_percent = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
+                    implementation_cost = constants.IMPLEMENTATION_COST
+                    roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
+
+                    savings_cols = st.columns(5)
+                    with savings_cols[0]:
+                        st.metric("Monthly Savings", f"KSh {monthly_transport_savings:,.0f}")
+                    with savings_cols[1]:
+                        st.metric("Annual Savings", f"KSh {annual_transport_savings:,.0f}")
+                    with savings_cols[2]:
+                        st.metric("Monthly Savings %", f"{monthly_savings_percent:.1f}%")
+                    with savings_cols[3]:
+                        st.metric("Annual Savings %", f"{annual_savings_percent:.1f}%")
+                    with savings_cols[4]:
+                        st.metric("ROI", f"{roi_percentage:.0f}%")
+
+                    # ----------------------------------
+                    # 5. Key Insights & Recommendations
+                    # ----------------------------------
+
+
+                    st.markdown("---")
+                    st.markdown("#### 📋 Key Insights & Recommendations")
+                    st.markdown(f"""
+                    - **EOQ Implementation**: Save KSh {annual_transport_savings:,.0f} annually on transport costs.
+                    - **Order Frequency**: Reduce from {current_monthly_orders:.1f} to {eoq_monthly_orders:.1f} orders/month.
+                    - **Payback Period**: {payback_period:.1f} months to recover implementation costs.
+                    - **Largest Cost**: Product cost ({(annual_product_cost/total_annual_spending)*100:.1f}% of total).
+                    - **Loss Prevention**: Sublimation losses cost KSh {annual_sublimation_loss:,.0f} annually.
+                    """)
                 else:
-                    st.caption("No data in the current filter to export.")
+                    st.warning("🧮 Cost analysis requires historical order data.")
+                    st.info("Please add the first order for this period using the 'Record Receipt' button in the sidebar to see the cost breakdown.")
 
-            # --- DIVIDER TO SEPARATE SECTIONS ---
-            st.divider()
+        if tab5:
+            with tab5:
+                st.markdown("### 📋 Strategic Recommendations")
 
-            # --- SECTION 2: GLOBAL STATUS & HELP ---
-            st.markdown("### 📊 Current Status")
-            
-            st.metric("Current Stock Level", f"{inventory_tracker.current_stock:,.1f} kg")
+                # Immediate actions
+                st.markdown("#### 🎯 Recommended Actions")
 
-            # --- SECTION 3: COMMENTED OUT FEATURES (Kept for future reference) ---
-            #with st.expander("ℹ️ How to Use This Page"):
-            #    st.markdown("""
-            #    1.  **Record Usage:** Use the sidebar to log daily consumption.
-            #    2.  **Record Receipt:** Use the sidebar when new stock arrives.
-            #    3.  **View Transactions:** All transactions will appear here automatically.
-            #    4.  **Filter Data:** Use the filters above to narrow down results.
-            #    5.  **Export Data:** Download buttons appear when transaction data exists.
-            #    """)
+                recommendations = [
+                f"**Implement optimized ordering quantity:** Order {eoq:.0f} kg per shipment (accounts for {avg_sublimation*100:.2f}% sublimation losses)",
+                f"**Maintain safety stock:** Keep minimum inventory of {safety_stock:.0f} kg to buffer against demand variability and sublimation",
+                f"**Set reorder point:** Initiate new orders when inventory reaches {reorder_point:.0f} kg",
+                f"**Optimize order frequency:** Target {eoq_monthly_orders:.1f} orders per month based on demand patterns"
+        ]
 
-            # --- SECTION 4: COMMENTED OUT DATA MANAGEMENT (Kept for future reference) ---
-            # st.divider()
-            #st.markdown("### ⚠️ Data Management")
-            #st.warning("This action will permanently delete ALL transaction and order data for ALL periods. Use with caution.")
-            
-            #if 'confirm_clear_pressed' not in st.session_state:
-            #     st.session_state.confirm_clear_pressed = False
+                for recommendation in recommendations:
+                    st.markdown(f"- {recommendation}", unsafe_allow_html=True)
+                for i, rec in enumerate(recommendations, 1):
+                    st.markdown(f"{i}. {rec}")
 
-            #if st.button("Clear All Transactions and Orders", type="secondary"):
-            #    st.session_state.confirm_clear_pressed = True
+                # Medium-term improvements
+                st.markdown("#### 🔄 Medium-term Improvements")
 
-            #if st.session_state.confirm_clear_pressed:
-            #    st.error("Are you sure? This cannot be undone.")
-            #    col1, col2 = st.columns(2)
-            #    with col1:
-            #        if st.button("CONFIRM PERMANENT DELETION", type="primary"):
-            #            clear_transactions_from_db()
-            #            st.session_state.transactions = []
-            #            st.session_state.confirm_clear_pressed = False
-            #            st.success("All transaction and order data has been permanently cleared!")
-            #            
-            #    with col2:
-            #        if st.button("Cancel"):
-            #            st.session_state.confirm_clear_pressed = False          
+                medium_term = [
+                    "**Demand forecasting:** Implement automated forecasting for better demand planning",
+                    "**Supplier negotiations:** Leverage consistent ordering patterns for better transport rates",
+                    "**Container optimization:** Standardize orders to maximize container utilization",
+                    "**Inventory tracking:** Implement real-time inventory monitoring system"
+                ]
+
+                for i, rec in enumerate(medium_term, 1):
+                    st.markdown(f"{i}. {rec}")
+
+                # Key metrics to monitor (now matching the Current vs EOQ Comparison calculations)
+                st.markdown("#### 📊 Key Metrics to Monitor")
+
+                avg_order_size = kpis.get('avg_order_size', 0)
+                current_monthly_volume = kpis.get('current_monthly_volume', 0)
+
+                if avg_order_size > 0:
+                    current_inventory_turnover = f"{current_monthly_volume / (avg_order_size/2):.1f}x/month"
+                else:
+                    current_inventory_turnover = "N/A"
+
+                if eoq > 0:
+                    target_inventory_turnover = f"{current_monthly_volume / eoq:.1f}x/month"
+                else:
+                    target_inventory_turnover = "N/A"
+
+                metrics_to_track = pd.DataFrame({
+                    'Metric': [
+                        'Service Level',
+                        'Inventory Turnover',
+                        'Stockout Frequency',
+                        'Order Frequency',
+                        'Container Utilization',
+                        'Total Transport Cost'
+                    ],
+                    'Current Value': [
+                        f"{constants.SERVICE_LEVEL*100:.0f}%",
+                        current_inventory_turnover,  # <-- FIXED LINE
+                        "Monitor",
+                        f"{current_monthly_orders:.1f}/month",
+                        f"{kpis.get('container_utilization', 0)*100:.1f}%",
+                        f"KSh {current_monthly_orders * constants.TRANSPORT_COST:,.0f}/month"
+                    ],
+                    'Target Value': [
+                        f"{constants.SERVICE_LEVEL*100:.0f}%",
+                        target_inventory_turnover,  # <-- ALSO FIXED
+                        "<5%",
+                        f"{eoq_monthly_orders:.1f}/month",
+                        ">85%",
+                        f"KSh {eoq_monthly_orders * constants.TRANSPORT_COST:,.0f}/month"
+                    ]
+                })
+
+                st.dataframe(metrics_to_track, use_container_width=True, height=250, hide_index=True)
+
+                # Implementation timeline
+                st.markdown("#### 📅 Implementation Timeline")
+
+                timeline_data = pd.DataFrame({
+                    'Week': ['Week 1-2', 'Week 3-4', 'Month 2', 'Month 3', 'Ongoing'],
+                    'Activities': [
+                        'Calculate EOQ and safety stock, Set reorder points',
+                        'Implement new ordering policy, Train staff',
+                        'Monitor performance, Adjust parameters',
+                        'Evaluate results, Optimize further',
+                        'Regular review and adjustment'
+                    ],
+                    'Expected Outcome': [
+                        'Clear inventory targets established',
+                        'New system operational',
+                        'Initial cost savings realized',
+                        'Full optimization achieved',
+                        'Continuous improvement'
+                    ]
+                })
+
+                st.dataframe(timeline_data, use_container_width=True, height=220, hide_index=True)
+
+                st.markdown("#### 🌍 Long-term Improvements")
+                st.markdown("""
+                1. **Supply Chain Diversification**
+                - Develop relationships with multiple dry ice suppliers
+                - Establish backup transportation routes
+
+                2. **Sustainability Initiatives**
+                - Implement CO₂ capture system from fermentation processes
+                - Explore renewable energy-powered production
+
+                3. **Automated Replenishment System**
+                - IoT sensors with real-time inventory tracking
+                - AI-driven predictive ordering
+
+                4. **Carbon Credit Program**
+                - Monetize emission reductions from optimized logistics
+                - Achieve carbon-neutral certification by 2027
+                """)
+
+                # Key metrics dashboard
+                st.subheader("📊 Performance Targets")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Supplier Risk Reduction", "40%", "15% achieved")
+                with col2:
+                    st.metric("Stockout Reduction", "30%", "8% improvement")
+                with col3:
+                    st.metric("Carbon Footprint", "-15%", "-5% YoY")
+                with col4:
+                    st.metric("Automation Level", "95%", "25% current")
+
+                # Interactive Plotly timeline
+                st.subheader("⏱️ Implementation Timeline")
+                fig_timeline = go.Figure()
+                fig_timeline.add_trace(go.Scatter(
+                    x=[0, 1, 2, 3],
+                    y=[1, 2, 3, 4],
+                    mode='markers+lines+text',
+                    marker=dict(size=16, color='#3498db'),
+                    line=dict(color='#2c3e50', width=4),
+                    text=['Supplier Program', 'IoT Pilot', 'CO₂ Study', 'Full Rollout'],
+                    textposition='top center',
+                    name='Milestones'
+                ))
+                fig_timeline.update_layout(
+                    height=mobile_ui.get_chart_height(),
+                    showlegend=False,
+                    yaxis=dict(showticklabels=False, title=None),
+                    xaxis=dict(
+                        title='Implementation Quarters',
+                        tickmode='array',
+                        tickvals=[0, 1, 2, 3],
+                        ticktext=['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+']
+                    ),
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                fig_timeline = mobile_ui.optimize_chart_for_mobile(fig_timeline)
+                st.plotly_chart(fig_timeline, use_container_width=True,
+                    config=mobile_ui.get_mobile_chart_config())
+
+                # Roadmap dataframe with original content
+                roadmap_data = {
+                    'Timeline': ['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026+'],
+                    'Initiative': [
+                        'Supplier diversification program',
+                        'IoT sensor pilot in 2 facilities',
+                        'CO₂ capture feasibility study',
+                        'Full automation rollout'
+                    ],
+                    'Target': [
+                        'Reduce supplier risk by 40%',
+                        'Cut stockouts by 30%',
+                        'Decrease carbon footprint by 15%',
+                        'Achieve 95% automated ordering'
+                    ]
+                }
+
+                roadmap = pd.DataFrame(roadmap_data)
+
+                # Styled dataframe with highlighting
+                st.dataframe(
+                roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
+                .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
+                use_container_width=True,
+                height=200,
+                hide_index=True
+                )
+
+                # Expandable implementation details
+                with st.expander("🔍 Detailed Implementation Plans", expanded=False):
+                    selected_quarter = st.selectbox(
+                        "Select Quarter",
+                        roadmap['Timeline'].tolist(),
+                        key='quarter_selector'
+                    )
+                    filtered_info = roadmap[roadmap['Timeline'] == selected_quarter]
+
+                    st.subheader(f"{selected_quarter} Implementation Plan")
+                    st.markdown(f"**Initiative:** {filtered_info['Initiative'].values[0]}")
+                    st.markdown(f"**Target:** {filtered_info['Target'].values[0]}")
+
+                    # Quarter-specific details
+                    if selected_quarter == 'Q3 2025':
+                        st.markdown("""
+                        - Identify 3 new dry ice suppliers
+                        - Negotiate backup transportation contracts
+                        - Develop risk assessment framework
+                        """)
+                        st.progress(30)
+                    elif selected_quarter == 'Q4 2025':
+                        st.markdown("""
+                        - Install IoT sensors in Midwest facilities
+                        - Develop predictive ordering algorithms
+                        - Train operations team on new system
+                        """)
+                        st.progress(15)
+                    elif selected_quarter == 'Q1 2026':
+                        st.markdown("""
+                        - Technical assessment of CO₂ capture systems
+                        - Calculate ROI for sustainability investments
+                        - Partner identification for implementation
+                        """)
+                        st.progress(5)
+                    else:
+                        st.markdown("""
+                        - System-wide automation deployment
+                        - Process optimization across all facilities
+                        - Integration with finance systems
+                        """)
+                        st.progress(0)
+
+                    st.caption(f"Current status of {selected_quarter} initiatives")
+        if tab6:
+            with tab6:
+                st.markdown("### 🛠️ Predictive Maintenance Dashboard")
+                # Container Health Assessment
+                st.markdown("#### 📦 Container Health Assessment")
+
+                # Container data
+                containers_data = {
+                    'CTN-001': {'insulation_efficiency': 75, 'seal_integrity': 65, 'structural_condition': 85, 'usage_cycles': 42, 'location': 'Storage Unit #1'},
+                    'CTN-002': {'insulation_efficiency': 88, 'seal_integrity': 92, 'structural_condition': 90, 'usage_cycles': 28, 'location': 'Storage Unit #2'},
+                    'CTN-003': {'insulation_efficiency': 60, 'seal_integrity': 55, 'structural_condition': 70, 'usage_cycles': 67, 'location': 'Transport Container #A'}
+                }
+
+                # Container selection
+                selected_container = st.selectbox(
+                    "Select Container for Analysis",
+                    list(containers_data.keys()),
+                    format_func=lambda x: f"{x} - {containers_data[x]['location']}",
+                    key="maintenance_container_select" # Added key to avoid widget duplication errors
+                )
+                container_data = containers_data[selected_container]
+
+                # Calculate health metrics
+                health_score = (container_data['insulation_efficiency'] + container_data['seal_integrity'] + container_data['structural_condition']) / 3
+                failure_risk = "High" if health_score < 70 else "Medium" if health_score < 85 else "Low"
+
+                # Display health metrics
+                health_cols = st.columns(5)
+                metrics = [
+                    ("Insulation Efficiency", f"{container_data['insulation_efficiency']}%"),
+                    ("Seal Integrity", f"{container_data['seal_integrity']}%"),
+                    ("Structural Condition", f"{container_data['structural_condition']}%"),
+                    ("Usage Cycles", container_data['usage_cycles']),
+                    ("Health Score", f"{health_score:.1f}%")
+                ]
+
+                for col, (label, value) in zip(health_cols, metrics):
+                    with col:
+                        st.metric(label, value)
+
+                # Risk assessment
+                st.markdown("---")
+                st.markdown("#### 📊 Risk Assessment")
+                risk_color = "🔴" if failure_risk == "High" else "🟡" if failure_risk == "Medium" else "🟢"
+                st.metric("Failure Risk Level", f"{risk_color} {failure_risk}")
+
+                # Maintenance recommendations
+                st.markdown("---")
+                st.markdown("#### 🔧 Maintenance Recommendations")
+                recommendations = []
+                if container_data['insulation_efficiency'] < 70:
+                    recommendations.append("📋 Schedule insulation inspection")
+                if container_data['seal_integrity'] < 70:
+                    recommendations.append("🔧 Replace door seals and gaskets")
+                if container_data['structural_condition'] < 80:
+                    recommendations.append("🔨 Conduct structural assessment")
+                if container_data['usage_cycles'] > 50:
+                    recommendations.append("📋 Consider container rotation")
+                if not recommendations:
+                    recommendations.append("✅ Continue regular maintenance")
+
+                for i, action in enumerate(recommendations, 1):
+                    st.markdown(f"{i}. {action}")
+
+                # System overview
+                st.markdown("---")
+                st.markdown("#### 📊 System Overview")
+
+                overview_cols = st.columns(4)
+                overview_metrics = [
+                    ("Equipment Uptime", "98.2%", "0.5%"),
+                    ("Temperature Stability", "±0.5°C", "-0.2°C"),
+                    ("Last Maintenance", "12 days ago", None),
+                    ("Next Service Due", "18 days", None)
+                ]
+
+                for col, (label, value, delta) in zip(overview_cols, overview_metrics):
+                    with col:
+                        st.metric(label, value, delta=delta)
+
+                # Maintenance schedule
+                st.markdown("---")
+                st.markdown("#### 📅 Maintenance Schedule")
+                maintenance_data = pd.DataFrame({
+                    'Equipment': ['Storage Unit #1', 'Storage Unit #2', 'Container CTN-001', 'Container CTN-002', 'Container CTN-003', 'Monitoring System'],
+                    'Last Service': ['2024-06-15', '2024-06-10', '2024-06-05', '2024-06-01', '2024-05-28', '2024-06-20'],
+                    'Next Service': ['2024-07-15', '2024-07-10', '2024-06-25', '2024-07-01', '2024-06-28', '2024-07-20'],
+                    'Status': ['Good', 'Good', 'Fair', 'Good', 'Needs Attention', 'Excellent'],
+                    'Priority': ['Medium', 'Medium', 'High', 'Low', 'High', 'Low']
+                })
+
+                maintenance_data['Last Service'] = pd.to_datetime(maintenance_data['Last Service'])
+                maintenance_data['Next Service'] = pd.to_datetime(maintenance_data['Next Service'])
+                maintenance_data['Days Overdue'] = (pd.Timestamp.today().normalize() - maintenance_data['Next Service']).dt.days
+
+                def style_status(val):
+                    colors = {'Needs Attention': 'background-color: #fff3cd', 'Excellent': 'background-color: #d4edda',
+                            'Good': 'background-color: #d1ecf1', 'Fair': 'background-color: #f8d7da'}
+                    return colors.get(val, '')
+
+                def style_priority(val):
+                    colors = {'High': 'background-color: #f8d7da', 'Medium': 'background-color: #fff3cd', 'Low': 'background-color: #d4edda'}
+                    return colors.get(val, '')
+
+                # Pre-format the date columns BEFORE passing to styler
+                maintenance_data['Last Service'] = maintenance_data['Last Service'].dt.strftime('%Y-%m-%d')
+                maintenance_data['Next Service'] = maintenance_data['Next Service'].dt.strftime('%Y-%m-%d')
+                maintenance_data['Days Overdue'] = maintenance_data['Days Overdue'].apply(
+                lambda x: f"{x} days" if x > 0 else "On schedule"
+                )
+
+                st.dataframe(
+                maintenance_data.style
+                .map(style_status, subset=['Status'])
+                .map(style_priority, subset=['Priority']),
+                use_container_width=True,
+                height=250,
+                hide_index=True
+                )
+
+                # Cost tracking
+                st.markdown("---")
+                st.markdown("#### 💰 Maintenance Costs")
+                cost_data = pd.DataFrame({
+                    'Month': pd.date_range('2024-01-01', periods=6, freq='ME'),
+                    'Preventive': [2500, 3200, 2800, 4100, 2900, 3500],
+                    'Reactive': [1200, 800, 2100, 600, 1800, 900],
+                    'Emergency': [0, 0, 1500, 0, 0, 2200]
+                })
+
+                fig_maintenance_cost = px.bar(
+                    cost_data.melt(id_vars=['Month'], var_name='Type', value_name='Cost'),
+                    x='Month', y='Cost', color='Type',
+                    title="Monthly Maintenance Costs (KSh)",
+                    color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'}
+                )
+                fig_maintenance_cost = mobile_ui.optimize_chart_for_mobile(fig_maintenance_cost)
+                st.plotly_chart(fig_maintenance_cost, use_container_width=True,
+                    config=mobile_ui.get_mobile_chart_config())
+
+                # ROI calculator
+                st.markdown("#### 📈 Maintenance ROI")
+                with st.container():
+                    roi_cols = st.columns(3)
+                with roi_cols[0]:
+                    preventive_cost = st.number_input("Annual Preventive Cost (KSh)", value=40000, step=5000, key="preventive_cost")
+                with roi_cols[1]:
+                    avoided_cost = st.number_input("Avoided Reactive Cost (KSh)", value=75000, step=5000, key="avoided_cost")
+                with roi_cols[2]:
+                    downtime_cost = st.number_input("Avoided Downtime Cost (KSh)", value=150000, step=10000, key="downtime_cost")
+
+                total_savings = avoided_cost + downtime_cost
+                roi = ((total_savings - preventive_cost) / preventive_cost) * 100 if preventive_cost > 0 else 0
+
+                st.metric("Maintenance ROI", f"{roi:.1f}%")
+                if roi > 0:
+                    st.success(f"💡 Every KSh 1 spent on preventive maintenance saves KSh {total_savings/preventive_cost:.2f} in other costs.")
+                else:
+                    st.warning("⚠️ Consider optimizing maintenance strategy.")
+                    
+        if tab7:
+            with tab7:
+                st.markdown("## 📜 Inventory Transaction History")
+
+                # --- SECTION 1: PERIOD-SPECIFIC TRANSACTION HISTORY ---
+                if not st.session_state.transactions:
+                    st.info("No transactions recorded for this period yet. Use the sidebar to record usage or receipts.")
+                else:
+                    trans_df = pd.DataFrame(st.session_state.transactions)
+                    trans_df['date'] = pd.to_datetime(trans_df['date'])
+                    trans_df = trans_df.sort_values('date', ascending=False)
+                    
+                    # 🚀 COMPRESS DATAFRAME TO REDUCE MEMORY USAGE
+                    # ============================================================
+                    trans_df = compress_dataframe(trans_df)
+                    logger.info(f"Transactions loaded and compressed: {len(trans_df)} records")
+                    # ============================================================
+                    # 🎯 FILTERS (BEFORE PAGINATION)
+                    # ============================================================
+                    filter_col1, filter_col2, filter_col3 = st.columns(3)
+                    with filter_col1:
+                        transaction_type = st.selectbox("Transaction Type", ["All", "usage", "receipt"], key="trans_type_filter")
+                    with filter_col2:
+                        date_min = trans_df['date'].min().date()
+                        date_max = trans_df['date'].max().date()
+                        selected_dates = st.date_input("Date Range", [date_min, date_max], min_value=date_min, max_value=date_max, key="date_range_filter")
+                    with filter_col3:
+                        show_limit = st.selectbox("Show Last", ["All", "10", "25", "50", "100"], key="show_limit_filter")
+                    
+                    # Apply filters
+                    filtered_df = trans_df.copy()
+                    if transaction_type != "All":
+                        filtered_df = filtered_df[filtered_df['type'] == transaction_type]
+                    if len(selected_dates) == 2:
+                        start_date, end_date = selected_dates
+                        filtered_df = filtered_df[(filtered_df['date'].dt.date >= start_date) & (filtered_df['date'].dt.date <= end_date)]
+                    if show_limit != "All":
+                        filtered_df = filtered_df.head(int(show_limit))
+
+                    # ============================================================
+                    # 🎯 DISPLAY WITH PAGINATION (FOR LARGE DATASETS)
+                    # ============================================================
+                    with st.expander("📋 View Transaction Records", expanded=not mobile_ui.should_collapse_advanced()):
+                        # Paginate the filtered data (only if more than 100 rows)
+                        if len(filtered_df) > 100:
+                            paginated_df, paginator = paginate_dataframe(
+                                filtered_df,
+                                page_size=50,  # Show 50 per page
+                                key_prefix="transactions",
+                                show_controls=True,
+                                compact=False
+                            )
+                            display_df = paginated_df
+                            show_pagination = True
+                        else:
+                            display_df = filtered_df
+                            show_pagination = False
+                        
+                        # Prepare display DataFrame
+                        display_df_display = display_df.copy()
+                        display_df_display['Date'] = display_df_display['date'].dt.strftime('%Y-%m-%d %H:%M')
+                        display_df_display['Type'] = display_df_display['type'].str.title()
+                        display_df_display['Quantity (kg)'] = display_df_display['quantity'].apply(lambda x: f"{x:,.2f}")
+                        
+                        # Show optimized table
+                        st.dataframe(
+                            display_df_display[['Date', 'Type', 'Quantity (kg)', 'description']],
+                            use_container_width=True,
+                            height=400,
+                            hide_index=True
+                        )
+                        
+                        # Show pagination info
+                        if show_pagination:
+                            st.caption(f"📊 Page {paginator.current_page} of {paginator.total_pages} | Showing {len(display_df):,} of {len(filtered_df):,} records")
+                        else:
+                            st.caption(f"📊 Showing {len(filtered_df):,} records")
+                    
+                    # ============================================================
+                    # 🎯 TRANSACTION SUMMARY
+                    # ============================================================
+                    st.markdown("### 📈 Transaction Summary (Filtered Period)")
+                    total_used = filtered_df[filtered_df['type']=='usage']['quantity'].sum()
+                    total_received = filtered_df[filtered_df['type']=='receipt']['quantity'].sum()
+                    net_change = total_received - total_used
+
+                    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+                    stat_col1.metric("Total Used", f"{total_used:,.1f} kg")
+                    stat_col2.metric("Total Received", f"{total_received:,.1f} kg")
+                    stat_col3.metric("Net Change", f"{net_change:,.1f} kg", delta=f"{net_change:,.1f} kg")
+                    stat_col4.metric("Total Transactions", len(filtered_df))
+
+                    # ============================================================
+                    # 🎯 EXPORT DATA SECTION
+                    # ============================================================
+                    st.markdown("### 📥 Export Filtered Data")
+                    if not filtered_df.empty:
+                        csv = filtered_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=csv,
+                            file_name=f"transaction_history_{st.session_state.selected_period.replace('/', '-')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime='text/csv',
+                            use_container_width=True
+                        )
+                    else:
+                        st.caption("No data in the current filter to export.")
+
+                # --- DIVIDER TO SEPARATE SECTIONS ---
+                st.divider()
+
+                # --- SECTION 2: GLOBAL STATUS & HELP ---
+                st.markdown("### 📊 Current Status")
+                
+                st.metric("Current Stock Level", f"{inventory_tracker.current_stock:,.1f} kg")
+
+                # --- SECTION 3: COMMENTED OUT FEATURES (Kept for future reference) ---
+                #with st.expander("ℹ️ How to Use This Page"):
+                #    st.markdown("""
+                #    1.  **Record Usage:** Use the sidebar to log daily consumption.
+                #    2.  **Record Receipt:** Use the sidebar when new stock arrives.
+                #    3.  **View Transactions:** All transactions will appear here automatically.
+                #    4.  **Filter Data:** Use the filters above to narrow down results.
+                #    5.  **Export Data:** Download buttons appear when transaction data exists.
+                #    """)
+
+                # --- SECTION 4: COMMENTED OUT DATA MANAGEMENT (Kept for future reference) ---
+                # st.divider()
+                #st.markdown("### ⚠️ Data Management")
+                #st.warning("This action will permanently delete ALL transaction and order data for ALL periods. Use with caution.")
+                
+                #if 'confirm_clear_pressed' not in st.session_state:
+                #     st.session_state.confirm_clear_pressed = False
+
+                #if st.button("Clear All Transactions and Orders", type="secondary"):
+                #    st.session_state.confirm_clear_pressed = True
+
+                #if st.session_state.confirm_clear_pressed:
+                #    st.error("Are you sure? This cannot be undone.")
+                #    col1, col2 = st.columns(2)
+                #    with col1:
+                #        if st.button("CONFIRM PERMANENT DELETION", type="primary"):
+                #            clear_transactions_from_db()
+                #            st.session_state.transactions = []
+                #            st.session_state.confirm_clear_pressed = False
+                #            st.success("All transaction and order data has been permanently cleared!")
+                #            
+                #    with col2:
+                #        if st.button("Cancel"):
+                #            st.session_state.confirm_clear_pressed = False          
 
 if __name__ == "__main__":
     main()
