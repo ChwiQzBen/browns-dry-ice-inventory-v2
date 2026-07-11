@@ -10680,7 +10680,7 @@ def main():
                 st.markdown("---")
                 st.markdown("#### 💰 Maintenance Costs")
                 cost_data = pd.DataFrame({
-                    'Month': pd.date_range('2024-01-01', periods=6, freq='ME'),
+                    'Month': pd.date_range('2024-01-01', periods=6, freq='M'),
                     'Preventive': [2500, 3200, 2800, 4100, 2900, 3500],
                     'Reactive': [1200, 800, 2100, 600, 1800, 900],
                     'Emergency': [0, 0, 1500, 0, 0, 2200]
