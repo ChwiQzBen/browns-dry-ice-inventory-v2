@@ -10160,7 +10160,7 @@ def main():
                     st.dataframe(
                             cost_components.style
                             .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-                            .map(lambda x: 'font-weight: bold', subset=['Component'])
+                            .applymap(lambda x: 'font-weight: bold', subset=['Component'])
                             .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
                             use_container_width=True,
                             height=220,
@@ -10669,8 +10669,8 @@ def main():
 
                 st.dataframe(
                 maintenance_data.style
-                .map(style_status, subset=['Status'])
-                .map(style_priority, subset=['Priority']),
+                .applymap(style_status, subset=['Status'])
+                .applymap(style_priority, subset=['Priority']),
                 use_container_width=True,
                 height=250,
                 hide_index=True
