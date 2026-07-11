@@ -37,7 +37,7 @@ from app.core.google_sheet_reader import GoogleSheetReader
 from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
-from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine
+from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine, generate_ai_insights
 import warnings
 from supabase import create_client, Client
 from core.error_handling import (
@@ -7206,6 +7206,111 @@ def main():
         """, unsafe_allow_html=True)
 
     # ============================================================
+    # 🤖 AI INSIGHTS FEED
+    # ============================================================
+    avg_daily_forecast_val = float(np.mean(ensemble_forecast_values)) if len(ensemble_forecast_values) > 0 else 0
+    historical_avg_daily_val = kpis.get('current_monthly_volume', 0) / 30
+
+    ai_insights = generate_ai_insights(
+        current_stock=inventory_tracker.current_stock,
+        safety_stock=safety_stock,
+        reorder_point=reorder_point,
+        eoq=eoq,
+        avg_daily_forecast=avg_daily_forecast_val,
+        historical_avg_daily=historical_avg_daily_val,
+        forecast_accuracy=backtest_accuracy * 100,
+        container_efficiency=kpis.get('container_utilization', 0) * 100,
+    )
+
+    if ai_insights:
+        insight_lines = "".join(
+            f'<div style="font-size:13px; color:#444; margin-bottom:6px;">{i["icon"]} {i["text"]}</div>'
+            for i in ai_insights
+        )
+        st.markdown(f"""
+        <div style="
+            border: 1px solid rgba(102,126,234,0.2);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            background: rgba(102,126,234,0.03);
+        ">
+            <div style="font-size:14px; font-weight:700; margin-bottom:10px; color:#333;">🤖 AI Insights</div>
+            {insight_lines}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ============================================================
+    # 🔮 WHAT-IF SIMULATOR
+    # ============================================================
+    if not decision:
+        st.info("🔮 What-If Simulator will be available after the next page refresh — the Decision Center needs one full run first.")
+    else:
+        with st.expander("🔮 What-If Simulator", expanded=False):
+            st.caption("Adjust assumptions below to see how they'd affect inventory recommendations. This does not change your live data.")
+            sim_col1, sim_col2 = st.columns(2)
+            with sim_col1:
+                demand_change_pct = st.slider(
+                    "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
+                    help="Simulate a demand increase or decrease vs. current forecast",
+                    key="sim_demand_change"
+                )
+            with sim_col2:
+                lead_time_delta = st.slider(
+                    "Additional supplier lead time (days)", min_value=0, max_value=10, value=0, step=1,
+                    help="Simulate a supplier delay",
+                    key="sim_lead_time_delta"
+                )
+
+            if demand_change_pct != 0 or lead_time_delta != 0:
+                sim_monthly_demand = monthly_demand_input * (1 + demand_change_pct / 100)
+                sim_adjusted_demand = sim_monthly_demand * sublimation_factor
+                sim_lead_time_days = constants.LEAD_TIME_DAYS + lead_time_delta
+
+                sim_eoq = math.sqrt(
+                    (2 * sim_adjusted_demand * constants.TRANSPORT_COST) / (constants.HOLDING_RATE * constants.PRICE_PER_KG)
+                ) if (constants.HOLDING_RATE * constants.PRICE_PER_KG) > 0 else 0
+
+                sim_safety_stock = z_score * demand_stddev_input * math.sqrt(sim_lead_time_days) * sublimation_factor
+                sim_reorder_point = (sim_adjusted_demand / 30 * sim_lead_time_days) + sim_safety_stock
+                sim_forecast_values = ensemble_forecast_values * (1 + demand_change_pct / 100)
+
+                sim_snapshot = InventorySnapshot(
+                    current_stock=inventory_tracker.current_stock,
+                    eoq=sim_eoq,
+                    safety_stock=sim_safety_stock,
+                    reorder_point=sim_reorder_point,
+                    forecast_values=sim_forecast_values,
+                    forecast_accuracy=backtest_accuracy * 100,
+                    lead_time_days=sim_lead_time_days,
+                    transport_cost=constants.TRANSPORT_COST,
+                    avg_order_size=kpis.get('avg_order_size', 300),
+                    monthly_holding_cost=annual_holding_cost / 12,
+                )
+                sim_decision = InventoryDecisionEngine(sim_snapshot).executive_summary()
+
+                st.markdown("---")
+                compare_col1, compare_col2 = st.columns(2)
+                with compare_col1:
+                    st.markdown("**📍 Current (Baseline)**")
+                    st.metric("Days Remaining", f"{decision['inventory']['days_remaining']}")
+                    st.metric("Action", decision['inventory']['action'])
+                    st.metric("Recommended Qty", f"{decision['inventory']['recommended_quantity']:,.0f} kg")
+                with compare_col2:
+                    st.markdown("**🔮 Simulated Scenario**")
+                    delta_days = sim_decision['inventory']['days_remaining'] - decision['inventory']['days_remaining']
+                    st.metric("Days Remaining", f"{sim_decision['inventory']['days_remaining']}", delta=f"{delta_days:+d} days")
+                    st.metric("Action", sim_decision['inventory']['action'])
+                    st.metric("Recommended Qty", f"{sim_decision['inventory']['recommended_quantity']:,.0f} kg")
+
+                st.info(f"**{sim_decision['inventory']['recommendation']}**")
+
+                if sim_decision['risk']['level'] in ('Critical', 'High') and decision['risk']['level'] not in ('Critical', 'High'):
+                    st.warning(f"⚠️ This scenario would raise your risk level from {decision['risk']['level']} to {sim_decision['risk']['level']}.")
+            else:
+                st.caption("Move a slider above to see the simulated impact.")
+
+    # ============================================================
     # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
     # Calculate monthly savings and percentage
     monthly_savings = annual_transport_savings / 12
@@ -7269,6 +7374,47 @@ def main():
     # ============================================================
     # KPI GRID - 4 Columns Inside Single Card
     # ============================================================
+    action_style = "font-size:10px;color:#667eea;font-weight:600;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(102,126,234,0.25);"
+
+    container_eff = kpis.get('container_utilization', 0) * 100
+
+    if stock_status['status'] in ['Critical', 'Low Stock']:
+        action_stock = f"→ Order {eoq:,.0f} kg now"
+    else:
+        action_stock = "→ No action needed"
+
+    if eoq_monthly_orders > 0:
+        action_orders = f"→ Target {eoq_monthly_orders:.1f}/mo (EOQ-optimal)"
+    else:
+        action_orders = "→ —"
+
+    if inventory_tracker.current_stock < safety_stock * 1.2:
+        action_safety = "→ Near threshold — reorder soon"
+    else:
+        action_safety = "→ Buffer adequate"
+
+    avg_order = kpis.get('avg_order_size', 0)
+    if avg_order > 0 and eoq > 0 and abs(avg_order - eoq) / eoq > 0.25:
+        action_eoq = f"→ Align orders closer to {eoq:,.0f} kg"
+    else:
+        action_eoq = "→ Order sizes aligned"
+
+    action_spending = "→ See cost breakdown below"
+
+    if annual_transport_savings > 0:
+        action_transport = "→ Implement EOQ to realize this"
+    else:
+        action_transport = "→ Already optimized"
+
+    if percent_savings > 0:
+        action_monthly = "→ On track — maintain policy"
+    else:
+        action_monthly = "→ Review order frequency"
+
+    if container_eff < 85:
+        action_container = "→ Consolidate orders to improve fill"
+    else:
+        action_container = "→ Fill rate optimal"
 
     # Row 1: Main KPIs (4 columns)
     col1, col2, col3, col4 = st.columns(4)
@@ -7293,6 +7439,7 @@ def main():
             <div style="font-size: 11px; color: {stock_status['color']}; font-weight: 600;">
                 {stock_status['status']}
             </div>
+            <div style="{action_style}">{action_stock}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7314,6 +7461,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 {kpis.get('total_volume', 0):,.0f} kg total
             </div>
+            <div style="{action_style}">{action_orders}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7335,6 +7483,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 {kpis.get('order_frequency', 0):.1f} orders/mo
             </div>
+            <div style="{action_style}">{action_safety}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7356,6 +7505,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 Optimal order size
             </div>
+            <div style="{action_style}">{action_eoq}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7388,6 +7538,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 Total cost
             </div>
+            <div style="{action_style}">{action_spending}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7409,6 +7560,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 From EOQ optimization
             </div>
+            <div style="{action_style}">{action_transport}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7432,11 +7584,11 @@ def main():
             <div style="font-size: 12px; color: {delta_color}; font-weight: 600;">
                 {delta_arrow} {percent_savings:+.1f}%
             </div>
+            <div style="{action_style}">{action_monthly}</div>
         </div>
         """, unsafe_allow_html=True)
 
     with col4:
-        container_eff = kpis.get('container_utilization', 0) * 100
         st.markdown(f"""
         <div style="
             background: rgba(255,255,255,0.06);
@@ -7454,6 +7606,7 @@ def main():
             <div style="font-size: 11px; color: #888;">
                 Fill rate
             </div>
+            <div style="{action_style}">{action_container}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -7623,9 +7776,10 @@ def main():
         """, unsafe_allow_html=True)
         
         # ALL ITEMS CONTAINER - 5 Tabs
+        tab_inventory = tab_movements = tab_analytics = tab_inventory_visual = tab_advanced = None
         visible_tab_names = filter_tabs(ALL_ITEMS_TAB_REQUIREMENTS)
         if not visible_tab_names:
-            st.warning("🔒 You don't have permission to view any tabs in this mode.")
+            st.warning("This section isn't available for your current role. Contact an administrator if you believe this is an error.")
             log_access_denied("view_all_items_mode")
         else:
             created_tabs = st.tabs(visible_tab_names)
@@ -9204,9 +9358,10 @@ def main():
         """, unsafe_allow_html=True)
         
         # DRY ICE CONTAINER - 7 Tabs
+        tab1 = tab2 = tab3 = tab4 = tab5 = tab6 = tab7 = None
         visible_tab_names = filter_tabs(DRY_ICE_TAB_REQUIREMENTS)
         if not visible_tab_names:
-            st.warning("🔒 You don't have permission to view any tabs in this mode.")
+            st.warning("This section isn't available for your current role. Contact an administrator if you believe this is an error.")
             log_access_denied("view_dry_ice_mode")
         else:
             created_tabs = st.tabs(visible_tab_names)

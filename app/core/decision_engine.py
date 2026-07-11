@@ -134,3 +134,39 @@ class InventoryDecisionEngine:
             "explanation": self.explanation(),
             "forecast_accuracy": round(self.s.forecast_accuracy, 1),
         }
+    
+    def generate_ai_insights(current_stock, safety_stock, reorder_point, eoq,
+                          avg_daily_forecast, historical_avg_daily,
+                          forecast_accuracy, container_efficiency):
+        """
+        Generate a short, prioritized list of rule-based insights.
+        Returns up to 4 dicts: {icon, text, priority} — priority 0=critical, 1=warning, 2=good.
+        """
+        insights = []
+
+        if current_stock <= 0:
+            insights.append({'icon': '🔴', 'text': 'Stock is depleted — order immediately', 'priority': 0})
+        elif current_stock < safety_stock:
+            insights.append({'icon': '🔴', 'text': f'Stock ({current_stock:,.0f} kg) is below safety stock ({safety_stock:,.0f} kg)', 'priority': 0})
+        elif current_stock <= reorder_point:
+            insights.append({'icon': '⚠️', 'text': f'Stock has reached the reorder point — order {eoq:,.0f} kg soon', 'priority': 1})
+        else:
+            insights.append({'icon': '✅', 'text': 'No purchase required today', 'priority': 2})
+
+        if historical_avg_daily > 0:
+            pct_change = (avg_daily_forecast - historical_avg_daily) / historical_avg_daily * 100
+            if pct_change >= 15:
+                insights.append({'icon': '⚠️', 'text': f'Forecasted demand is {pct_change:.0f}% above recent average', 'priority': 1})
+            elif pct_change <= -15:
+                insights.append({'icon': 'ℹ️', 'text': f'Forecasted demand is {abs(pct_change):.0f}% below recent average', 'priority': 2})
+
+        if forecast_accuracy < 70:
+            insights.append({'icon': '⚠️', 'text': f'Forecast confidence is low ({forecast_accuracy:.0f}%) — treat recommendations cautiously', 'priority': 1})
+        elif forecast_accuracy >= 90:
+            insights.append({'icon': '✅', 'text': f'Forecast confidence is strong ({forecast_accuracy:.0f}%)', 'priority': 2})
+
+        if container_efficiency < 70:
+            insights.append({'icon': '⚠️', 'text': f'Container fill rate is low ({container_efficiency:.0f}%) — consolidate orders', 'priority': 1})
+
+        insights.sort(key=lambda x: x['priority'])
+        return insights[:4]
