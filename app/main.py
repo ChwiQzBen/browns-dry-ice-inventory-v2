@@ -37,6 +37,7 @@ from app.core.google_sheet_reader import GoogleSheetReader
 from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
+from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine
 import warnings
 from supabase import create_client, Client
 from core.error_handling import (
@@ -663,9 +664,51 @@ class Constants:
     SUB_LOSS_RANGE = (1.51, 3.03)
     LEAD_TIME_DAYS = 1
     SERVICE_LEVEL = 0.95
-    IMPLEMENTATION_COST = 50000
+    IMPLEMENTATION_COST = 25700  # training + SOP + signage + supervision + 20% contingency — adjustable in sidebar
+    ALL_ITEMS_IMPLEMENTATION_COST = 70000  # baseline count + data cleanup + training + first-cycle supervision — adjustable in sidebar
+    SYNERGY_DISCOUNT = 0.12  # combined rollout shares training/supervision overhead
 
 constants = Constants()
+
+@st.cache_data(ttl=600)
+def calculate_all_items_annual_savings(stock_df, order_cost, holding_rate):
+    """
+    Compute total EOQ-based annual savings across all priced inventory items.
+    Cached and computed automatically once stock_df is loaded — no button click needed.
+    Returns (total_annual_savings, items_analyzed).
+    """
+    if stock_df is None or stock_df.empty:
+        return 0.0, 0
+
+    cost_df = stock_df.copy()
+    if 'QUANTITY' not in cost_df.columns or 'UNIT PRICE' not in cost_df.columns:
+        return 0.0, 0
+
+    cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
+    cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
+    cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
+    cost_df = cost_df[(cost_df['QUANTITY'] > 0) & (cost_df['UNIT PRICE'] > 0)]
+
+    if cost_df.empty or holding_rate <= 0:
+        return 0.0, 0
+
+    cost_df['ANNUAL_DEMAND'] = cost_df['QUANTITY'] * 12
+    total_savings = 0.0
+    items_counted = 0
+
+    for _, row in cost_df.iterrows():
+        try:
+            eoq = math.sqrt((2 * row['ANNUAL_DEMAND'] * order_cost) / (holding_rate * row['UNIT PRICE']))
+            if eoq > 0 and row['QUANTITY'] > 0:
+                current_cost = (row['ANNUAL_DEMAND'] / row['QUANTITY']) * order_cost + (row['QUANTITY'] / 2) * holding_rate * row['UNIT PRICE']
+                optimal_cost = (row['ANNUAL_DEMAND'] / eoq) * order_cost + (eoq / 2) * holding_rate * row['UNIT PRICE']
+                savings = max(0, current_cost - optimal_cost)
+                total_savings += savings
+                items_counted += 1
+        except (ValueError, ZeroDivisionError):
+            continue
+
+    return total_savings, items_counted
 
 # 🔐 ROLE-BASED ACCESS CONTROL (tab/section visibility layer)
 # Independent of AuthManager.check_permission() — different granularity,
@@ -729,8 +772,8 @@ DRY_ICE_TAB_REQUIREMENTS = {
 def get_current_role() -> str:
     auth = st.session_state.get('_auth')
     if auth and getattr(auth, 'is_authenticated', False):
-        return getattr(auth, 'current_role', 'viewer') or 'viewer'
-    return 'viewer'
+        return getattr(auth, 'current_role', None) or None
+    return None
 
 def has_permission(permission: Permission) -> bool:
     return permission in ROLE_PERMISSIONS.get(get_current_role(), set())
@@ -6361,7 +6404,25 @@ def main():
         initial_stock=current_stock,
         analyzer=analyzer
     )
-    
+    # ============================================================
+    # 🎯 DECISION ENGINE (stored in session_state so the sidebar,
+    # which renders earlier in this function, can read it too)
+    # ============================================================
+    snapshot = InventorySnapshot(
+        current_stock=inventory_tracker.current_stock,
+        eoq=eoq,
+        safety_stock=safety_stock,
+        reorder_point=reorder_point,
+        forecast_values=ensemble_forecast_values,
+        forecast_accuracy=backtest_accuracy * 100,
+        lead_time_days=constants.LEAD_TIME_DAYS,
+        transport_cost=constants.TRANSPORT_COST,
+        avg_order_size=kpis.get('avg_order_size', 300),
+        monthly_holding_cost=annual_holding_cost / 12,
+    )
+    decision_engine = InventoryDecisionEngine(snapshot)
+    st.session_state.decision = decision_engine.executive_summary()
+
     # Initialize other components
     mobile_ui = MobileInterface()
     #alerts_system = SmartAlerts(inventory_tracker)
@@ -6988,6 +7049,31 @@ def main():
             st.write(f"**Lead time:** {constants.LEAD_TIME_DAYS} day(s)")
             st.write(f"**Service level:** {constants.SERVICE_LEVEL*100:.0f}%")
 
+            st.markdown("---")
+            st.markdown("**Implementation Cost — Dry Ice Tier**")
+            implementation_cost_input = st.number_input(
+                "Dry Ice Implementation Cost (KSh)",
+                min_value=0.0,
+                value=float(st.session_state.get('implementation_cost', constants.IMPLEMENTATION_COST)),
+                step=1000.0,
+                help="Staff training + SOP updates + signage + supervision during rollout + contingency buffer",
+                key="implementation_cost_input"
+            )
+            st.session_state.implementation_cost = implementation_cost_input
+            st.caption("Illustrative breakdown: training ~6,000 | SOP docs ~5,000 | signage ~4,000 | supervision ~6,400 | contingency ~20% — replace with real figures when available.")
+
+            st.markdown("**Implementation Cost — All Items Tier**")
+            all_items_implementation_cost_input = st.number_input(
+                "All Items Implementation Cost (KSh)",
+                min_value=0.0,
+                value=float(st.session_state.get('all_items_implementation_cost', constants.ALL_ITEMS_IMPLEMENTATION_COST)),
+                step=1000.0,
+                help="Baseline physical count + Google Sheets data cleanup + staff training + first-cycle supervision + contingency",
+                key="all_items_implementation_cost_input"
+            )
+            st.session_state.all_items_implementation_cost = all_items_implementation_cost_input
+            st.caption("Illustrative breakdown: baseline count ~28,800 | data cleanup ~11,200 | training ~7,500 | supervision ~12,800 | contingency ~15% — replace with real figures when available.")
+
         st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     # ============================================================
@@ -7070,6 +7156,54 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # 🎯 DECISION CENTER
+    # ============================================================
+    decision = st.session_state.get('decision')
+    if decision:
+        RISK_COLORS = {
+            "Critical": "#dc3545",
+            "High": "#ff9800",
+            "Medium": "#ffc107",
+            "Low": "#28a745",
+        }
+        decision_color = RISK_COLORS.get(decision["risk"]["level"], "#888888")
+        inv = decision["inventory"]
+        risk = decision["risk"]
+        fin = decision["financial"]
+
+        st.markdown(f"""
+        <div style="
+            border: 2px solid {decision_color};
+            border-radius: 16px;
+            padding: 20px;
+            margin: 20px 0;
+            background: {decision_color}0d;
+        ">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:18px; font-weight:700;">🎯 Decision Center</span>
+                <span style="background:{decision_color}; color:white; padding:4px 14px; border-radius:20px; font-size:12px; font-weight:600;">
+                    {risk['level']} Risk ({risk['score']}/100)
+                </span>
+            </div>
+            <div style="font-size:20px; font-weight:700; color:{decision_color}; margin-bottom:6px;">
+                {inv['action']}
+            </div>
+            <div style="font-size:14px; color:#555; margin-bottom:10px;">
+                {inv['recommendation']}
+            </div>
+            <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:13px; color:#888; margin-bottom:12px;">
+                <span>📅 Days remaining: <strong>{inv['days_remaining']}</strong></span>
+                <span>📦 Recommended qty: <strong>{inv['recommended_quantity']:,.0f} kg</strong></span>
+                <span>🎯 Forecast confidence: <strong>{decision['forecast_accuracy']:.0f}%</strong></span>
+                <span>💰 Potential savings: <strong>KSh {fin['potential_monthly_savings']:,.0f}/mo</strong></span>
+            </div>
+            <div style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 10px;">
+                <div style="font-size:12px; font-weight:600; color:#666; margin-bottom:4px;">Why?</div>
+                {''.join(f'<div style="font-size:13px; color:#555; margin-bottom:2px;">• {reason}</div>' for reason in decision['explanation'])}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ============================================================
     # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
@@ -7378,6 +7512,64 @@ def main():
     # Close the card
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # ============================================================
+    # 🏢 SYSTEM-WIDE ROI SUMMARY (Tier 3 — Combined, auto-recomputed)
+    # ============================================================
+    dry_ice_implementation_cost = st.session_state.get('implementation_cost', constants.IMPLEMENTATION_COST)
+    all_items_implementation_cost = st.session_state.get('all_items_implementation_cost', constants.ALL_ITEMS_IMPLEMENTATION_COST)
+    combined_implementation_cost = (dry_ice_implementation_cost + all_items_implementation_cost) * (1 - constants.SYNERGY_DISCOUNT)
+
+    all_items_annual_savings, items_analyzed = calculate_all_items_annual_savings(
+        stock_df if 'stock_df' in locals() and stock_df is not None else pd.DataFrame(),
+        constants.TRANSPORT_COST,
+        constants.HOLDING_RATE
+    )
+
+    combined_annual_savings = annual_transport_savings + all_items_annual_savings
+    combined_monthly_savings = combined_annual_savings / 12
+    combined_payback_months = (
+        combined_implementation_cost / combined_monthly_savings
+        if combined_monthly_savings > 0 else 0
+    )
+    combined_roi = (
+        (combined_annual_savings / combined_implementation_cost) * 100
+        if combined_implementation_cost > 0 else 0
+    )
+
+    with st.expander("🏢 System-Wide ROI Summary (Dry Ice + All Items Combined)", expanded=False):
+        st.caption(
+            f"Analyzed {items_analyzed} priced items across all categories, plus Dry Ice EOQ optimization. "
+            f"Costs below are estimates — adjust in Sidebar → System Parameters → Inventory Parameters."
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**❄️ Dry Ice Tier**")
+            st.metric("Implementation Cost", f"KSh {dry_ice_implementation_cost:,.0f}")
+            st.metric("Annual Savings", f"KSh {annual_transport_savings:,.0f}")
+            dry_ice_roi = (annual_transport_savings / dry_ice_implementation_cost * 100
+                           if dry_ice_implementation_cost > 0 else 0)
+            st.metric("ROI", f"{dry_ice_roi:.0f}%")
+
+        with col2:
+            st.markdown("**📦 All Items Tier**")
+            st.metric("Implementation Cost", f"KSh {all_items_implementation_cost:,.0f}")
+            st.metric("Annual Savings", f"KSh {all_items_annual_savings:,.0f}")
+            all_items_roi = (all_items_annual_savings / all_items_implementation_cost * 100
+                              if all_items_implementation_cost > 0 else 0)
+            st.metric("ROI", f"{all_items_roi:.0f}%")
+
+        with col3:
+            st.markdown("**🎯 Combined System**")
+            st.metric("Implementation Cost", f"KSh {combined_implementation_cost:,.0f}",
+                       help=f"Auto-computed: (Dry Ice + All Items) × {1 - constants.SYNERGY_DISCOUNT:.2f} — reflects shared training/supervision overhead when rolled out together")
+            st.metric("Annual Savings", f"KSh {combined_annual_savings:,.0f}")
+            st.metric("ROI", f"{combined_roi:.0f}%")
+
+        st.markdown("---")
+        st.metric("📅 Combined Payback Period", f"{combined_payback_months:.1f} months")
+
+    
     # ============================================================
     # 🔐 SECURITY DASHBOARD
     if st.session_state.get('show_security_dashboard', False):
@@ -9117,7 +9309,7 @@ def main():
                                 st.metric("Inventory Turns Change", f"{inventory_turns_improvement:+.1f}x")
 
                             annual_savings = monthly_savings * 12
-                            implementation_cost = 5000
+                            implementation_cost = st.session_state.get('implementation_cost', constants.IMPLEMENTATION_COST)
                             roi = (annual_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
                             st.metric("Estimated ROI", f"{roi:.0f}%", help="Return on investment from implementing optimizations")
                 else:
@@ -9503,7 +9695,7 @@ def main():
                         # THIS VALUE IS NOW CONSISTENT
                         st.metric("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", f"{annual_savings_percentage:.1f}% of total")
 
-                    implementation_cost = constants.IMPLEMENTATION_COST
+                    implementation_cost = st.session_state.get('implementation_cost', constants.IMPLEMENTATION_COST)
                     payback_period = implementation_cost / (annual_transport_savings / 12) if annual_transport_savings > 0 else 0
                     roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else 0
                     with impact_cols[2]:
@@ -9944,7 +10136,7 @@ def main():
                     
                     monthly_savings_percent = (monthly_transport_savings / current_monthly_transport_cost) * 100 if current_monthly_transport_cost > 0 else 0
                     annual_savings_percent = (annual_transport_savings / annual_transport_cost) * 100 if annual_transport_cost > 0 else 0
-                    implementation_cost = constants.IMPLEMENTATION_COST
+                    implementation_cost = st.session_state.get('implementation_cost', constants.IMPLEMENTATION_COST)
                     roi_percentage = (annual_transport_savings / implementation_cost) * 100 if implementation_cost > 0 else float('inf')
 
                     savings_cols = st.columns(5)

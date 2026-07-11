@@ -51,9 +51,9 @@ class AuthManager:
             'priority': 100
         },
         'manager': {
-            'permissions': ['view_inventory', 'edit_inventory', 'view_reports', 'manage_users'],
-            'priority': 80
-        },
+                'permissions': ['view_inventory', 'edit_inventory', 'view_reports', 'manage_users', 'record_usage', 'record_receipt'],
+                'priority': 80
+            },
         'user': {
             'permissions': ['view_inventory', 'record_usage', 'record_receipt', 'view_reports'],
             'priority': 50
