@@ -2364,9 +2364,9 @@ def show_replenishment_suggestions(recommendations_df, title="🛒 Replenishment
             return 'background-color: #d4edda;'
     
     # Apply styling
-    styled_df = display_df.style.map(
+    styled_df = display_df.style.applymap(
     color_urgency, subset=['Urgency']
-    ).map(
+    ).applymap(
         color_action, subset=['Action']
     )
     
@@ -4773,7 +4773,7 @@ def view_count_detail(count_id):
         return ''
     
     st.dataframe(
-        df.style.map(style_variance, subset=['Variance']),
+        df.style.applymap(style_variance, subset=['Variance']),
         use_container_width=True,
         hide_index=True
     )
@@ -8018,7 +8018,7 @@ def main():
                                         else:
                                             return 'background-color: #d4edda; color: #155724;'
                                     
-                                    styled_cycle_df = cycle_df.style.map(style_priority, subset=['Priority'])
+                                    styled_cycle_df = cycle_df.style.applymap(style_priority, subset=['Priority'])
                                     
                                     st.dataframe(
                                         styled_cycle_df,
@@ -8115,7 +8115,7 @@ def main():
                                         else:
                                             return 'background-color: #d4edda;'
                                     
-                                    styled_replenishment = replenishment_df.style.map(
+                                    styled_replenishment = replenishment_df.style.applymap(
                                         style_abc_class, subset=['ABC Class']
                                     )
                                                                     
@@ -10505,7 +10505,7 @@ def main():
 
                 # Styled dataframe with highlighting
                 st.dataframe(
-                roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
+                roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
                 .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
                 use_container_width=True,
                 height=200,
