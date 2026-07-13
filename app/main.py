@@ -180,8 +180,8 @@ def fix_order_date():
 
 
 st.set_page_config(
-    page_title="Browns Food Co - Dry Ice Inventory Optimizer",
-    page_icon="❄️",
+    page_title="Browns Ops Suite",
+    page_icon="🧀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -6793,7 +6793,7 @@ def main():
                 letter-spacing: -0.3px;
                 margin-bottom: 8px;
             ">
-                DRY ICE INVENTORY OPTIMIZER
+                BROWNS OPS SUITE
             </div>
             <div style="
                 height: 2px;
