@@ -489,22 +489,57 @@ def _render_batch_tracking_tab(book: RecipeBook, tracker: BatchTracker, supabase
         for ab in aging_batches:
             recipe = book.get(ab.cheese_name) if ab.cheese_name in book else None
             shelf_life = recipe.shelf_life_days if recipe else 365
-            col1, col2, col3 = st.columns([2, 1, 1])
+
+            # Expected post-loss yield the model assumed — used as the input default below
+            if recipe and recipe.aging:
+                expected_yield = ab.starting_quantity_kg * (recipe.aging.yield_rate ** ab.aging_years)
+            else:
+                expected_yield = ab.starting_quantity_kg
+
+            st.write(f"**{ab.batch_id}** — {ab.cheese_name} — {ab.starting_quantity_kg:.1f}kg started, "
+                    f"{ab.days_remaining()} days remaining")
+
+            # Quarterly checkpoint pass/fail — this was previously data with no UI
+            if ab.checkpoints:
+                cp_cols = st.columns(len(ab.checkpoints))
+                for i, cp in enumerate(ab.checkpoints):
+                    with cp_cols[i]:
+                        icon = {"Pending": "⏳", "Passed": "✅", "Failed": "❌"}.get(cp.status, "⏳")
+                        st.caption(f"{icon} {cp.stage}")
+                        if cp.status == "Pending":
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                if st.button("Pass", key=f"aging_pass_{ab.batch_id}_{cp.stage}"):
+                                    tracker.record_aging_checkpoint(ab.batch_id, cp.stage, passed=True)
+                                    st.rerun()
+                            with c2:
+                                if st.button("Fail", key=f"aging_fail_{ab.batch_id}_{cp.stage}"):
+                                    tracker.record_aging_checkpoint(ab.batch_id, cp.stage, passed=False)
+                                    st.rerun()
+
+            if ab.any_failed():
+                st.error("⚠️ Failed a quarterly aging check — this batch cannot be released.")
+
+            col1, col2 = st.columns([1, 1])
             with col1:
-                st.write(f"**{ab.batch_id}** — {ab.cheese_name} — {ab.starting_quantity_kg:.1f}kg started, "
-                         f"{ab.days_remaining()} days remaining")
+                actual_yield = st.number_input(
+                    "Actual yield (kg)", value=float(round(expected_yield, 1)), min_value=0.0,
+                    help=f"Model expected ~{expected_yield:.1f}kg after aging loss — adjust if the "
+                        f"real weigh-in differs.",
+                    key=f"yield_{ab.batch_id}"
+                )
             with col2:
-                actual_yield = st.number_input("Actual yield (kg)",
-                                                value=float(ab.starting_quantity_kg), min_value=0.0,
-                                                key=f"yield_{ab.batch_id}")
-            with col3:
-                if st.button("Release", key=f"release_aged_{ab.batch_id}"):
-                    tracker.release_from_aging(ab.batch_id, actual_yield, shelf_life)
-                    st.success(f"Released {actual_yield:.1f}kg of {ab.cheese_name} to finished goods.")
-                    st.rerun()
+                st.write("")
+                if st.button("Release", key=f"release_aged_{ab.batch_id}", disabled=ab.any_failed()):
+                    try:
+                        tracker.release_from_aging(ab.batch_id, actual_yield, shelf_life)
+                        st.success(f"Released {actual_yield:.1f}kg of {ab.cheese_name} to finished goods.")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(f"❌ {e}")
+            st.markdown("---")
     else:
         st.caption("Nothing currently aging.")
-
 
 # ============================================================
 # TAB 5: AGING ROOM
