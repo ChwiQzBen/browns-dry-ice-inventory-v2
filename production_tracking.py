@@ -115,6 +115,11 @@ class RecipeBook:
     def add(self, recipe: CheeseRecipe) -> None:
         self._recipes[recipe.name] = recipe
 
+    def remove(self, name: str) -> None:
+        if name not in self._recipes:
+            raise KeyError(f"No recipe registered for '{name}'")
+        del self._recipes[name]
+
     def get(self, name: str) -> CheeseRecipe:
         if name not in self._recipes:
             raise KeyError(f"No recipe registered for '{name}'")

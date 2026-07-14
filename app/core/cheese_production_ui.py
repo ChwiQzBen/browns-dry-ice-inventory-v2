@@ -257,10 +257,9 @@ def _render_recipes_tab(book: RecipeBook, supabase_client) -> None:
         with col_delete:
             if editing and st.button("🗑️ Delete Recipe", use_container_width=True, key="delete_recipe_btn"):
                 delete_recipe(editing.name, supabase_client)
-                book._recipes.pop(editing.name, None)
+                book.remove(editing.name)  
                 st.success(f"Deleted '{editing.name}'.")
                 st.rerun()
-
 
 # ============================================================
 # TAB 2: MILK RECEIPTS
