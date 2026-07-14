@@ -1,0 +1,596 @@
+"""
+app/core/cheese_production_ui.py
+==================================
+Streamlit tab bodies for "🧀 Cheese Production Mode" — the third mode
+alongside "All Items Mode" and "Dry Ice Mode" in main.py.
+
+Deliberately decoupled from main.py's Permission/RBAC machinery: this module
+takes a `has_permission` callable so it never imports from main.py (avoids a
+circular import, since main.py is the one that imports THIS module).
+
+Entry point:
+
+    from app.core.cheese_production_ui import render_cheese_production_mode
+    render_cheese_production_mode(supabase_client=init_supabase(), has_permission=has_permission)
+
+See CHEESE_INTEGRATION_GUIDE.md for the exact main.py wiring (Permission
+enum entries, tab-requirements dict, mode radio option, sidebar section).
+"""
+
+from __future__ import annotations
+from datetime import datetime, date, timedelta
+from typing import Optional, Callable
+import streamlit as st
+import pandas as pd
+
+from newsvendor_engine import AgingConfig
+from production_tracking import (
+    RecipeBook, CheeseRecipe, BOMLineItem, OperationStep,
+    BatchTracker, BatchStatus, DEFAULT_PRODUCTION_CHECKPOINTS, FEFOInventory,
+)
+from production_plan import ProductionPlanner
+from demand_forecast import CheeseDemandForecaster
+
+from app.core.cheese_data_access import (
+    init_cheese_storage, load_recipe_book, save_recipe, delete_recipe,
+    save_milk_receipt, get_milk_receipts, get_milk_liters_for_date,
+    load_batch_tracker, get_aging_room_capacity_kg, set_aging_room_capacity_kg,
+    get_aging_room_used_kg, check_aging_room_capacity,
+)
+
+CHEESE_TAB_NAMES = [
+    "🧀 Recipes",
+    "🥛 Milk Receipts",
+    "📋 Production Planning",
+    "🏭 Batch Tracking & QC",
+    "🧊 Aging Room",
+    "📦 FEFO Inventory",
+]
+
+
+# ============================================================
+# SESSION STATE / SETUP
+# ============================================================
+def _ensure_state(supabase_client) -> None:
+    if "cheese_storage_initialized" not in st.session_state:
+        init_cheese_storage(supabase_client)
+        st.session_state.cheese_storage_initialized = True
+
+    if "cheese_recipe_book" not in st.session_state:
+        st.session_state.cheese_recipe_book = load_recipe_book(supabase_client)
+
+    if "cheese_tracker" not in st.session_state:
+        st.session_state.cheese_tracker = load_batch_tracker(supabase_client)
+
+    if "cheese_demand_overrides" not in st.session_state:
+        # {cheese_name: (mean_kg, std_kg)} — manual planning inputs until
+        # cheese_sales_history has enough rows for the forecaster to take over
+        st.session_state.cheese_demand_overrides = {}
+
+    if "cheese_selling_prices" not in st.session_state:
+        st.session_state.cheese_selling_prices = {}
+
+    if "cheese_last_plan" not in st.session_state:
+        st.session_state.cheese_last_plan = None
+
+
+def render_cheese_production_mode(supabase_client=None,
+                                   has_permission: Optional[Callable[[str], bool]] = None,
+                                   milk_cost_per_liter: float = 45.0,
+                                   raw_milk_price_per_liter: float = 35.0) -> None:
+    """Main entry point — call this from main.py inside the
+    '🧀 Cheese Production Mode' branch, after filtering visible tab names
+    the same way the other two modes already do."""
+
+    def _allowed(permission: str) -> bool:
+        return has_permission(permission) if has_permission else True
+
+    _ensure_state(supabase_client)
+    book: RecipeBook = st.session_state.cheese_recipe_book
+    tracker: BatchTracker = st.session_state.cheese_tracker
+
+    visible = [name for name, perm in {
+        "🧀 Recipes": "view_cheese_recipes",
+        "🥛 Milk Receipts": "record_milk_receipt",
+        "📋 Production Planning": "run_production_plan",
+        "🏭 Batch Tracking & QC": "manage_cheese_batches",
+        "🧊 Aging Room": "view_cheese_production",
+        "📦 FEFO Inventory": "view_cheese_production",
+    }.items() if _allowed(perm)]
+
+    if not visible:
+        st.warning("This section isn't available for your current role.")
+        return
+
+    tabs = st.tabs(visible)
+    tab_lookup = dict(zip(visible, tabs))
+
+    if "🧀 Recipes" in tab_lookup:
+        with tab_lookup["🧀 Recipes"]:
+            _render_recipes_tab(book, supabase_client)
+    if "🥛 Milk Receipts" in tab_lookup:
+        with tab_lookup["🥛 Milk Receipts"]:
+            _render_milk_receipts_tab(supabase_client)
+    if "📋 Production Planning" in tab_lookup:
+        with tab_lookup["📋 Production Planning"]:
+            _render_production_planning_tab(book, tracker, supabase_client,
+                                             milk_cost_per_liter, raw_milk_price_per_liter)
+    if "🏭 Batch Tracking & QC" in tab_lookup:
+        with tab_lookup["🏭 Batch Tracking & QC"]:
+            _render_batch_tracking_tab(book, tracker, supabase_client)
+    if "🧊 Aging Room" in tab_lookup:
+        with tab_lookup["🧊 Aging Room"]:
+            _render_aging_room_tab(tracker, supabase_client)
+    if "📦 FEFO Inventory" in tab_lookup:
+        with tab_lookup["📦 FEFO Inventory"]:
+            _render_fefo_inventory_tab(book, tracker)
+
+
+# ============================================================
+# TAB 1: RECIPES
+# ============================================================
+def _render_recipes_tab(book: RecipeBook, supabase_client) -> None:
+    st.markdown("### 🧀 Cheese Recipes (BOM / Master Data)")
+
+    if book.list_names():
+        rows = []
+        for name in book.list_names():
+            r = book.get(name)
+            rows.append({
+                "Name": r.name, "Code": r.product_code, "Category": r.category,
+                "Batch Size (kg)": r.batch_size_kg, "Milk (L/batch)": r.milk_liters_per_batch,
+                "Yield (kg/L)": round(r.yield_kg_per_liter_milk(), 3),
+                "Unit Cost (KSh/kg, excl. milk)": round(r.unit_cost(), 2),
+                "Shelf Life (days)": r.shelf_life_days,
+                "Aging": f"{r.aging.aging_years:.1f}yr" if r.aging else "—",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("No recipes yet — add your first one below.")
+
+    with st.expander("➕ Add / Edit Recipe", expanded=not book.list_names()):
+        existing_names = ["(new recipe)"] + book.list_names()
+        pick = st.selectbox("Recipe", existing_names, key="recipe_picker")
+        editing = book.get(pick) if pick != "(new recipe)" else None
+
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Name", value=editing.name if editing else "", key="recipe_name")
+            product_code = st.text_input("Product Code", value=editing.product_code if editing else "",
+                                          key="recipe_code")
+            category = st.text_input("Category", value=editing.category if editing else "Fresh Cheese",
+                                      key="recipe_category")
+            batch_size_kg = st.number_input("Batch Size (kg finished cheese)",
+                                             value=float(editing.batch_size_kg) if editing else 6.0,
+                                             min_value=0.1, step=0.5, key="recipe_batch_size")
+        with col2:
+            milk_liters = st.number_input("Milk per Batch (liters)",
+                                           value=float(editing.milk_liters_per_batch) if editing else 50.0,
+                                           min_value=0.1, step=5.0, key="recipe_milk_liters")
+            shelf_life = st.number_input("Shelf Life (days, once finished)",
+                                          value=int(editing.shelf_life_days) if editing else 30,
+                                          min_value=1, step=1, key="recipe_shelf_life")
+            lead_time = st.number_input("Lead Time (days, order to finished good)",
+                                         value=int(editing.lead_time_days) if editing else 1,
+                                         min_value=0, step=1, key="recipe_lead_time")
+
+        st.markdown("**Non-milk ingredients** (cost per batch — milk itself is costed separately)")
+        default_ing = pd.DataFrame([
+            {"name": i.name, "quantity": i.quantity, "unit": i.unit, "cost_per_unit": i.cost_per_unit}
+            for i in editing.non_milk_ingredients
+        ]) if editing else pd.DataFrame(columns=["name", "quantity", "unit", "cost_per_unit"])
+        ing_df = st.data_editor(default_ing, num_rows="dynamic", use_container_width=True,
+                                 key="recipe_ingredients_editor")
+
+        st.markdown("**Packaging**")
+        default_pkg = pd.DataFrame([
+            {"name": i.name, "quantity": i.quantity, "unit": i.unit, "cost_per_unit": i.cost_per_unit}
+            for i in editing.packaging
+        ]) if editing else pd.DataFrame(columns=["name", "quantity", "unit", "cost_per_unit"])
+        pkg_df = st.data_editor(default_pkg, num_rows="dynamic", use_container_width=True,
+                                 key="recipe_packaging_editor")
+
+        st.markdown("**Operations**")
+        default_ops = pd.DataFrame([
+            {"name": o.name, "hours": o.hours, "machine": o.machine, "cost_per_hour": o.cost_per_hour}
+            for o in editing.operations
+        ]) if editing else pd.DataFrame(columns=["name", "hours", "machine", "cost_per_hour"])
+        ops_df = st.data_editor(default_ops, num_rows="dynamic", use_container_width=True,
+                                 key="recipe_operations_editor")
+
+        st.markdown("**Aging** (leave unchecked for fresh cheese)")
+        has_aging = st.checkbox("This cheese ages", value=bool(editing.aging) if editing else False,
+                                 key="recipe_has_aging")
+        aging = None
+        if has_aging:
+            ac1, ac2, ac3 = st.columns(3)
+            with ac1:
+                aging_years = st.number_input("Aging Years", value=editing.aging.aging_years if (editing and editing.aging) else 1.0,
+                                               min_value=0.1, step=0.5, key="recipe_aging_years")
+                yield_rate = st.number_input("Yield Rate (survives aging, %/yr)",
+                                              value=(editing.aging.yield_rate * 100) if (editing and editing.aging) else 90.0,
+                                              min_value=1.0, max_value=100.0, step=1.0, key="recipe_yield_rate") / 100
+            with ac2:
+                storage_rate = st.number_input("Storage Cost Rate (%/yr)",
+                                                value=(editing.aging.storage_cost_rate * 100) if (editing and editing.aging) else 3.0,
+                                                min_value=0.0, step=0.5, key="recipe_storage_rate") / 100
+                aging_loss_rate = st.number_input("Aging Loss Rate (%/yr)",
+                                                   value=(editing.aging.aging_loss_rate * 100) if (editing and editing.aging) else 2.0,
+                                                   min_value=0.0, step=0.5, key="recipe_aging_loss") / 100
+            with ac3:
+                financing_rate = st.number_input("Financing Rate (%/yr)",
+                                                  value=(editing.aging.financing_rate * 100) if (editing and editing.aging) else 5.0,
+                                                  min_value=0.0, step=0.5, key="recipe_financing_rate") / 100
+                overage_mult = st.number_input("Overage Penalty Multiplier",
+                                                value=editing.aging.overage_penalty_multiplier if (editing and editing.aging) else 1.0,
+                                                min_value=1.0, step=0.1, key="recipe_overage_mult")
+            aging = AgingConfig(aging_years=aging_years, storage_cost_rate=storage_rate,
+                                 aging_loss_rate=aging_loss_rate, financing_rate=financing_rate,
+                                 yield_rate=yield_rate, overage_penalty_multiplier=overage_mult)
+
+        col_save, col_delete = st.columns(2)
+        with col_save:
+            if st.button("💾 Save Recipe", type="primary", use_container_width=True, key="save_recipe_btn"):
+                if not name:
+                    st.error("Name is required.")
+                else:
+                    try:
+                        recipe = CheeseRecipe(
+                            name=name, product_code=product_code, category=category,
+                            batch_size_kg=batch_size_kg, milk_liters_per_batch=milk_liters,
+                            shelf_life_days=int(shelf_life), lead_time_days=int(lead_time),
+                            non_milk_ingredients=[BOMLineItem(**row) for row in ing_df.to_dict("records") if row.get("name")],
+                            packaging=[BOMLineItem(**row) for row in pkg_df.to_dict("records") if row.get("name")],
+                            operations=[OperationStep(**row) for row in ops_df.to_dict("records") if row.get("name")],
+                            aging=aging,
+                            recipe_version=editing.recipe_version if editing else "v1.0",
+                        )
+                        save_recipe(recipe, supabase_client)
+                        book.add(recipe)
+                        st.success(f"✅ Saved '{name}'. Unit cost (excl. milk): KSh {recipe.unit_cost():.2f}/kg, "
+                                   f"yield {recipe.yield_kg_per_liter_milk():.3f} kg/L milk.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Could not save recipe: {e}")
+        with col_delete:
+            if editing and st.button("🗑️ Delete Recipe", use_container_width=True, key="delete_recipe_btn"):
+                delete_recipe(editing.name, supabase_client)
+                book._recipes.pop(editing.name, None)
+                st.success(f"Deleted '{editing.name}'.")
+                st.rerun()
+
+
+# ============================================================
+# TAB 2: MILK RECEIPTS
+# ============================================================
+def _render_milk_receipts_tab(supabase_client) -> None:
+    st.markdown("### 🥛 Milk Receipts")
+    st.caption("This is the daily milk supply the Production Planning tab allocates across cheeses.")
+
+    today_total = get_milk_liters_for_date(date.today(), supabase_client)
+    st.metric("Milk received today", f"{today_total:,.0f} L")
+
+    with st.form("milk_receipt_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            receipt_date = st.date_input("Receipt Date", value=date.today())
+            liters = st.number_input("Liters", min_value=0.0, value=300.0, step=10.0)
+        with col2:
+            cost_per_liter = st.number_input("Cost per Liter (KSh)", min_value=0.0, value=45.0, step=1.0)
+            supplier = st.text_input("Supplier", placeholder="e.g. Kiambu Dairy Farmers Co-op")
+        notes = st.text_input("Notes (optional)")
+
+        if st.form_submit_button("📥 Record Milk Receipt", type="primary"):
+            if liters <= 0:
+                st.error("Enter a quantity greater than 0.")
+            else:
+                new_id = save_milk_receipt(receipt_date, liters, cost_per_liter, supplier, notes, supabase_client)
+                st.success(f"✅ Recorded {liters:,.0f}L at KSh {cost_per_liter:.2f}/L (receipt #{new_id}).")
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### Recent Receipts")
+    start = date.today() - timedelta(days=30)
+    receipts = get_milk_receipts(start_date=start, supabase_client=supabase_client)
+    if receipts:
+        df = pd.DataFrame(receipts)
+        df["total_cost"] = df["liters"] * df["cost_per_liter"]
+        st.dataframe(
+            df[["id", "date", "liters", "cost_per_liter", "total_cost", "supplier", "notes"]],
+            use_container_width=True, hide_index=True,
+        )
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Receipts CSV", csv,
+                            file_name=f"milk_receipts_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+    else:
+        st.info("No milk receipts in the last 30 days.")
+
+
+# ============================================================
+# TAB 3: PRODUCTION PLANNING
+# ============================================================
+def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, supabase_client,
+                                     milk_cost_per_liter: float, raw_milk_price_per_liter: float) -> None:
+    st.markdown("### 📋 Today's Production Plan")
+
+    if not book.list_names():
+        st.warning("Add at least one recipe in the 🧀 Recipes tab before planning production.")
+        return
+
+    default_milk = get_milk_liters_for_date(date.today(), supabase_client)
+    milk_available_l = st.number_input(
+        "Milk available today (liters)", min_value=0.0,
+        value=float(default_milk) if default_milk > 0 else 0.0, step=10.0,
+        help="Defaults to today's total from the 🥛 Milk Receipts tab — override if needed.",
+    )
+
+    capacity_kg = get_aging_room_capacity_kg(supabase_client=supabase_client)
+    used_kg = get_aging_room_used_kg(tracker)
+    remaining_kg = max(0.0, capacity_kg - used_kg)
+    cap_col1, cap_col2, cap_col3 = st.columns(3)
+    cap_col1.metric("Aging Room Capacity", f"{capacity_kg:,.0f} kg")
+    cap_col2.metric("Currently Aging", f"{used_kg:,.0f} kg")
+    cap_col3.metric("Room Remaining", f"{remaining_kg:,.0f} kg")
+
+    st.markdown("#### Demand & Pricing per Cheese")
+    st.caption(
+        "No per-SKU sales history table is wired in yet, so these are manual estimates "
+        "(CheeseDemandForecaster will switch to rolling-stats/ML automatically once "
+        "cheese_sales_history has enough rows — see demand_forecast.py)."
+    )
+    forecaster = CheeseDemandForecaster()
+    demand_forecast = {}
+    selling_prices = {}
+    for name in book.list_names():
+        recipe = book.get(name)
+        with st.expander(f"{name}" + (" (aged)" if recipe.aging else ""), expanded=False):
+            c1, c2, c3 = st.columns(3)
+            prior_mean, prior_std = st.session_state.cheese_demand_overrides.get(name, (0.0, 0.0))
+            with c1:
+                mean_kg = st.number_input(f"Expected demand (kg)", min_value=0.0,
+                                           value=float(prior_mean), step=1.0, key=f"demand_mean_{name}")
+            with c2:
+                std_kg = st.number_input(f"Demand std dev (kg)", min_value=0.0,
+                                          value=float(prior_std) if prior_std else round(mean_kg * 0.3, 1),
+                                          step=1.0, key=f"demand_std_{name}")
+            with c3:
+                price = st.number_input(f"Selling price (KSh/kg)", min_value=0.0,
+                                         value=float(st.session_state.cheese_selling_prices.get(name, 0.0)),
+                                         step=10.0, key=f"price_{name}")
+            fcast = forecaster.forecast(name, [], fallback_mean=mean_kg if mean_kg > 0 else 1.0)
+            st.caption(f"ℹ️ {fcast.confidence_note}")
+            demand_forecast[name] = (mean_kg, std_kg if std_kg > 0 else mean_kg * 0.3)
+            selling_prices[name] = price
+            st.session_state.cheese_demand_overrides[name] = (mean_kg, std_kg)
+            st.session_state.cheese_selling_prices[name] = price
+
+    ready = milk_available_l > 0 and all(v > 0 for v in selling_prices.values()) and any(
+        v[0] > 0 for v in demand_forecast.values())
+
+    if st.button("🧮 Build Production Plan", type="primary", disabled=not ready):
+        planner = ProductionPlanner(book, tracker, milk_cost_per_liter, raw_milk_price_per_liter)
+        # Only pass cheeses with a non-zero demand estimate to the allocator
+        active_demand = {k: v for k, v in demand_forecast.items() if v[0] > 0 and selling_prices.get(k, 0) > 0}
+        plan = planner.build_plan(
+            milk_available_l=milk_available_l,
+            demand_forecast=active_demand,
+            selling_prices={k: selling_prices[k] for k in active_demand},
+            aging_room_capacity_kg=capacity_kg,
+            aging_room_used_kg=used_kg,
+        )
+        st.session_state.cheese_last_plan = plan
+
+    if not ready:
+        st.info("Enter milk available, and at least one cheese's demand + selling price, to enable planning.")
+
+    plan = st.session_state.cheese_last_plan
+    if plan:
+        st.markdown("---")
+        st.markdown("#### Plan Result")
+        st.code(plan.summary(), language=None)
+        if plan.warnings:
+            for w in plan.warnings:
+                st.warning(w)
+
+        with st.expander("🚀 Execute this plan (creates real production batches)"):
+            operator = st.text_input("Operator name", key="execute_plan_operator")
+            recent_receipts = get_milk_receipts(start_date=date.today() - timedelta(days=3),
+                                                 supabase_client=supabase_client)
+            receipt_labels = {f"#{r['id']} — {r['date']} — {r['liters']:.0f}L": str(r["id"]) for r in recent_receipts}
+            picked_labels = st.multiselect("Milk receipt(s) used", list(receipt_labels.keys()),
+                                            default=list(receipt_labels.keys())[:1] if receipt_labels else [])
+            milk_receipt_ids = [receipt_labels[l] for l in picked_labels]
+
+            if st.button("✅ Confirm & Create Batches", type="primary", key="confirm_execute_plan"):
+                if not operator:
+                    st.error("Enter an operator name for traceability.")
+                else:
+                    batch_ids = planner.execute_plan(plan, operator=operator,
+                                                       milk_receipt_ids=milk_receipt_ids) \
+                        if 'planner' in dir() else None
+                    # planner may be out of scope if the page re-ran between build & execute;
+                    # rebuild a lightweight one bound to the same tracker/book to execute safely.
+                    if batch_ids is None:
+                        planner = ProductionPlanner(book, tracker, milk_cost_per_liter, raw_milk_price_per_liter)
+                        batch_ids = planner.execute_plan(plan, operator=operator, milk_receipt_ids=milk_receipt_ids)
+                    st.success(f"✅ Created {len(batch_ids)} production batch(es): {', '.join(batch_ids)}")
+                    st.session_state.cheese_last_plan = None
+                    st.rerun()
+
+
+# ============================================================
+# TAB 4: BATCH TRACKING & QC
+# ============================================================
+def _render_batch_tracking_tab(book: RecipeBook, tracker: BatchTracker, supabase_client) -> None:
+    st.markdown("### 🏭 Batch Tracking & Quality Control")
+
+    if not tracker.production_batches:
+        st.info("No production batches yet — build and execute a plan in 📋 Production Planning.")
+        return
+
+    status_filter = st.selectbox("Filter by status", ["All"] + [s.value for s in BatchStatus],
+                                  key="batch_status_filter")
+    batches = list(tracker.production_batches.values())
+    if status_filter != "All":
+        batches = [b for b in batches if b.status.value == status_filter]
+    batches.sort(key=lambda b: b.created_at, reverse=True)
+
+    for batch in batches:
+        with st.container():
+            st.markdown(f"**{batch.batch_id}** — {batch.cheese_name} — {batch.quantity_kg:.1f} kg "
+                        f"— *{batch.status.value}* — operator: {batch.operator}")
+            cp_cols = st.columns(len(batch.checkpoints) or 1)
+            for i, cp in enumerate(batch.checkpoints):
+                with cp_cols[i % len(cp_cols)]:
+                    icon = {"Pending": "⏳", "Passed": "✅", "Failed": "❌"}.get(cp.status, "⏳")
+                    st.caption(f"{icon} {cp.stage}")
+                    if cp.status == "Pending":
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("Pass", key=f"pass_{batch.batch_id}_{cp.stage}"):
+                                tracker.record_production_checkpoint(batch.batch_id, cp.stage, passed=True)
+                                st.rerun()
+                        with c2:
+                            if st.button("Fail", key=f"fail_{batch.batch_id}_{cp.stage}"):
+                                tracker.record_production_checkpoint(batch.batch_id, cp.stage, passed=False)
+                                st.rerun()
+
+            recipe = book.get(batch.cheese_name) if batch.cheese_name in book else None
+            if batch.status == BatchStatus.PASSED_QC:
+                if recipe and recipe.aging:
+                    if st.button(f"🧊 Start Aging ({recipe.aging.aging_years:.1f}yr)",
+                                 key=f"start_aging_{batch.batch_id}"):
+                        ok, used, capacity, remaining = check_aging_room_capacity(
+                            tracker, batch.quantity_kg, supabase_client=supabase_client)
+                        if not ok:
+                            st.error(f"⚠️ Aging room only has {remaining:.1f}kg free "
+                                     f"(capacity {capacity:.0f}kg, {used:.0f}kg already aging) — "
+                                     f"this batch is {batch.quantity_kg:.1f}kg. Free up room first, "
+                                     f"or reduce the batch quantity before starting aging.")
+                        else:
+                            tracker.start_aging(batch.batch_id, recipe.aging.aging_years)
+                            st.success("Aging started.")
+                            st.rerun()
+                else:
+                    shelf_life = recipe.shelf_life_days if recipe else 30
+                    if st.button("📦 Release to Finished Goods", key=f"release_fresh_{batch.batch_id}"):
+                        tracker.release_fresh_to_finished(batch.batch_id, shelf_life)
+                        st.success("Released to finished goods.")
+                        st.rerun()
+            elif batch.status == BatchStatus.FAILED_QC:
+                st.error("❌ Failed QC — not eligible for aging or release.")
+            st.markdown("---")
+
+    st.markdown("#### Batches Currently Aging")
+    aging_batches = [b for b in tracker.aging_batches.values() if b.status == BatchStatus.AGING]
+    if aging_batches:
+        for ab in aging_batches:
+            recipe = book.get(ab.cheese_name) if ab.cheese_name in book else None
+            shelf_life = recipe.shelf_life_days if recipe else 365
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                st.write(f"**{ab.batch_id}** — {ab.cheese_name} — {ab.starting_quantity_kg:.1f}kg started, "
+                         f"{ab.days_remaining()} days remaining")
+            with col2:
+                actual_yield = st.number_input("Actual yield (kg)",
+                                                value=float(ab.starting_quantity_kg), min_value=0.0,
+                                                key=f"yield_{ab.batch_id}")
+            with col3:
+                if st.button("Release", key=f"release_aged_{ab.batch_id}"):
+                    tracker.release_from_aging(ab.batch_id, actual_yield, shelf_life)
+                    st.success(f"Released {actual_yield:.1f}kg of {ab.cheese_name} to finished goods.")
+                    st.rerun()
+    else:
+        st.caption("Nothing currently aging.")
+
+
+# ============================================================
+# TAB 5: AGING ROOM
+# ============================================================
+def _render_aging_room_tab(tracker: BatchTracker, supabase_client) -> None:
+    st.markdown("### 🧊 Aging Room Capacity")
+
+    current_capacity = get_aging_room_capacity_kg(supabase_client=supabase_client)
+    used = get_aging_room_used_kg(tracker)
+    remaining = max(0.0, current_capacity - used)
+    pct = min(1.0, used / current_capacity) if current_capacity > 0 else 0.0
+
+    st.progress(pct, text=f"{used:,.0f} / {current_capacity:,.0f} kg used ({pct:.0%})")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Capacity", f"{current_capacity:,.0f} kg")
+    col2.metric("Used", f"{used:,.0f} kg")
+    col3.metric("Remaining", f"{remaining:,.0f} kg")
+
+    with st.expander("⚙️ Adjust Room Capacity"):
+        new_capacity = st.number_input("Max Capacity (kg)", min_value=0.0, value=float(current_capacity), step=10.0)
+        notes = st.text_input("Notes", placeholder="e.g. Aging Room 1, north wall shelving")
+        if st.button("Save Capacity", type="primary"):
+            set_aging_room_capacity_kg(new_capacity, notes=notes, supabase_client=supabase_client)
+            st.success(f"✅ Aging room capacity set to {new_capacity:,.0f} kg.")
+            st.rerun()
+
+    st.markdown("#### Batches in the Room")
+    aging_batches = [b for b in tracker.aging_batches.values() if b.status == BatchStatus.AGING]
+    if aging_batches:
+        rows = [{
+            "Batch": b.batch_id, "Cheese": b.cheese_name, "Kg": b.starting_quantity_kg,
+            "Days Remaining": b.days_remaining(), "Started": b.start_date.strftime("%Y-%m-%d"),
+        } for b in aging_batches]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("The aging room is currently empty.")
+
+
+# ============================================================
+# TAB 6: FEFO INVENTORY
+# ============================================================
+def _render_fefo_inventory_tab(book: RecipeBook, tracker: BatchTracker) -> None:
+    st.markdown("### 📦 Finished Goods Inventory (FEFO)")
+    fefo = FEFOInventory(tracker)
+
+    rows = []
+    for name in book.list_names():
+        stock = fefo.total_available_kg(name)
+        batches = fefo.stock_by_cheese(name)
+        next_expiry = batches[0].expiry_date.strftime("%Y-%m-%d") if batches else "—"
+        rows.append({"Cheese": name, "Total Stock (kg)": stock, "Batches": len(batches),
+                      "Next Expiry": next_expiry})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    days = st.slider("Show items expiring within (days)", min_value=1, max_value=90, value=14)
+    expiring = fefo.expiring_within(days)
+    if expiring:
+        st.warning(f"⚠️ {len(expiring)} finished batch(es) expiring within {days} days")
+        exp_rows = [{
+            "Batch": b.batch_id, "Cheese": b.cheese_name, "Kg": b.quantity_kg,
+            "Expiry": b.expiry_date.strftime("%Y-%m-%d"),
+            "Days Left": b.days_to_expiry(),
+        } for b in expiring]
+        st.dataframe(pd.DataFrame(exp_rows), use_container_width=True, hide_index=True)
+    else:
+        st.success(f"✅ Nothing expiring within {days} days.")
+
+    st.markdown("---")
+    st.markdown("#### Simulate an Order (FEFO Allocation)")
+    if book.list_names():
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sim_cheese = st.selectbox("Cheese", book.list_names(), key="fefo_sim_cheese")
+        with c2:
+            sim_qty = st.number_input("Quantity requested (kg)", min_value=0.0, value=10.0, step=1.0)
+        with c3:
+            st.write("")
+            st.write("")
+            run_sim = st.button("Allocate")
+        if run_sim:
+            result = fefo.allocate(sim_cheese, sim_qty)
+            st.write(f"Allocated **{result.allocated_kg:.1f}kg** of {sim_qty:.1f}kg requested "
+                     f"(shortfall: {result.shortfall_kg:.1f}kg)")
+            if result.lines:
+                st.dataframe(pd.DataFrame([{
+                    "Batch": l.batch_id, "Kg Taken": l.quantity_kg,
+                    "Expiry": l.expiry_date.strftime("%Y-%m-%d"),
+                } for l in result.lines]), use_container_width=True, hide_index=True)
+            st.caption("Note: this mutates real stock (marks batches DISPATCHED) — it's a live allocation, "
+                       "not a dry run. Refresh the tab to re-check current stock.")
