@@ -9334,10 +9334,12 @@ def main():
     # CONTAINER 2: BCPOS MODE (Cheese Production)
     # ============================================================
     elif mode == "🧀 BCPOS Mode":
+        from app.core.cheese_data_access import get_weighted_milk_cost_for_date
+        todays_milk_cost = get_weighted_milk_cost_for_date(datetime.today().date(), init_supabase())
         render_cheese_production_mode(
             supabase_client=init_supabase(),
             has_permission=has_permission,
-            milk_cost_per_liter=45.0,
+            milk_cost_per_liter=todays_milk_cost if todays_milk_cost > 0 else 45.0,  # fallback pre-first-receipt
             raw_milk_price_per_liter=35.0
         )
 

@@ -508,3 +508,14 @@ def check_aging_room_capacity(tracker: BatchTracker, additional_kg: float,
     remaining = capacity - used
     ok = additional_kg <= remaining
     return ok, used, capacity, remaining
+
+def get_weighted_milk_cost_for_date(target_date: date, supabase_client) -> float:
+    """Weighted-average cost/liter across today's receipts. Returns 0.0
+    if nothing's been received yet — caller should fall back to a default."""
+    receipts = get_milk_receipts(start_date=target_date, supabase_client=supabase_client)
+    todays = [r for r in receipts if r["date"] == target_date.isoformat()]
+    total_liters = sum(r["liters"] for r in todays)
+    if total_liters <= 0:
+        return 0.0
+    total_cost = sum(r["liters"] * r["cost_per_liter"] for r in todays)
+    return total_cost / total_liters
