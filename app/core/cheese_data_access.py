@@ -1,0 +1,510 @@
+"""
+app/core/cheese_data_access.py
+================================
+Dual-backend (Supabase primary / SQLite fallback) persistence for the
+Cheese Production mode — mirrors the pattern already used for Dry Ice in
+main.py (USE_SUPABASE flag, try Supabase first, fall back to SQLite, never
+let a DB hiccup crash the UI).
+
+This module owns ONLY persistence + rehydration. All business logic (the
+newsvendor math, milk allocation, FEFO, the batch state machine) stays in
+newsvendor_engine.py / production_tracking.py / production_plan.py — this
+file just loads/saves those objects.
+
+Usage from main.py:
+
+    from app.core.cheese_data_access import (
+        init_cheese_storage, load_recipe_book, save_recipe,
+        save_milk_receipt, get_milk_receipts, get_milk_liters_for_date,
+        load_batch_tracker, get_aging_room_capacity_kg,
+        set_aging_room_capacity_kg, get_aging_room_used_kg,
+    )
+
+    supabase = init_supabase()          # you already have this
+    init_cheese_storage(supabase)       # safe to call every run
+    book = load_recipe_book(supabase)
+    tracker = load_batch_tracker(supabase)   # a PersistentBatchTracker
+"""
+
+from __future__ import annotations
+from dataclasses import asdict
+from datetime import datetime, date, timedelta
+from typing import Optional, List, Dict, Any
+import json
+import sqlite3
+
+from newsvendor_engine import AgingConfig
+from production_tracking import (
+    RecipeBook, CheeseRecipe, BOMLineItem, OperationStep,
+    BatchTracker, ProductionBatch, AgingBatch, FinishedGoodBatch,
+    QualityCheckpoint, BatchStatus,
+)
+
+CHEESE_SQLITE_FILE = "cheese_production.db"
+DEFAULT_AGING_ROOM_CAPACITY_KG = 500.0
+
+
+# ============================================================
+# SQLITE SCHEMA (fallback / local dev — Supabase tables are created via
+# cheese_schema.sql, run once in the Supabase SQL editor)
+# ============================================================
+def init_cheese_storage(supabase_client=None) -> None:
+    """Safe to call on every app run. Only touches SQLite — Supabase
+    tables must already exist (see cheese_schema.sql)."""
+    conn = sqlite3.connect(CHEESE_SQLITE_FILE)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS cheese_recipes (
+        name TEXT PRIMARY KEY, product_code TEXT, category TEXT,
+        batch_size_kg REAL, milk_liters_per_batch REAL,
+        shelf_life_days INTEGER, lead_time_days INTEGER,
+        non_milk_ingredients TEXT, packaging TEXT, operations TEXT,
+        aging_config TEXT, recipe_version TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS milk_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, liters REAL,
+        cost_per_liter REAL, supplier TEXT, notes TEXT, created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cheese_production_batches (
+        batch_id TEXT PRIMARY KEY, cheese_name TEXT, recipe_version TEXT,
+        quantity_kg REAL, milk_receipt_ids TEXT, operator TEXT,
+        status TEXT, checkpoints TEXT, created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cheese_aging_batches (
+        batch_id TEXT PRIMARY KEY, production_batch_id TEXT, cheese_name TEXT,
+        aging_years REAL, start_date TEXT, scheduled_end_date TEXT,
+        starting_quantity_kg REAL, status TEXT, checkpoints TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cheese_finished_batches (
+        batch_id TEXT PRIMARY KEY, production_batch_id TEXT,
+        aging_batch_id TEXT, cheese_name TEXT, quantity_kg REAL,
+        packaging_date TEXT, expiry_date TEXT, status TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS aging_room_config (
+        room_name TEXT PRIMARY KEY, max_capacity_kg REAL, notes TEXT
+    )""")
+    c.execute("""INSERT OR IGNORE INTO aging_room_config (room_name, max_capacity_kg, notes)
+                 VALUES ('default', ?, 'Set this to your real aging room capacity in kg')""",
+              (DEFAULT_AGING_ROOM_CAPACITY_KG,))
+    conn.commit()
+    conn.close()
+
+
+def _sqlite():
+    return sqlite3.connect(CHEESE_SQLITE_FILE)
+
+
+# ============================================================
+# SERIALIZATION HELPERS
+# ============================================================
+def _as_list(raw) -> list:
+    """Supabase (JSONB) hands back a python list/dict already; SQLite
+    hands back a JSON string. Normalize both to a python object."""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, dict)):
+        return raw
+    return json.loads(raw)
+
+
+def _checkpoints_to_json(checkpoints: List[QualityCheckpoint]) -> str:
+    return json.dumps([{
+        "stage": c.stage, "required": c.required, "status": c.status,
+        "checked_at": c.checked_at.isoformat() if c.checked_at else None,
+        "notes": c.notes,
+    } for c in checkpoints])
+
+
+def _json_to_checkpoints(raw) -> List[QualityCheckpoint]:
+    out = []
+    for d in _as_list(raw):
+        cp = QualityCheckpoint(stage=d["stage"], required=d.get("required", True))
+        cp.status = d.get("status", "Pending")
+        cp.notes = d.get("notes", "")
+        checked_at = d.get("checked_at")
+        cp.checked_at = datetime.fromisoformat(checked_at) if checked_at else None
+        out.append(cp)
+    return out
+
+
+def _recipe_to_row(recipe: CheeseRecipe) -> Dict[str, Any]:
+    return {
+        "name": recipe.name,
+        "product_code": recipe.product_code,
+        "category": recipe.category,
+        "batch_size_kg": recipe.batch_size_kg,
+        "milk_liters_per_batch": recipe.milk_liters_per_batch,
+        "shelf_life_days": recipe.shelf_life_days,
+        "lead_time_days": recipe.lead_time_days,
+        "non_milk_ingredients": json.dumps([asdict(i) for i in recipe.non_milk_ingredients]),
+        "packaging": json.dumps([asdict(i) for i in recipe.packaging]),
+        "operations": json.dumps([asdict(o) for o in recipe.operations]),
+        "aging_config": json.dumps(asdict(recipe.aging)) if recipe.aging else None,
+        "recipe_version": recipe.recipe_version,
+    }
+
+
+def _row_to_recipe(row: Dict[str, Any]) -> CheeseRecipe:
+    aging = None
+    if row.get("aging_config"):
+        raw = row["aging_config"]
+        aging_data = raw if isinstance(raw, dict) else json.loads(raw)
+        aging = AgingConfig(**aging_data)
+    non_milk = [BOMLineItem(**i) for i in _as_list(row.get("non_milk_ingredients"))]
+    packaging = [BOMLineItem(**i) for i in _as_list(row.get("packaging"))]
+    operations = [OperationStep(**o) for o in _as_list(row.get("operations"))]
+    return CheeseRecipe(
+        name=row["name"], product_code=row.get("product_code") or "",
+        category=row.get("category") or "",
+        batch_size_kg=row["batch_size_kg"], milk_liters_per_batch=row["milk_liters_per_batch"],
+        shelf_life_days=row["shelf_life_days"], lead_time_days=row["lead_time_days"],
+        non_milk_ingredients=non_milk, packaging=packaging, operations=operations,
+        aging=aging, recipe_version=row.get("recipe_version") or "v1.0",
+    )
+
+
+# ============================================================
+# RECIPES
+# ============================================================
+def save_recipe(recipe: CheeseRecipe, supabase_client=None) -> None:
+    row = _recipe_to_row(recipe)
+    if supabase_client:
+        try:
+            supabase_client.table("cheese_recipes").upsert(row).execute()
+            return
+        except Exception:
+            pass  # fall through to SQLite
+    conn = _sqlite()
+    c = conn.cursor()
+    c.execute("""INSERT OR REPLACE INTO cheese_recipes
+        (name, product_code, category, batch_size_kg, milk_liters_per_batch,
+         shelf_life_days, lead_time_days, non_milk_ingredients, packaging,
+         operations, aging_config, recipe_version)
+        VALUES (:name, :product_code, :category, :batch_size_kg, :milk_liters_per_batch,
+         :shelf_life_days, :lead_time_days, :non_milk_ingredients, :packaging,
+         :operations, :aging_config, :recipe_version)""", row)
+    conn.commit()
+    conn.close()
+
+
+def delete_recipe(name: str, supabase_client=None) -> None:
+    if supabase_client:
+        try:
+            supabase_client.table("cheese_recipes").delete().eq("name", name).execute()
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("DELETE FROM cheese_recipes WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+
+
+def load_recipe_book(supabase_client=None) -> RecipeBook:
+    book = RecipeBook()
+    rows = None
+    if supabase_client:
+        try:
+            rows = supabase_client.table("cheese_recipes").select("*").execute().data
+        except Exception:
+            rows = None
+    if rows is None:
+        conn = _sqlite()
+        conn.row_factory = sqlite3.Row
+        rows = [dict(r) for r in conn.execute("SELECT * FROM cheese_recipes").fetchall()]
+        conn.close()
+    for row in rows:
+        try:
+            book.add(_row_to_recipe(row))
+        except Exception:
+            continue  # skip a corrupted row rather than crashing the whole app
+    return book
+
+
+# ============================================================
+# MILK RECEIPTS  (the explicitly-called-out "milk receipt persistence")
+# ============================================================
+def save_milk_receipt(receipt_date: date, liters: float, cost_per_liter: float,
+                       supplier: str = "", notes: str = "",
+                       supabase_client=None) -> Optional[int]:
+    date_str = receipt_date.isoformat() if hasattr(receipt_date, "isoformat") else str(receipt_date)
+    row = {"date": date_str, "liters": liters, "cost_per_liter": cost_per_liter,
+           "supplier": supplier, "notes": notes}
+    if supabase_client:
+        try:
+            result = supabase_client.table("milk_receipts").insert(row).execute()
+            return result.data[0]["id"] if result.data else None
+        except Exception:
+            pass
+    conn = _sqlite()
+    c = conn.cursor()
+    c.execute("""INSERT INTO milk_receipts (date, liters, cost_per_liter, supplier, notes, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)""",
+              (date_str, liters, cost_per_liter, supplier, notes, datetime.now().isoformat()))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_milk_receipts(start_date: Optional[date] = None, end_date: Optional[date] = None,
+                       supabase_client=None) -> List[Dict[str, Any]]:
+    if supabase_client:
+        try:
+            query = supabase_client.table("milk_receipts").select("*").order("date", desc=True)
+            if start_date:
+                query = query.gte("date", start_date.isoformat())
+            if end_date:
+                query = query.lte("date", end_date.isoformat())
+            return query.execute().data
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.row_factory = sqlite3.Row
+    sql = "SELECT * FROM milk_receipts WHERE 1=1"
+    params = []
+    if start_date:
+        sql += " AND date >= ?"
+        params.append(start_date.isoformat())
+    if end_date:
+        sql += " AND date <= ?"
+        params.append(end_date.isoformat())
+    sql += " ORDER BY date DESC"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn.close()
+    return rows
+
+
+def get_milk_liters_for_date(target_date: date, supabase_client=None) -> float:
+    """Total milk received on a given day — the natural default for
+    'milk_available_l' in a no-storage daily allocation model."""
+    receipts = get_milk_receipts(start_date=target_date, end_date=target_date,
+                                  supabase_client=supabase_client)
+    return sum(r["liters"] for r in receipts)
+
+
+# ============================================================
+# BATCH TRACKER PERSISTENCE
+# ============================================================
+def _save_production_batch_row(batch: ProductionBatch, supabase_client=None) -> None:
+    row = {
+        "batch_id": batch.batch_id, "cheese_name": batch.cheese_name,
+        "recipe_version": batch.recipe_version, "quantity_kg": batch.quantity_kg,
+        "milk_receipt_ids": json.dumps(batch.milk_receipt_ids),
+        "operator": batch.operator, "status": batch.status.value,
+        "checkpoints": _checkpoints_to_json(batch.checkpoints),
+        "created_at": batch.created_at.isoformat(),
+    }
+    if supabase_client:
+        try:
+            supabase_client.table("cheese_production_batches").upsert(row).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("""INSERT OR REPLACE INTO cheese_production_batches
+        (batch_id, cheese_name, recipe_version, quantity_kg, milk_receipt_ids,
+         operator, status, checkpoints, created_at)
+        VALUES (:batch_id, :cheese_name, :recipe_version, :quantity_kg, :milk_receipt_ids,
+         :operator, :status, :checkpoints, :created_at)""", row)
+    conn.commit()
+    conn.close()
+
+
+def _save_aging_batch_row(batch: AgingBatch, supabase_client=None) -> None:
+    row = {
+        "batch_id": batch.batch_id, "production_batch_id": batch.production_batch_id,
+        "cheese_name": batch.cheese_name, "aging_years": batch.aging_years,
+        "start_date": batch.start_date.isoformat(),
+        "scheduled_end_date": batch.scheduled_end_date.isoformat(),
+        "starting_quantity_kg": batch.starting_quantity_kg,
+        "status": batch.status.value,
+        "checkpoints": _checkpoints_to_json(batch.checkpoints),
+    }
+    if supabase_client:
+        try:
+            supabase_client.table("cheese_aging_batches").upsert(row).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("""INSERT OR REPLACE INTO cheese_aging_batches
+        (batch_id, production_batch_id, cheese_name, aging_years, start_date,
+         scheduled_end_date, starting_quantity_kg, status, checkpoints)
+        VALUES (:batch_id, :production_batch_id, :cheese_name, :aging_years, :start_date,
+         :scheduled_end_date, :starting_quantity_kg, :status, :checkpoints)""", row)
+    conn.commit()
+    conn.close()
+
+
+def _save_finished_batch_row(batch: FinishedGoodBatch, supabase_client=None) -> None:
+    row = {
+        "batch_id": batch.batch_id, "production_batch_id": batch.production_batch_id,
+        "aging_batch_id": batch.aging_batch_id, "cheese_name": batch.cheese_name,
+        "quantity_kg": batch.quantity_kg,
+        "packaging_date": batch.packaging_date.isoformat(),
+        "expiry_date": batch.expiry_date.isoformat(),
+        "status": batch.status.value,
+    }
+    if supabase_client:
+        try:
+            supabase_client.table("cheese_finished_batches").upsert(row).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("""INSERT OR REPLACE INTO cheese_finished_batches
+        (batch_id, production_batch_id, aging_batch_id, cheese_name, quantity_kg,
+         packaging_date, expiry_date, status)
+        VALUES (:batch_id, :production_batch_id, :aging_batch_id, :cheese_name, :quantity_kg,
+         :packaging_date, :expiry_date, :status)""", row)
+    conn.commit()
+    conn.close()
+
+
+class PersistentBatchTracker(BatchTracker):
+    """Drop-in replacement for BatchTracker that persists every mutation.
+    Everything else about production_tracking.py's API is unchanged —
+    the newsvendor/production-plan code doesn't need to know this exists."""
+
+    def __init__(self, supabase_client=None):
+        super().__init__()
+        self._supabase_client = supabase_client
+
+    def start_production(self, *args, **kwargs) -> ProductionBatch:
+        batch = super().start_production(*args, **kwargs)
+        _save_production_batch_row(batch, self._supabase_client)
+        return batch
+
+    def record_production_checkpoint(self, *args, **kwargs) -> ProductionBatch:
+        batch = super().record_production_checkpoint(*args, **kwargs)
+        _save_production_batch_row(batch, self._supabase_client)
+        return batch
+
+    def start_aging(self, *args, **kwargs) -> AgingBatch:
+        batch = super().start_aging(*args, **kwargs)
+        # QC status on the production batch flips to AGING — persist both
+        pb = self.production_batches[batch.production_batch_id]
+        _save_production_batch_row(pb, self._supabase_client)
+        _save_aging_batch_row(batch, self._supabase_client)
+        return batch
+
+    def release_from_aging(self, *args, **kwargs) -> FinishedGoodBatch:
+        fg = super().release_from_aging(*args, **kwargs)
+        ab = self.aging_batches[fg.aging_batch_id]
+        _save_aging_batch_row(ab, self._supabase_client)
+        _save_finished_batch_row(fg, self._supabase_client)
+        return fg
+
+    def release_fresh_to_finished(self, *args, **kwargs) -> FinishedGoodBatch:
+        fg = super().release_fresh_to_finished(*args, **kwargs)
+        pb = self.production_batches[fg.production_batch_id]
+        _save_production_batch_row(pb, self._supabase_client)
+        _save_finished_batch_row(fg, self._supabase_client)
+        return fg
+
+
+def load_batch_tracker(supabase_client=None) -> PersistentBatchTracker:
+    """Rehydrates a PersistentBatchTracker from whichever backend has data,
+    so batches survive an app restart / redeploy instead of living only in
+    st.session_state for the current browser session."""
+    tracker = PersistentBatchTracker(supabase_client)
+
+    pb_rows = fg_rows = ab_rows = None
+    if supabase_client:
+        try:
+            pb_rows = supabase_client.table("cheese_production_batches").select("*").execute().data
+            ab_rows = supabase_client.table("cheese_aging_batches").select("*").execute().data
+            fg_rows = supabase_client.table("cheese_finished_batches").select("*").execute().data
+        except Exception:
+            pb_rows = ab_rows = fg_rows = None
+
+    if pb_rows is None:
+        conn = _sqlite()
+        conn.row_factory = sqlite3.Row
+        pb_rows = [dict(r) for r in conn.execute("SELECT * FROM cheese_production_batches").fetchall()]
+        ab_rows = [dict(r) for r in conn.execute("SELECT * FROM cheese_aging_batches").fetchall()]
+        fg_rows = [dict(r) for r in conn.execute("SELECT * FROM cheese_finished_batches").fetchall()]
+        conn.close()
+
+    for row in pb_rows:
+        tracker.production_batches[row["batch_id"]] = ProductionBatch(
+            batch_id=row["batch_id"], cheese_name=row["cheese_name"],
+            recipe_version=row.get("recipe_version") or "v1.0",
+            quantity_kg=row["quantity_kg"],
+            milk_receipt_ids=_as_list(row.get("milk_receipt_ids")),
+            operator=row.get("operator") or "", status=BatchStatus(row["status"]),
+            checkpoints=_json_to_checkpoints(row.get("checkpoints")),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+    for row in ab_rows:
+        tracker.aging_batches[row["batch_id"]] = AgingBatch(
+            batch_id=row["batch_id"], production_batch_id=row["production_batch_id"],
+            cheese_name=row["cheese_name"], aging_years=row["aging_years"],
+            start_date=datetime.fromisoformat(row["start_date"]),
+            scheduled_end_date=datetime.fromisoformat(row["scheduled_end_date"]),
+            starting_quantity_kg=row["starting_quantity_kg"], status=BatchStatus(row["status"]),
+            checkpoints=_json_to_checkpoints(row.get("checkpoints")),
+        )
+    for row in fg_rows:
+        tracker.finished_batches[row["batch_id"]] = FinishedGoodBatch(
+            batch_id=row["batch_id"], production_batch_id=row["production_batch_id"],
+            aging_batch_id=row.get("aging_batch_id"), cheese_name=row["cheese_name"],
+            quantity_kg=row["quantity_kg"],
+            packaging_date=datetime.fromisoformat(row["packaging_date"]),
+            expiry_date=datetime.fromisoformat(row["expiry_date"]), status=BatchStatus(row["status"]),
+        )
+    return tracker
+
+
+# ============================================================
+# AGING ROOM CAPACITY  (the explicitly-called-out capacity constraint)
+# ============================================================
+def get_aging_room_capacity_kg(room_name: str = "default", supabase_client=None) -> float:
+    if supabase_client:
+        try:
+            result = supabase_client.table("aging_room_config").select("*").eq("room_name", room_name).execute()
+            if result.data:
+                return float(result.data[0]["max_capacity_kg"])
+        except Exception:
+            pass
+    conn = _sqlite()
+    row = conn.execute("SELECT max_capacity_kg FROM aging_room_config WHERE room_name = ?",
+                        (room_name,)).fetchone()
+    conn.close()
+    return float(row[0]) if row else DEFAULT_AGING_ROOM_CAPACITY_KG
+
+
+def set_aging_room_capacity_kg(max_capacity_kg: float, room_name: str = "default",
+                                 notes: str = "", supabase_client=None) -> None:
+    row = {"room_name": room_name, "max_capacity_kg": max_capacity_kg, "notes": notes}
+    if supabase_client:
+        try:
+            supabase_client.table("aging_room_config").upsert(row).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("INSERT OR REPLACE INTO aging_room_config (room_name, max_capacity_kg, notes) VALUES (?, ?, ?)",
+                 (room_name, max_capacity_kg, notes))
+    conn.commit()
+    conn.close()
+
+
+def get_aging_room_used_kg(tracker: BatchTracker) -> float:
+    """Kg currently occupying the aging room — everything with status
+    AGING. (Finished/failed/recalled batches have left the room.)"""
+    return sum(
+        b.starting_quantity_kg for b in tracker.aging_batches.values()
+        if b.status == BatchStatus.AGING
+    )
+
+
+def check_aging_room_capacity(tracker: BatchTracker, additional_kg: float,
+                                room_name: str = "default", supabase_client=None):
+    """Returns (ok: bool, used_kg: float, capacity_kg: float, remaining_kg: float).
+    Use this BEFORE calling tracker.start_aging() to decide whether to warn,
+    block, or cap the quantity going into aging."""
+    capacity = get_aging_room_capacity_kg(room_name, supabase_client)
+    used = get_aging_room_used_kg(tracker)
+    remaining = capacity - used
+    ok = additional_kg <= remaining
+    return ok, used, capacity, remaining
