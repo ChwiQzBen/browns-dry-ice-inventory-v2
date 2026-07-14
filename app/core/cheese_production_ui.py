@@ -285,9 +285,12 @@ def _render_milk_receipts_tab(supabase_client) -> None:
             if liters <= 0:
                 st.error("Enter a quantity greater than 0.")
             else:
-                new_id = save_milk_receipt(receipt_date, liters, cost_per_liter, supplier, notes, supabase_client)
-                st.success(f"✅ Recorded {liters:,.0f}L at KSh {cost_per_liter:.2f}/L (receipt #{new_id}).")
-                st.rerun()
+                try:
+                    new_id = save_milk_receipt(receipt_date, liters, cost_per_liter, supplier, notes, supabase_client)
+                    st.success(f"✅ Recorded {liters:,.0f}L at KSh {cost_per_liter:.2f}/L (receipt #{new_id}).")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Could not record milk receipt: {e}")
 
     st.markdown("---")
     st.markdown("#### Recent Receipts")
@@ -369,17 +372,22 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
         v[0] > 0 for v in demand_forecast.values())
 
     if st.button("🧮 Build Production Plan", type="primary", disabled=not ready):
-        planner = ProductionPlanner(book, tracker, milk_cost_per_liter, raw_milk_price_per_liter)
-        # Only pass cheeses with a non-zero demand estimate to the allocator
-        active_demand = {k: v for k, v in demand_forecast.items() if v[0] > 0 and selling_prices.get(k, 0) > 0}
-        plan = planner.build_plan(
-            milk_available_l=milk_available_l,
-            demand_forecast=active_demand,
-            selling_prices={k: selling_prices[k] for k in active_demand},
-            aging_room_capacity_kg=capacity_kg,
-            aging_room_used_kg=used_kg,
-        )
-        st.session_state.cheese_last_plan = plan
+        try:
+            planner = ProductionPlanner(book, tracker, milk_cost_per_liter, raw_milk_price_per_liter)
+            active_demand = {k: v for k, v in demand_forecast.items() if v[0] > 0 and selling_prices.get(k, 0) > 0}
+            plan = planner.build_plan(
+                milk_available_l=milk_available_l,
+                demand_forecast=active_demand,
+                selling_prices={k: selling_prices[k] for k in active_demand},
+                aging_room_capacity_kg=capacity_kg,
+                aging_room_used_kg=used_kg,
+            )
+            st.session_state.cheese_last_plan = plan
+        except Exception as e:
+            st.error(f"❌ Could not build production plan: {e}")
+            st.caption("Usually means one cheese's selling price doesn't cover its effective unit "
+                    "cost (incl. milk, and for aged cheeses, storage/financing/loss). Check that "
+                    "cheese's price and cost inputs above.")
 
     if not ready:
         st.info("Enter milk available, and at least one cheese's demand + selling price, to enable planning.")
