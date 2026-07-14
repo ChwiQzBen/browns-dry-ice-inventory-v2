@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 app/core/cheese_production_ui.py
 ==================================
@@ -16,8 +17,9 @@ Entry point:
 See CHEESE_INTEGRATION_GUIDE.md for the exact main.py wiring (Permission
 enum entries, tab-requirements dict, mode radio option, sidebar section).
 """
-
-from __future__ import annotations
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from datetime import datetime, date, timedelta
 from typing import Optional, Callable
 import streamlit as st

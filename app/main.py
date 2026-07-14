@@ -38,6 +38,7 @@ from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
 from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine, generate_ai_insights
+from app.core.cheese_production_ui import render_cheese_production_mode 
 import warnings
 from supabase import create_client, Client
 from core.error_handling import (
@@ -5988,8 +5989,8 @@ def main():
 
     inventory_mode = st.sidebar.radio(
         "Select inventory view:",
-        ["📦 All Items Mode", "❄️ Dry Ice Mode"],
-        help="Switch between general inventory management and Dry Ice analysis",
+        ["📦 All Items Mode", "🧀 BCPOS Mode", "❄️ Dry Ice Mode"],
+        help="Switch between general inventory management, Cheese Production Optimization, or Dry Ice analysis",
         key="inventory_mode"
     )
 
@@ -9316,7 +9317,18 @@ def main():
                     st.warning("No data available for advanced analytics")
 
     # ============================================================
-    # CONTAINER 2: DRY ICE MODE (7 TABS)
+    # CONTAINER 2: BCPOS MODE (Cheese Production)
+    # ============================================================
+    elif mode == "🧀 BCPOS Mode":
+        render_cheese_production_mode(
+            supabase_client=init_supabase(),
+            has_permission=has_permission,
+            milk_cost_per_liter=45.0,
+            raw_milk_price_per_liter=35.0
+        )
+
+    # ============================================================
+    # CONTAINER 3: DRY ICE MODE (7 TABS)
     # ============================================================
     else:  # "❄️ Dry Ice Mode"
         # ============================================================
