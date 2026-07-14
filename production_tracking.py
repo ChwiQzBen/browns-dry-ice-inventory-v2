@@ -199,6 +199,10 @@ class AgingBatch:
         as_of = as_of or datetime.now()
         return max(0, (self.scheduled_end_date - as_of).days)
 
+    def any_failed(self) -> bool:
+        """Check if any required checkpoint has failed."""
+        return any(cp.status == "Failed" for cp in self.checkpoints if cp.required)
+
 
 @dataclass
 class FinishedGoodBatch:
@@ -289,10 +293,37 @@ class BatchTracker:
         self.aging_batches[batch.batch_id] = batch
         pb.status = BatchStatus.AGING
         return batch
+    
+    def record_aging_checkpoint(self, aging_batch_id: str, stage: str,
+                                  passed: bool, notes: str = "") -> AgingBatch:
+        """Record a checkpoint result for an aging batch."""
+        if aging_batch_id not in self.aging_batches:
+            raise KeyError(f"Aging batch {aging_batch_id} not found")
+        
+        batch = self.aging_batches[aging_batch_id]
+        for cp in batch.checkpoints:
+            if cp.stage == stage:
+                cp.record(passed, notes)
+                break
+        else:
+            raise KeyError(f"No checkpoint '{stage}' on aging batch {aging_batch_id}")
+        
+        if batch.any_failed():
+            batch.status = BatchStatus.FAILED_QC
+        return batch
 
     def release_from_aging(self, aging_batch_id: str, actual_yield_kg: float,
-                            shelf_life_days: int) -> FinishedGoodBatch:
+                        shelf_life_days: int) -> FinishedGoodBatch:
+        """Release an aged batch to finished goods. Raises ValueError if QC failed."""
         ab = self.aging_batches[aging_batch_id]
+        
+        # 🔴 BLOCK RELEASE IF ANY AGING CHECKPOINT FAILED
+        if ab.any_failed():
+            raise ValueError(
+                f"Cannot release {aging_batch_id}: a quarterly aging check failed. "
+                f"This batch must be quarantined/recalled, not released to finished goods."
+            )
+        
         now = datetime.now()
         fg = FinishedGoodBatch(
             batch_id=_new_id("FG"),
