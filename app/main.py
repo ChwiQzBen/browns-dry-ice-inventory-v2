@@ -733,6 +733,11 @@ class Permission(str, Enum):
     CLEAR_TRANSACTIONS = "clear_transactions"
     VIEW_SECURITY_DASHBOARD = "view_security_dashboard"
     MANAGE_USERS = "manage_users"
+    VIEW_CHEESE_PRODUCTION = "view_cheese_production"
+    VIEW_CHEESE_RECIPES = "view_cheese_recipes"
+    RECORD_MILK_RECEIPT = "record_milk_receipt"
+    RUN_PRODUCTION_PLAN = "run_production_plan"
+    MANAGE_CHEESE_BATCHES = "manage_cheese_batches"
 
 ROLE_PERMISSIONS = {
     "admin": set(Permission),
