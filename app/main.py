@@ -747,13 +747,22 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_ANALYTICS, Permission.VIEW_FORECASTS, Permission.VIEW_COST_DATA,
         Permission.VIEW_STRATEGY, Permission.VIEW_MAINTENANCE,
         Permission.GENERATE_REPORTS, Permission.VIEW_REPORTS,
+        # --- cheese: full operational access ---
+        Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
+        Permission.RECORD_MILK_RECEIPT, Permission.RUN_PRODUCTION_PLAN,
+        Permission.MANAGE_CHEESE_BATCHES,
     },
     "user": {
         Permission.VIEW_STOCK, Permission.VIEW_STOCK_TAKE,
         Permission.RECORD_USAGE, Permission.RECORD_RECEIPT, Permission.RUN_STOCK_TAKE,
+        # --- cheese: day-to-day recording only, no planning/batch release ---
+        Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
+        Permission.RECORD_MILK_RECEIPT,
     },
     "viewer": {
         Permission.VIEW_STOCK, Permission.VIEW_ANALYTICS, Permission.VIEW_REPORTS,
+        # --- cheese: read-only ---
+        Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
     },
 }
 
