@@ -5855,20 +5855,22 @@ def main():
 
     # Sidebar - Header with Glass Design (ABOVE Analysis Period)
     st.sidebar.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 15px 20px;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 20px;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-    ">
-        <div style="font-size: 20px; font-weight: 700;">Inventory Control</div>
-        <div style="font-size: 12px; opacity: 0.8;">Browns Food Co</div>
-    </div>
+        <div style="
+            background: linear-gradient(135deg, #1a237e 0%, #4fc3f7 100%);
+            padding: 15px 20px;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3);
+        ">
+            <div style="font-size: 20px; font-weight: 700;">Browns Ops Suite</div>
+            <div style="font-size: 9.5px; opacity: 0.7; margin-top: 4px; white-space: nowrap;">
+                Inventory • Dry Ice • Production Optimization
+            </div>
+        </div>
     """, unsafe_allow_html=True)
-
+    
     # ============================================================
     # 🔐 AUTHENTICATION STATUS INDICATOR
     # ============================================================
@@ -7138,24 +7140,24 @@ def main():
     # SECTION 9: FOOTER (Container Style) - INCREASED FONT SIZES
     # ============================================================
     st.sidebar.markdown("""
-    <div style="
-        border-radius: 12px;
-        padding: 18px 15px;
-        text-align: center;
-        background: rgba(0,0,0,0.03);
-        border: 1px solid rgba(0,0,0,0.05);
-    ">
-        <div style="font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px;">
-            🧀 Browns Cheese
+        <div style="
+            border-radius: 12px;
+            padding: 16px 15px;
+            text-align: center;
+            background: rgba(0,0,0,0.03);
+            border: 1px solid rgba(0,0,0,0.05);
+        ">
+            <div style="font-size: 16px; font-weight: 700; color: #1a237e; margin-bottom: 3px;">
+                🧀 Browns Ops Suite
+            </div>
+            <div style="font-size: 12px; color: #888; margin-bottom: 5px;">
+                Inventory • Dry Ice • Production
+            </div>
+            <div style="font-size: 10px; color: #999; border-top: 2px solid #1a237e; padding-top: 6px;">
+                © 2025 MarginIQ Ltd
+            </div>
         </div>
-        <div style="font-size: 14px; color: #666; margin-top: 4px;">
-            Dry Ice Management System
-        </div>
-        <div style="font-size: 13px; color: #888; margin-top: 6px;">
-            © 2025 - Gathura Chege
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     # 🎯 DECISION CENTER
     # ============================================================
