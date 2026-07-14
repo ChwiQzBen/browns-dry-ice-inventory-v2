@@ -618,15 +618,24 @@ def _render_fefo_inventory_tab(book: RecipeBook, tracker: BatchTracker) -> None:
         with c3:
             st.write("")
             st.write("")
-            run_sim = st.button("Allocate")
+            run_sim = st.button("Preview")
+
         if run_sim:
-            result = fefo.allocate(sim_cheese, sim_qty)
-            st.write(f"Allocated **{result.allocated_kg:.1f}kg** of {sim_qty:.1f}kg requested "
-                     f"(shortfall: {result.shortfall_kg:.1f}kg)")
-            if result.lines:
+            preview = fefo.allocate(sim_cheese, sim_qty, commit=False)
+            st.write(f"Would allocate **{preview.allocated_kg:.1f}kg** of {sim_qty:.1f}kg requested "
+                    f"(shortfall: {preview.shortfall_kg:.1f}kg)")
+            if preview.lines:
                 st.dataframe(pd.DataFrame([{
                     "Batch": l.batch_id, "Kg Taken": l.quantity_kg,
                     "Expiry": l.expiry_date.strftime("%Y-%m-%d"),
-                } for l in result.lines]), use_container_width=True, hide_index=True)
-            st.caption("Note: this mutates real stock (marks batches DISPATCHED) — it's a live allocation, "
-                       "not a dry run. Refresh the tab to re-check current stock.")
+                } for l in preview.lines]), use_container_width=True, hide_index=True)
+            st.session_state.fefo_pending_allocation = (sim_cheese, sim_qty)
+
+        if st.session_state.get("fefo_pending_allocation"):
+            st.warning("⚠️ This will permanently dispatch the batches shown above.")
+            if st.button("✅ Confirm & Dispatch", type="primary", key="fefo_confirm_dispatch"):
+                cheese, qty = st.session_state.fefo_pending_allocation
+                result = fefo.allocate(cheese, qty, commit=True)
+                st.success(f"Dispatched {result.allocated_kg:.1f}kg of {cheese}.")
+                st.session_state.fefo_pending_allocation = None
+                st.rerun()

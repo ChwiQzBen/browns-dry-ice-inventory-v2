@@ -416,7 +416,8 @@ class FEFOInventory:
     def total_available_kg(self, cheese_name: str) -> float:
         return sum(b.quantity_kg for b in self.stock_by_cheese(cheese_name))
 
-    def allocate(self, cheese_name: str, quantity_requested_kg: float) -> FEFOAllocationResult:
+    def allocate(self, cheese_name: str, quantity_requested_kg: float,
+             commit: bool = True) -> FEFOAllocationResult:
         remaining = quantity_requested_kg
         lines: List[FEFOAllocationLine] = []
 
@@ -426,20 +427,18 @@ class FEFOInventory:
             take = min(batch.quantity_kg, remaining)
             if take <= 0:
                 continue
-            batch.quantity_kg -= take
-            if batch.quantity_kg <= 1e-9:
-                batch.status = BatchStatus.DISPATCHED
+            if commit:
+                batch.quantity_kg -= take
+                if batch.quantity_kg <= 1e-9:
+                    batch.status = BatchStatus.DISPATCHED
             lines.append(FEFOAllocationLine(batch_id=batch.batch_id, quantity_kg=take,
-                                             expiry_date=batch.expiry_date))
+                                            expiry_date=batch.expiry_date))
             remaining -= take
 
         allocated = quantity_requested_kg - remaining
         return FEFOAllocationResult(
-            cheese_name=cheese_name,
-            requested_kg=quantity_requested_kg,
-            allocated_kg=allocated,
-            shortfall_kg=max(0.0, remaining),
-            lines=lines,
+            cheese_name=cheese_name, requested_kg=quantity_requested_kg,
+            allocated_kg=allocated, shortfall_kg=max(0.0, remaining), lines=lines,
         )
 
     def expiring_within(self, days: int) -> List[FinishedGoodBatch]:
