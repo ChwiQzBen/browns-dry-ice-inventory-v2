@@ -107,8 +107,8 @@ def render_cheese_production_mode(supabase_client=None,
     visible = [name for name, perm in {
         "🧀 Recipes": "view_cheese_recipes",
         "🥛 Milk Receipts": "record_milk_receipt",
-        "� Sales": "record_cheese_sale",
-        "�📋 Production Planning": "run_production_plan",
+        "💰 Sales": "record_cheese_sale",
+        "📋 Production Planning": "run_production_plan",
         "🏭 Batch Tracking & QC": "manage_cheese_batches",
         "🧊 Aging Room": "view_cheese_production",
         "📦 FEFO Inventory": "view_cheese_production",
@@ -127,13 +127,13 @@ def render_cheese_production_mode(supabase_client=None,
     if "🥛 Milk Receipts" in tab_lookup:
         with tab_lookup["🥛 Milk Receipts"]:
             _render_milk_receipts_tab(supabase_client)
-    if "� Sales" in tab_lookup:
-        with tab_lookup["💰 Sales"]:
+    if "💰 Sales" in tab_lookup:  
+        with tab_lookup["💰 Sales"]:  
             _render_sales_tab(book, tracker, supabase_client)
-    if "�📋 Production Planning" in tab_lookup:
-        with tab_lookup["📋 Production Planning"]:
+    if "📋 Production Planning" in tab_lookup:  
+        with tab_lookup["📋 Production Planning"]: 
             _render_production_planning_tab(book, tracker, supabase_client,
-                                             milk_cost_per_liter, raw_milk_price_per_liter)
+                                            milk_cost_per_liter, raw_milk_price_per_liter)
     if "🏭 Batch Tracking & QC" in tab_lookup:
         with tab_lookup["🏭 Batch Tracking & QC"]:
             _render_batch_tracking_tab(book, tracker, supabase_client)
