@@ -120,6 +120,7 @@ class ProductionPlanner:
                 demand_std=std,
                 current_inventory=current_stock,
                 aging=recipe.aging,
+                shelf_life_days=recipe.shelf_life_days,
             ))
 
         # Aging-room constraint: every aged cheese is capped at whatever
@@ -160,6 +161,12 @@ class ProductionPlanner:
                 reasons.append(
                     f"Capped by aging-room capacity — newsvendor-optimal quantity was "
                     f"higher, but the room doesn't have space for more"
+                )
+            if line.shelf_life_multiplier > 1.05:
+                reasons.append(
+                    f"Short shelf life ({recipe.shelf_life_days}d) raises the effective "
+                    f"cost of overproducing ({line.shelf_life_multiplier:.1f}x) — safety "
+                    f"stock trimmed vs. what a longer-shelf-life SKU would carry"
                 )
             if not line.fully_allocated:
                 reasons.append("Milk-constrained — below newsvendor-optimal quantity")

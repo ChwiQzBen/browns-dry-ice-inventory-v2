@@ -21,7 +21,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from datetime import datetime, date, timedelta
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 import streamlit as st
 import pandas as pd
 
@@ -32,10 +32,12 @@ from production_tracking import (
 )
 from production_plan import ProductionPlanner
 from demand_forecast import CheeseDemandForecaster
+from app.core.cheese_forecast_adapter import make_ensemble_demand_forecaster
 
 from app.core.cheese_data_access import (
     init_cheese_storage, load_recipe_book, save_recipe, delete_recipe,
     save_milk_receipt, get_milk_receipts, get_milk_liters_for_date,
+    save_cheese_sale, get_sales_history, get_daily_sales_kg,
     load_batch_tracker, get_aging_room_capacity_kg, set_aging_room_capacity_kg,
     get_aging_room_used_kg, check_aging_room_capacity,
 )
@@ -43,11 +45,22 @@ from app.core.cheese_data_access import (
 CHEESE_TAB_NAMES = [
     "🧀 Recipes",
     "🥛 Milk Receipts",
-    "📋 Production Planning",
+    "� Sales",
+    "�📋 Production Planning",
     "🏭 Batch Tracking & QC",
     "🧊 Aging Room",
     "📦 FEFO Inventory",
 ]
+
+
+@st.cache_data(ttl=3600, show_spinner="Running demand forecast ensemble...")
+def _cached_ensemble_demand(cheese_name: str, daily_sales_kg: Tuple[float, ...]) -> Tuple[float, float]:
+    """Cached wrapper around the ensemble adapter. Without this, the
+    ensemble would re-train on EVERY Streamlit rerun — i.e. every widget
+    interaction anywhere on the page, not just this tab — for every cheese
+    with 60+ days of sales history. Cached 1hr per (cheese, sales-history)
+    combination instead."""
+    return make_ensemble_demand_forecaster()(cheese_name, list(daily_sales_kg))
 
 
 # ============================================================
@@ -94,7 +107,8 @@ def render_cheese_production_mode(supabase_client=None,
     visible = [name for name, perm in {
         "🧀 Recipes": "view_cheese_recipes",
         "🥛 Milk Receipts": "record_milk_receipt",
-        "📋 Production Planning": "run_production_plan",
+        "� Sales": "record_cheese_sale",
+        "�📋 Production Planning": "run_production_plan",
         "🏭 Batch Tracking & QC": "manage_cheese_batches",
         "🧊 Aging Room": "view_cheese_production",
         "📦 FEFO Inventory": "view_cheese_production",
@@ -113,7 +127,10 @@ def render_cheese_production_mode(supabase_client=None,
     if "🥛 Milk Receipts" in tab_lookup:
         with tab_lookup["🥛 Milk Receipts"]:
             _render_milk_receipts_tab(supabase_client)
-    if "📋 Production Planning" in tab_lookup:
+    if "� Sales" in tab_lookup:
+        with tab_lookup["💰 Sales"]:
+            _render_sales_tab(book, tracker, supabase_client)
+    if "�📋 Production Planning" in tab_lookup:
         with tab_lookup["📋 Production Planning"]:
             _render_production_planning_tab(book, tracker, supabase_client,
                                              milk_cost_per_liter, raw_milk_price_per_liter)
@@ -311,6 +328,79 @@ def _render_milk_receipts_tab(supabase_client) -> None:
 
 
 # ============================================================
+# TAB: SALES  (feeds cheese_sales -> CheeseDemandForecaster)
+# ============================================================
+def _render_sales_tab(book: RecipeBook, tracker: BatchTracker, supabase_client) -> None:
+    st.markdown("### 💰 Record a Sale")
+    st.caption(
+        "Recording a sale here dispatches stock via FEFO (earliest-expiry batches "
+        "consumed first — same allocation logic as 📦 FEFO Inventory) AND saves the "
+        "sale to history, so 📋 Production Planning's demand forecast has real data."
+    )
+
+    if not book.list_names():
+        st.info("Add a recipe first, then produce and release some stock before recording sales.")
+        return
+
+    fefo = FEFOInventory(tracker)
+
+    with st.form("record_sale_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            sale_date = st.date_input("Sale Date", value=date.today())
+            cheese_name = st.selectbox("Cheese", book.list_names(), key="sale_cheese")
+        with col2:
+            quantity_kg = st.number_input("Quantity Sold (kg)", min_value=0.0, value=1.0, step=0.5)
+            price_per_kg = st.number_input("Price per kg (KSh)", min_value=0.0, value=0.0, step=10.0)
+        customer = st.text_input("Customer (optional)")
+        notes = st.text_input("Notes (optional)")
+
+        available = fefo.total_available_kg(cheese_name) if cheese_name else 0.0
+        st.caption(f"Available stock: {available:,.1f} kg")
+
+        if st.form_submit_button("💰 Record Sale", type="primary"):
+            if quantity_kg <= 0:
+                st.error("Enter a quantity greater than 0.")
+            elif price_per_kg <= 0:
+                st.error("Enter a price greater than 0.")
+            elif quantity_kg > available:
+                st.error(f"Only {available:,.1f}kg of {cheese_name} available — "
+                         f"can't record a sale for {quantity_kg:,.1f}kg.")
+            else:
+                try:
+                    result = fefo.allocate(cheese_name, quantity_kg, commit=True)
+                    batch_lines = [{"batch_id": l.batch_id, "quantity_kg": l.quantity_kg}
+                                   for l in result.lines]
+                    save_cheese_sale(sale_date, cheese_name, result.allocated_kg,
+                                      price_per_kg, batch_lines, customer, notes, supabase_client)
+                    st.success(f"✅ Sold {result.allocated_kg:,.1f}kg of {cheese_name} "
+                               f"for KSh {result.allocated_kg * price_per_kg:,.0f}, "
+                               f"drawn from {len(batch_lines)} batch(es).")
+                    if result.shortfall_kg > 0:
+                        st.warning(f"⚠️ {result.shortfall_kg:.1f}kg short — recorded what was "
+                                   f"actually available. Stock may have changed since the page loaded.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Could not record sale: {e}")
+
+    st.markdown("---")
+    st.markdown("#### Recent Sales")
+    start = date.today() - timedelta(days=30)
+    sales = get_sales_history(start_date=start, supabase_client=supabase_client)
+    if sales:
+        df = pd.DataFrame(sales)
+        st.dataframe(
+            df[["id", "date", "cheese_name", "quantity_kg", "price_per_kg", "revenue", "customer", "notes"]],
+            use_container_width=True, hide_index=True,
+        )
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Sales CSV", csv,
+                            file_name=f"cheese_sales_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+    else:
+        st.info("No sales recorded in the last 30 days.")
+
+
+# ============================================================
 # TAB 3: PRODUCTION PLANNING
 # ============================================================
 def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, supabase_client,
@@ -338,30 +428,47 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
 
     st.markdown("#### Demand & Pricing per Cheese")
     st.caption(
-        "No per-SKU sales history table is wired in yet, so these are manual estimates "
-        "(CheeseDemandForecaster will switch to rolling-stats/ML automatically once "
-        "cheese_sales_history has enough rows — see demand_forecast.py)."
+        "Auto-calculated from 💰 Sales history once a cheese has 60+ days of recorded "
+        "sales (rolling mean/std below that — see demand_forecast.py). Still fully "
+        "editable — click 📈 to snap back to the calculated value after overriding."
     )
-    forecaster = CheeseDemandForecaster()
+    forecaster = CheeseDemandForecaster(
+        ml_forecaster=lambda name, sales: _cached_ensemble_demand(name, tuple(sales))
+    )
     demand_forecast = {}
     selling_prices = {}
     for name in book.list_names():
         recipe = book.get(name)
         with st.expander(f"{name}" + (" (aged)" if recipe.aging else ""), expanded=False):
-            c1, c2, c3 = st.columns(3)
             prior_mean, prior_std = st.session_state.cheese_demand_overrides.get(name, (0.0, 0.0))
+            sales_history = get_daily_sales_kg(name, days=90, supabase_client=supabase_client)
+            fcast = forecaster.forecast(name, sales_history,
+                                         fallback_mean=prior_mean if prior_mean > 0 else 1.0)
+
+            has_override = prior_mean > 0 or prior_std > 0
+            default_mean = prior_mean if has_override else round(fcast.mean, 1)
+            default_std = prior_std if has_override else round(fcast.std, 1)
+
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
             with c1:
                 mean_kg = st.number_input(f"Expected demand (kg)", min_value=0.0,
-                                           value=float(prior_mean), step=1.0, key=f"demand_mean_{name}")
+                                           value=float(default_mean), step=1.0, key=f"demand_mean_{name}")
             with c2:
                 std_kg = st.number_input(f"Demand std dev (kg)", min_value=0.0,
-                                          value=float(prior_std) if prior_std else round(mean_kg * 0.3, 1),
+                                          value=float(default_std) if default_std else round(mean_kg * 0.3, 1),
                                           step=1.0, key=f"demand_std_{name}")
             with c3:
                 price = st.number_input(f"Selling price (KSh/kg)", min_value=0.0,
                                          value=float(st.session_state.cheese_selling_prices.get(name, 0.0)),
                                          step=10.0, key=f"price_{name}")
-            fcast = forecaster.forecast(name, [], fallback_mean=mean_kg if mean_kg > 0 else 1.0)
+            with c4:
+                st.write("")
+                st.write("")
+                if st.button("📈", key=f"use_forecast_{name}",
+                             help=f"Use forecast: {fcast.mean:.1f}kg ± {fcast.std:.1f}kg ({fcast.method})"):
+                    st.session_state.cheese_demand_overrides[name] = (round(fcast.mean, 1), round(fcast.std, 1))
+                    st.rerun()
+
             st.caption(f"ℹ️ {fcast.confidence_note}")
             demand_forecast[name] = (mean_kg, std_kg if std_kg > 0 else mean_kg * 0.3)
             selling_prices[name] = price

@@ -64,6 +64,11 @@ def init_cheese_storage(supabase_client=None) -> None:
         id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, liters REAL,
         cost_per_liter REAL, supplier TEXT, notes TEXT, created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cheese_sales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, cheese_name TEXT,
+        quantity_kg REAL, price_per_kg REAL, revenue REAL, batch_lines TEXT,
+        customer TEXT, notes TEXT, created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS cheese_production_batches (
         batch_id TEXT PRIMARY KEY, cheese_name TEXT, recipe_version TEXT,
         quantity_kg REAL, milk_receipt_ids TEXT, operator TEXT,
@@ -279,6 +284,97 @@ def get_milk_liters_for_date(target_date: date, supabase_client=None) -> float:
     receipts = get_milk_receipts(start_date=target_date, end_date=target_date,
                                   supabase_client=supabase_client)
     return sum(r["liters"] for r in receipts)
+
+
+# ============================================================
+# CHEESE SALES  (feeds CheeseDemandForecaster's daily_sales_kg input)
+# ============================================================
+def save_cheese_sale(sale_date: date, cheese_name: str, quantity_kg: float,
+                      price_per_kg: float, batch_lines: List[Dict[str, Any]],
+                      customer: str = "", notes: str = "",
+                      supabase_client=None) -> Optional[int]:
+    """Persists one sale EVENT, including which batch(es) it was fulfilled
+    from (batch_lines = [{"batch_id": ..., "quantity_kg": ...}, ...] — the
+    same shape as FEFOAllocationResult.lines), so a sale stays traceable
+    back to a specific ProductionBatch via BatchTracker.trace(). This does
+    NOT decrement stock itself — call FEFOInventory.allocate(commit=True)
+    for that, then pass its .lines here. Keeping them separate matches this
+    module's stated scope: persistence only, business logic lives elsewhere."""
+    date_str = sale_date.isoformat() if hasattr(sale_date, "isoformat") else str(sale_date)
+    revenue = quantity_kg * price_per_kg
+    row = {
+        "date": date_str, "cheese_name": cheese_name, "quantity_kg": quantity_kg,
+        "price_per_kg": price_per_kg, "revenue": revenue,
+        "batch_lines": json.dumps(batch_lines), "customer": customer, "notes": notes,
+    }
+    if supabase_client:
+        try:
+            result = supabase_client.table("cheese_sales").insert(row).execute()
+            return result.data[0]["id"] if result.data else None
+        except Exception:
+            pass
+    conn = _sqlite()
+    c = conn.cursor()
+    c.execute("""INSERT INTO cheese_sales
+        (date, cheese_name, quantity_kg, price_per_kg, revenue, batch_lines, customer, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (date_str, cheese_name, quantity_kg, price_per_kg, revenue,
+               json.dumps(batch_lines), customer, notes, datetime.now().isoformat()))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_sales_history(cheese_name: Optional[str] = None, start_date: Optional[date] = None,
+                       end_date: Optional[date] = None, supabase_client=None) -> List[Dict[str, Any]]:
+    """Raw sale rows, most recent first. Omit cheese_name for all cheeses
+    (used by the Sales tab's recent-activity table)."""
+    if supabase_client:
+        try:
+            query = supabase_client.table("cheese_sales").select("*").order("date", desc=True)
+            if cheese_name:
+                query = query.eq("cheese_name", cheese_name)
+            if start_date:
+                query = query.gte("date", start_date.isoformat())
+            if end_date:
+                query = query.lte("date", end_date.isoformat())
+            return query.execute().data
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.row_factory = sqlite3.Row
+    sql = "SELECT * FROM cheese_sales WHERE 1=1"
+    params = []
+    if cheese_name:
+        sql += " AND cheese_name = ?"
+        params.append(cheese_name)
+    if start_date:
+        sql += " AND date >= ?"
+        params.append(start_date.isoformat())
+    if end_date:
+        sql += " AND date <= ?"
+        params.append(end_date.isoformat())
+    sql += " ORDER BY date DESC"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn.close()
+    return rows
+
+
+def get_daily_sales_kg(cheese_name: str, days: int = 90, supabase_client=None) -> List[float]:
+    """Chronologically-ordered (oldest -> newest) total kg sold per day over
+    the last `days` days, zero-filled on no-sale days — exactly the
+    daily_sales_kg shape CheeseDemandForecaster.forecast() expects. Zero-
+    filling matters: a slow day should pull the mean down, not disappear
+    from the series entirely."""
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    rows = get_sales_history(cheese_name=cheese_name, start_date=start, end_date=end,
+                              supabase_client=supabase_client)
+    totals_by_day: Dict[str, float] = {}
+    for r in rows:
+        totals_by_day[r["date"]] = totals_by_day.get(r["date"], 0.0) + float(r["quantity_kg"])
+    return [totals_by_day.get((start + timedelta(days=i)).isoformat(), 0.0) for i in range(days)]
 
 
 # ============================================================

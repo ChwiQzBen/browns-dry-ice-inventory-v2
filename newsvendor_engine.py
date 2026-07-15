@@ -66,6 +66,7 @@ class NewsvendorResult:
     underage_penalty: float
     overage_penalty: float
     capacity_applied: bool = False
+    shelf_life_multiplier: float = 1.0
 
 
 # ============================================================
@@ -92,13 +93,40 @@ class NewsvendorModel:
 
     With aging_years = 0 this collapses to c_eff = unit_cost and
     production_quantity = Q*, i.e. the plain fresh-cheese model.
+
+    Shelf-life extension (only applied if `shelf_life_days` is provided)
+    -----------------------------------------------------------------------
+    NOTE: this is a pragmatic heuristic, not a formally-derived optimal
+    perishable-inventory policy (that's a multi-period dynamic program,
+    out of scope here — same spirit as the aging-room capacity cap in
+    production_plan.py deliberately not being a full LP solve). A classic
+    single-period newsvendor implicitly assumes unsold safety stock either
+    sells or is a total loss THIS period — fine for long-shelf-life cheese,
+    where "leftover today" just becomes tomorrow's current_inventory and
+    gets more chances to sell. For short-shelf-life fresh cheese that
+    assumption breaks: safety stock sized against demand variance may not
+    have enough remaining days to sell before it expires. Rather than
+    rebuild the demand-aggregation math, this reuses the exact lever aging
+    already has (overage_penalty_multiplier) and derives an equivalent
+    multiplier from shelf life:
+
+        shelf_life_multiplier = max(1.0, reference_shelf_life_days / shelf_life_days)
+
+    reference_shelf_life_days (default 14) is "long enough that ordinary
+    demand variability isn't a spoilage concern" — a cheese at or above
+    that shelf life gets multiplier 1.0 (unchanged from today's behavior).
+    A 5-day-shelf-life cheese gets ~2.8x, pulling production toward mean
+    demand and shrinking safety stock. If both aging and a short post-aging
+    shelf life apply, the two multipliers compound.
     """
 
     def __init__(self,
                  selling_price: float,
                  unit_cost: float,
                  salvage_value: float = 0.0,
-                 aging: Optional[AgingConfig] = None):
+                 aging: Optional[AgingConfig] = None,
+                 shelf_life_days: Optional[int] = None,
+                 reference_shelf_life_days: float = 14.0):
         if selling_price <= 0 or unit_cost <= 0:
             raise ValueError("selling_price and unit_cost must be positive")
 
@@ -106,6 +134,7 @@ class NewsvendorModel:
         self.unit_cost = unit_cost
         self.salvage_value = salvage_value
         self.aging = aging
+        self.shelf_life_days = shelf_life_days
 
         if aging is None:
             self.holding_rate = 0.0
@@ -122,11 +151,17 @@ class NewsvendorModel:
             self.aging_years = aging.aging_years
             overage_mult = aging.overage_penalty_multiplier
 
+        if shelf_life_days is not None and shelf_life_days > 0:
+            self.shelf_life_multiplier = max(1.0, reference_shelf_life_days / shelf_life_days)
+        else:
+            self.shelf_life_multiplier = 1.0
+
         # Effective unit cost carries forward storage/financing/aging-loss cost
         self.effective_unit_cost = unit_cost * self.cost_factor / self.yield_rate
 
         self.underage_penalty = selling_price - self.effective_unit_cost
-        self.overage_penalty = (self.effective_unit_cost - salvage_value) * overage_mult
+        self.overage_penalty = ((self.effective_unit_cost - salvage_value)
+                                 * overage_mult * self.shelf_life_multiplier)
 
         if self.underage_penalty <= 0:
             raise ValueError(
@@ -201,6 +236,7 @@ class NewsvendorModel:
             underage_penalty=self.underage_penalty,
             overage_penalty=self.overage_penalty,
             capacity_applied=capacity_applied,
+            shelf_life_multiplier=self.shelf_life_multiplier,
         )
 
 
@@ -220,6 +256,7 @@ class CheeseLine:
     current_inventory: float = 0.0
     salvage_rate: float = 0.30     # fraction of production_cost recovered if unsold
     aging: Optional[AgingConfig] = None
+    shelf_life_days: Optional[int] = None
 
 
 @dataclass
@@ -237,6 +274,7 @@ class AllocationLine:
     profit_per_liter: float
     fully_allocated: bool
     capacity_applied: bool = False
+    shelf_life_multiplier: float = 1.0
 
 
 @dataclass
@@ -304,6 +342,7 @@ class MilkAllocator:
                 unit_cost=full_unit_cost,
                 salvage_value=salvage_value,
                 aging=line.aging,
+                shelf_life_days=line.shelf_life_days,
             )
             line_capacity = capacity_by_cheese.get(line.name) if capacity_by_cheese else None
             result = model.solve(
@@ -360,6 +399,7 @@ class MilkAllocator:
                 profit_per_liter=(profit / allocated_milk) if allocated_milk > 0 else 0.0,
                 fully_allocated=fully_allocated,
                 capacity_applied=result.capacity_applied,
+                shelf_life_multiplier=result.shelf_life_multiplier,
             ))
 
             total_profit_cheese += profit
@@ -468,5 +508,23 @@ if __name__ == "__main__":
           f"(capacity_applied={parm_line.capacity_applied})")
     assert parm_line.cheese_produced_kg <= 15.0 + 1e-6
     assert parm_line.capacity_applied is True
+
+    print("\n" + "=" * 60)
+    print("TEST 5: Shelf-life-aware production (short vs long shelf life)")
+    print("=" * 60)
+    long_shelf = NewsvendorModel(selling_price=650, unit_cost=170, salvage_value=170 * 0.3,
+                                  shelf_life_days=30)
+    short_shelf = NewsvendorModel(selling_price=650, unit_cost=170, salvage_value=170 * 0.3,
+                                   shelf_life_days=5)
+    r_long = long_shelf.solve(mean_demand=60, std_demand=18)
+    r_short = short_shelf.solve(mean_demand=60, std_demand=18)
+    print(f"30-day shelf life: multiplier={r_long.shelf_life_multiplier:.2f}  "
+          f"production={r_long.production_quantity:.1f}kg")
+    print(f" 5-day shelf life: multiplier={r_short.shelf_life_multiplier:.2f}  "
+          f"production={r_short.production_quantity:.1f}kg")
+    assert r_long.shelf_life_multiplier == 1.0, "30d >= 14d reference should be unaffected"
+    assert r_short.shelf_life_multiplier > 1.0, "5d shelf life should trigger the penalty"
+    assert r_short.production_quantity < r_long.production_quantity, \
+        "shorter shelf life should trim safety stock vs. an otherwise-identical long-shelf-life cheese"
 
     print("\nAll checks passed.")
