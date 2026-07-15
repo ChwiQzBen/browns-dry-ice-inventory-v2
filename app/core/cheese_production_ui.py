@@ -114,7 +114,7 @@ def render_cheese_production_mode(supabase_client=None,
         "🏭 Batch Tracking & QC": "manage_cheese_batches",
         "🧊 Aging Room": "view_cheese_production",
         "📦 FEFO Inventory": "view_cheese_production",
-        "📄 Reports": "view_reports",
+        "📄 Production Reports": "view_reports",
     }.items() if _allowed(perm)]
 
     if not visible:
@@ -146,8 +146,8 @@ def render_cheese_production_mode(supabase_client=None,
     if "📦 FEFO Inventory" in tab_lookup:
         with tab_lookup["📦 FEFO Inventory"]:
             _render_fefo_inventory_tab(book, tracker)
-    if "📄 Reports" in tab_lookup:
-        with tab_lookup["📄 Reports"]:
+    if "📄 Production Reports" in tab_lookup:
+        with tab_lookup["📄 Production Reports"]:
             _render_reports_tab(book, tracker)
 
 
