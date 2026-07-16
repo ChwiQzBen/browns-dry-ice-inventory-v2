@@ -38,7 +38,8 @@ from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
 from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine, generate_ai_insights
-from app.core.cheese_production_ui import render_cheese_production_mode 
+from app.core.cheese_production_ui import render_cheese_production_mode
+from app.core.theme import THEME, kpi_card
 import warnings
 from supabase import create_client, Client
 from core.error_handling import (
@@ -5827,11 +5828,6 @@ def main():
         'inventory_items_count': 0,
         'inventory_sample': {},
         'load_attempts': 0,
-        'show_quick_receipt': False,
-        'show_quick_usage': False,
-        'quick_receipt_success': False,
-        'quick_usage_success': False,
-        'generate_report': False,
         'confirm_clear_pressed': False,
         'quick_orders': [],
         'stock_take_inventory': {},
@@ -7438,94 +7434,23 @@ def main():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        # Current Stock - Color coded based on status
         stock_status = inventory_tracker.get_stock_status()
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid {stock_status['color']};
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                📦 Current Stock
-            </div>
-            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
-                {inventory_tracker.current_stock:,.0f}
-            </div>
-            <div style="font-size: 11px; color: {stock_status['color']}; font-weight: 600;">
-                {stock_status['status']}
-            </div>
-            <div style="{action_style}">{action_stock}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Current Stock", f"{inventory_tracker.current_stock:,.0f}", icon="📦",
+                  color=stock_status['color'],
+                  subtext=f"<span style='color:{stock_status['color']};font-weight:600;'>{stock_status['status']}</span>",
+                  action=action_stock)
     with col2:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #4fc3f7;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                📋 Total Orders
-            </div>
-            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
-                {kpis.get('total_orders', 0):,}
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                {kpis.get('total_volume', 0):,.0f} kg total
-            </div>
-            <div style="{action_style}">{action_orders}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Total Orders", f"{kpis.get('total_orders', 0):,}", icon="📋",
+                  color=THEME["info"], subtext=f"{kpis.get('total_volume', 0):,.0f} kg total",
+                  action=action_orders)
     with col3:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #ff9800;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                🛡️ Safety Stock
-            </div>
-            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
-                {safety_stock:,.1f}
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                {kpis.get('order_frequency', 0):.1f} orders/mo
-            </div>
-            <div style="{action_style}">{action_safety}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Safety Stock", f"{safety_stock:,.1f}", icon="🛡️",
+                  color=THEME["orange"], subtext=f"{kpis.get('order_frequency', 0):.1f} orders/mo",
+                  action=action_safety)
     with col4:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #9c27b0;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                📦 Economic EOQ
-            </div>
-            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
-                {eoq:,.1f}
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                Optimal order size
-            </div>
-            <div style="{action_style}">{action_eoq}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        kpi_card("Economic EOQ", f"{eoq:,.1f}", icon="📦",
+                  color=THEME["purple"], subtext="Optimal order size",
+                  action=action_eoq)
 
     # Divider inside card
     st.markdown("""
@@ -7539,94 +7464,22 @@ def main():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #e74c3c;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                💰 Annual Spending
-            </div>
-            <div style="font-size: 18px; font-weight: 700; color: #333; margin: 4px 0;">
-                KSh {total_annual_spending:,.0f}
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                Total cost
-            </div>
-            <div style="{action_style}">{action_spending}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Annual Spending", f"KSh {total_annual_spending:,.0f}", icon="💰",
+                  color="#e74c3c", subtext="Total cost", action=action_spending)
     with col2:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #28a745;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                🚀 Annual Transport Savings
-            </div>
-            <div style="font-size: 18px; font-weight: 700; color: #28a745; margin: 4px 0;">
-                KSh {annual_transport_savings:,.0f}
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                From EOQ optimization
-            </div>
-            <div style="{action_style}">{action_transport}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Annual Transport Savings", f"KSh {annual_transport_savings:,.0f}", icon="🚀",
+                  color=THEME["success"], value_color=THEME["success"],
+                  subtext="From EOQ optimization", action=action_transport)
     with col3:
-        delta_color = "#28a745" if percent_savings > 0 else "#dc3545"
+        delta_color = THEME["success"] if percent_savings > 0 else THEME["danger"]
         delta_arrow = "▲" if percent_savings > 0 else "▼"
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #ff6f00;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                📈 Monthly Savings
-            </div>
-            <div style="font-size: 18px; font-weight: 700; color: #333; margin: 4px 0;">
-                KSh {monthly_savings:,.0f}
-            </div>
-            <div style="font-size: 12px; color: {delta_color}; font-weight: 600;">
-                {delta_arrow} {percent_savings:+.1f}%
-            </div>
-            <div style="{action_style}">{action_monthly}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+        kpi_card("Monthly Savings", f"KSh {monthly_savings:,.0f}", icon="📈",
+                  color=THEME["orange_dark"],
+                  subtext=f"<span style='color:{delta_color};font-weight:600;'>{delta_arrow} {percent_savings:+.1f}%</span>",
+                  action=action_monthly)
     with col4:
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.06);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            border-left: 3px solid #00bcd4;
-        ">
-            <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px;">
-                📊 Container Efficiency
-            </div>
-            <div style="font-size: 22px; font-weight: 700; color: #333; margin: 4px 0;">
-                {container_eff:.1f}%
-            </div>
-            <div style="font-size: 11px; color: #888;">
-                Fill rate
-            </div>
-            <div style="{action_style}">{action_container}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        kpi_card("Container Efficiency", f"{container_eff:.1f}%", icon="📊",
+                  color=THEME["cyan"], subtext="Fill rate", action=action_container)
 
     # Optional: Add a progress bar for stock level at the bottom
     if eoq > 0 and safety_stock > 0:
@@ -7838,7 +7691,12 @@ def main():
                 st.divider()
 
                 @st.cache_data(ttl=300)
-                def load_inventory_data():
+                def load_full_inventory_details():
+                    """Renamed from load_inventory_data() — that name collided with the
+                    module-level load_inventory_data() used for the KPI dashboard higher
+                    up in main(). Same name, different return shape; being a nested def
+                    it only shadowed the outer one within this tab's scope, which worked
+                    but was a landmine for future edits."""
                     try:
                         gsheet = GoogleSheetReader()
 
@@ -7868,27 +7726,33 @@ def main():
                     )
 
                 with st.spinner("📊Loading inventory data..."):
-                    stock_df, current_df, low_df, category_count = load_inventory_data()
+                    # Renamed from stock_df/current_df/low_df/category_count: those
+                    # bare names are also used by the outer load_inventory_data() call
+                    # earlier in main(), AND by 🤖 Advanced Analytics later on. Since
+                    # st.tabs() runs every tab body every rerun (not just the visible
+                    # tab), reusing those names here was silently overwriting the
+                    # dashboard's stock_df for the rest of the script.
+                    tab_stock_df, tab_current_df, tab_low_df, tab_category_count = load_full_inventory_details()
 
                 # Everything below stays INSIDE tab_inventory
-                if not stock_df.empty:
+                if not tab_stock_df.empty:
 
                     col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
-                        st.metric("📦 Total Items", len(stock_df))
+                        st.metric("📦 Total Items", len(tab_stock_df))
 
                     with col2:
-                        st.metric("📂 Categories", category_count)
+                        st.metric("📂 Categories", tab_category_count)
 
                     with col3:
                         st.metric(
                             "📊 Current Stock",
-                            len(current_df) if not current_df.empty else 0
+                            len(tab_current_df) if not tab_current_df.empty else 0
                         )
 
                     with col4:
-                        low_count = len(low_df) if not low_df.empty else 0
+                        low_count = len(tab_low_df) if not tab_low_df.empty else 0
                         st.metric(
                             "⚠️ Low Stock",
                             low_count,
@@ -7896,22 +7760,22 @@ def main():
                         )
 
                     # Price stats
-                    if 'UNIT PRICE' in stock_df.columns:
-                        price_count = stock_df['UNIT PRICE'].notna().sum()
+                    if 'UNIT PRICE' in tab_stock_df.columns:
+                        price_count = tab_stock_df['UNIT PRICE'].notna().sum()
 
                         if price_count > 0:
                             st.caption(
                                 f"💰 Prices available for "
-                                f"{price_count} out of {len(stock_df)} items"
+                                f"{price_count} out of {len(tab_stock_df)} items"
                             )
 
                     # --- ABC ANALYSIS (Operationalized) ---
-                    if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
+                    if 'UNIT PRICE' in tab_stock_df.columns and 'QUANTITY' in tab_stock_df.columns:
                         st.divider()
                         st.markdown("### 📊 ABC Analysis (Pareto Analysis)")
                         
                         # Create a copy for ABC analysis
-                        abc_df = stock_df.copy()
+                        abc_df = tab_stock_df.copy()
                         
                         # Convert to numeric, coercing errors to NaN
                         abc_df['QUANTITY'] = pd.to_numeric(abc_df['QUANTITY'], errors='coerce')
@@ -8264,13 +8128,13 @@ def main():
                             st.info("No valid items with both quantity and price data found for ABC analysis.")
 
                     # --- CATEGORY-LEVEL INVENTORY SUMMARY (WRAPPED IN EXPANDER) ---
-                    if 'ITEM_CATEGORY' in stock_df.columns and 'QUANTITY' in stock_df.columns and 'UNIT PRICE' in stock_df.columns:
+                    if 'ITEM_CATEGORY' in tab_stock_df.columns and 'QUANTITY' in tab_stock_df.columns and 'UNIT PRICE' in tab_stock_df.columns:
                         st.divider()
                         
                         # Wrap Category-Level Inventory Summary in expander - collapsed by default
                         with st.expander("📊 Category-Level Inventory Summary", expanded=False):
                             # Convert to numeric
-                            cat_df = stock_df.copy()
+                            cat_df = tab_stock_df.copy()
                             cat_df['QUANTITY'] = pd.to_numeric(cat_df['QUANTITY'], errors='coerce')
                             cat_df['UNIT PRICE'] = pd.to_numeric(cat_df['UNIT PRICE'], errors='coerce')
                             
@@ -8332,11 +8196,11 @@ def main():
                         )
 
                     with col2:
-                        if 'ITEM_CATEGORY' in stock_df.columns:
+                        if 'ITEM_CATEGORY' in tab_stock_df.columns:
                             categories = (
                                 ['All'] +
                                 sorted(
-                                    stock_df['ITEM_CATEGORY']
+                                    tab_stock_df['ITEM_CATEGORY']
                                     .dropna()
                                     .unique()
                                     .tolist()
@@ -8351,7 +8215,7 @@ def main():
                             category_filter = "All"
 
                     # Apply filters
-                    filtered_df = stock_df.copy()
+                    filtered_df = tab_stock_df.copy()
 
                     if search:
                         mask = False
@@ -8420,16 +8284,16 @@ def main():
                             )
 
                     # Low stock section (already has expander)
-                    if not low_df.empty:
+                    if not tab_low_df.empty:
                         st.divider()
 
                         st.warning(
-                            f"⚠️ {len(low_df)} items are low in stock and need reordering!"
+                            f"⚠️ {len(tab_low_df)} items are low in stock and need reordering!"
                         )
 
                         with st.expander("📋 View Low Stock Items", expanded=False):
                             st.dataframe(
-                                low_df,
+                                tab_low_df,
                                 use_container_width=True,
                                 height=300
                             )
@@ -8642,10 +8506,13 @@ def main():
                 # 🎯 DISPLAY ANALYTICS (ONLY WHEN LOADED)
                 # ============================================================
                 if analytics_loader.is_loaded:
-                    stock_df, check_in_df, check_out_df, current_stock_df = analytics_loader.data
+                    # Renamed stock_df -> analytics_stock_df for the same reason as the
+                    # Inventory tab fix above: this was clobbering the dashboard's
+                    # stock_df before create_advanced_analytics_tab() got to read it.
+                    analytics_stock_df, check_in_df, check_out_df, current_stock_df = analytics_loader.data
                     
                     # Verify data was loaded successfully
-                    if stock_df is None or stock_df.empty:
+                    if analytics_stock_df is None or analytics_stock_df.empty:
                         st.warning("⚠️ No analytics data available. Please check your Google Sheets connection.")
                     else:
                         # ============================================================
@@ -8657,7 +8524,7 @@ def main():
                         # Show summary metrics
                         col1, col2, col3, col4, col5 = st.columns(5)
                         with col1:
-                            st.metric("📦 Total Items", len(stock_df))
+                            st.metric("📦 Total Items", len(analytics_stock_df))
                         with col2:
                             st.metric("📥 Check-Ins", len(check_in_df) if not check_in_df.empty else 0)
                         with col3:
@@ -8971,8 +8838,8 @@ def main():
                         st.divider()
                         st.markdown("### 💰 Cost Optimization for All Items")
                         
-                        if 'UNIT PRICE' in stock_df.columns and 'QUANTITY' in stock_df.columns:
-                            cost_df = stock_df.copy()
+                        if 'UNIT PRICE' in analytics_stock_df.columns and 'QUANTITY' in analytics_stock_df.columns:
+                            cost_df = analytics_stock_df.copy()
                             cost_df['QUANTITY'] = pd.to_numeric(cost_df['QUANTITY'], errors='coerce')
                             cost_df['UNIT PRICE'] = pd.to_numeric(cost_df['UNIT PRICE'], errors='coerce')
                             cost_df = cost_df.dropna(subset=['QUANTITY', 'UNIT PRICE'])
