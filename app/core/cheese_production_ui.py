@@ -34,6 +34,7 @@ from production_plan import ProductionPlanner
 from demand_forecast import CheeseDemandForecaster
 from app.core.cheese_forecast_adapter import make_ensemble_demand_forecaster
 from app.core.production_reports import build_report_data, generate_production_report, summarize_report_data
+from scenario_analysis import Scenario, run_scenario, compare_scenarios
 
 from app.core.cheese_data_access import (
     init_cheese_storage, load_recipe_book, save_recipe, delete_recipe,
@@ -406,6 +407,188 @@ def _render_sales_tab(book: RecipeBook, tracker: BatchTracker, supabase_client) 
         st.info("No sales recorded in the last 30 days.")
 
 
+
+def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,
+                             milk_cost_per_liter: float, raw_milk_price_per_liter: float,
+                             milk_available_l: float, demand_forecast: dict, selling_prices: dict,
+                             base_plan, aging_room_capacity_kg: float, aging_room_used_kg: float) -> None:
+    """
+    'What if?' analysis for today's production plan — sliders react
+    immediately (same pattern as the Dry Ice What-If Simulator in main.py),
+    plus a named-scenario comparison table. Lives as an expander directly
+    under the plan it's perturbing rather than a separate tab, since it's
+    a continuation of the same planning workflow, not a separate feature.
+    """
+    if base_plan is None:
+        st.info("🔮 What-If Analysis will be available once you build a production plan above.")
+        return
+
+    # Same filter the main plan build uses — only cheeses with real demand + price
+    active_demand = {k: v for k, v in demand_forecast.items() if v[0] > 0 and selling_prices.get(k, 0) > 0}
+    active_prices = {k: selling_prices[k] for k in active_demand}
+
+    if not active_demand:
+        st.info("🔮 What-If Analysis needs at least one cheese with demand and price set above.")
+        return
+
+    with st.expander("🔮 What-If Analysis", expanded=False):
+        st.caption("Adjust assumptions below to see how they'd affect today's production plan. "
+                   "This does not change your live data or the plan above.")
+
+        sim_col1, sim_col2 = st.columns(2)
+        with sim_col1:
+            milk_change_pct = st.slider(
+                "Milk supply change (%)", min_value=-50, max_value=50, value=0, step=5,
+                help="Simulate a supplier shortfall or surplus vs. today's milk available",
+                key="cheese_whatif_milk_change",
+            )
+        with sim_col2:
+            demand_change_pct = st.slider(
+                "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
+                help="Simulate a demand spike or slump across all cheeses",
+                key="cheese_whatif_demand_change",
+            )
+
+        with st.expander("Per-cheese demand override (optional)", expanded=False):
+            override_names = st.multiselect(
+                "Apply a different demand change to specific cheeses",
+                list(active_demand.keys()), key="cheese_whatif_override_names",
+            )
+            per_cheese_overrides = {}
+            if override_names:
+                override_cols = st.columns(min(len(override_names), 3))
+                for i, name in enumerate(override_names):
+                    with override_cols[i % 3]:
+                        per_cheese_overrides[name] = st.slider(
+                            f"{name} (%)", -50, 100, 0, 5, key=f"cheese_whatif_override_{name}",
+                        )
+
+        with st.expander("Aging room capacity override (optional)", expanded=False):
+            max_slider = float(aging_room_capacity_kg * 2) if aging_room_capacity_kg > 0 else 100.0
+            sim_aging_capacity = st.slider(
+                "Simulated aging room capacity (kg)",
+                min_value=0.0, max_value=max_slider,
+                value=float(aging_room_capacity_kg), step=5.0,
+                help="Test a tighter (or looser) physical aging-room constraint",
+                key="cheese_whatif_aging_capacity",
+            )
+
+        anything_changed = (
+            milk_change_pct != 0
+            or demand_change_pct != 0
+            or any(v != 0 for v in per_cheese_overrides.values())
+            or sim_aging_capacity != aging_room_capacity_kg
+        )
+
+        # Rebuilt locally rather than reusing the outer planner variable, which
+        # (as the Execute-Plan block below already has to account for) may be
+        # out of scope after a rerun — this is a cheap, stateless wrapper.
+        whatif_planner = ProductionPlanner(book, tracker, milk_cost_per_liter, raw_milk_price_per_liter)
+
+        if anything_changed:
+            sim_scenario = Scenario(
+                name="Custom What-If",
+                description="Simulated via What-If Analysis controls",
+                milk_multiplier=1 + milk_change_pct / 100,
+                demand_multiplier=1 + demand_change_pct / 100,
+                per_cheese_demand_multiplier={
+                    k: 1 + v / 100 for k, v in per_cheese_overrides.items() if v != 0
+                },
+            )
+            sim_plan = run_scenario(
+                whatif_planner, milk_available_l, active_demand, active_prices, sim_scenario,
+                aging_room_capacity_kg=sim_aging_capacity, aging_room_used_kg=aging_room_used_kg,
+            )
+
+            st.markdown("---")
+            compare_col1, compare_col2 = st.columns(2)
+            with compare_col1:
+                st.markdown("**📍 Current Plan (Baseline)**")
+                st.metric("Total Profit", f"KSh {base_plan.total_profit:,.0f}")
+                st.metric("Unmet Demand", f"{base_plan.unmet_demand_kg:.1f} kg")
+                st.metric("Milk Utilization", f"{base_plan.allocation.utilization_rate:.0%}")
+            with compare_col2:
+                st.markdown("**🔮 Simulated Scenario**")
+                delta_profit = sim_plan.total_profit - base_plan.total_profit
+                delta_unmet = sim_plan.unmet_demand_kg - base_plan.unmet_demand_kg
+                delta_util = sim_plan.allocation.utilization_rate - base_plan.allocation.utilization_rate
+                st.metric("Total Profit", f"KSh {sim_plan.total_profit:,.0f}", delta=f"{delta_profit:+,.0f}")
+                st.metric("Unmet Demand", f"{sim_plan.unmet_demand_kg:.1f} kg",
+                          delta=f"{delta_unmet:+.1f} kg", delta_color="inverse")
+                st.metric("Milk Utilization", f"{sim_plan.allocation.utilization_rate:.0%}",
+                          delta=f"{delta_util:+.0%}")
+
+            if sim_plan.warnings:
+                for w in sim_plan.warnings:
+                    st.warning(f"⚠️ {w}")
+        else:
+            st.caption("Move a slider above to see the simulated impact.")
+
+        # ---- Named scenario comparison against baseline ----
+        st.markdown("---")
+        st.markdown("#### 📊 Compare Named Scenarios")
+        st.caption("Run a fixed set of scenarios side-by-side against today's baseline plan.")
+
+        preset_map = {
+            "Milk drops 20%": Scenario(name="Milk drops 20%", description="Supplier shortfall",
+                                        milk_multiplier=0.8),
+            "Milk drops 40%": Scenario(name="Milk drops 40%", description="Severe supplier shortfall",
+                                        milk_multiplier=0.6),
+            "Demand spike +30%": Scenario(name="Demand spike +30%", description="Unexpected order surge",
+                                           demand_multiplier=1.3),
+            "Demand spike +50%": Scenario(name="Demand spike +50%", description="Major demand spike",
+                                           demand_multiplier=1.5),
+            "Pasteurizer down": Scenario(
+                name="Pasteurizer down", description="Approximated as today's milk unusable",
+                milk_multiplier=0.0,
+                equipment_note=("Models 'no milk processed today,' not the pasteurizer itself — "
+                                 "there's no equipment-capacity constraint in the engine yet."),
+            ),
+        }
+
+        preset_names = st.multiselect(
+            "Select scenarios to compare",
+            list(preset_map.keys()),
+            default=["Milk drops 20%", "Demand spike +30%"],
+            key="cheese_whatif_presets",
+        )
+
+        if st.button("🔄 Run Comparison", key="cheese_whatif_run_comparison"):
+            if not preset_names:
+                st.warning("Select at least one scenario to compare.")
+            else:
+                selected_scenarios = [preset_map[n] for n in preset_names]
+                results = compare_scenarios(
+                    whatif_planner, milk_available_l, active_demand, active_prices, selected_scenarios,
+                    aging_room_capacity_kg=aging_room_capacity_kg, aging_room_used_kg=aging_room_used_kg,
+                )
+
+                rows = []
+                for r in results[1:]:  # skip baseline row — already shown as "Current Plan" above
+                    if r.error:
+                        rows.append({
+                            "Scenario": r.scenario.name, "Profit (KSh)": "Error",
+                            "Δ Profit": "-", "Unmet Demand (kg)": "-", "Δ Unmet": "-",
+                            "Milk Util.": "-", "Note": r.error,
+                        })
+                        continue
+                    rows.append({
+                        "Scenario": r.scenario.name,
+                        "Profit (KSh)": f"{r.plan.total_profit:,.0f}",
+                        "Δ Profit": f"{r.profit_delta_vs_base:+,.0f}",
+                        "Unmet Demand (kg)": f"{r.plan.unmet_demand_kg:.1f}",
+                        "Δ Unmet": f"{r.unmet_demand_delta_vs_base:+.1f}",
+                        "Milk Util.": f"{r.plan.allocation.utilization_rate:.0%}",
+                        "Note": r.scenario.equipment_note or "",
+                    })
+
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                for r in results:
+                    if not r.error and r.plan.warnings:
+                        for w in r.plan.warnings:
+                            st.caption(f"⚠️ [{r.scenario.name}] {w}")
+
 # ============================================================
 # TAB 3: PRODUCTION PLANNING
 # ============================================================
@@ -513,6 +696,12 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
         if plan.warnings:
             for w in plan.warnings:
                 st.warning(w)
+
+        _render_whatif_expander(
+            book, tracker, milk_cost_per_liter, raw_milk_price_per_liter,
+            milk_available_l, demand_forecast, selling_prices,
+            plan, capacity_kg, used_kg,
+        )
 
         with st.expander("🚀 Execute this plan (creates real production batches)"):
             operator = st.text_input("Operator name", key="execute_plan_operator")
