@@ -4,6 +4,9 @@ app/core/visual_inventory.py
 Visual/AI display helpers for inventory, extracted from main.py.
 Powers app.core.all_items_ui's 🖼️ Visual Inventory tab.
 
+get_sample_inventory_data() also lives here as a shared fallback dataset —
+app.core.stock_take imports it from this module rather than duplicating it.
+
 All functions are pure display/calc helpers — they take inventory_items
 (and a few other plain params) and render or return data, with no
 main.py-specific state. Kept in the same relative order as main.py for
@@ -181,6 +184,78 @@ def visual_inventory_grid(items, columns=3):
 
             # Use st.html() instead of st.markdown()
             st.components.v1.html(html_content)
+
+
+def get_sample_inventory_data():
+    """
+    Get sample inventory data for testing the visual grid
+    """
+    return {
+        "Dry Ice Block (10kg)": {
+            "icon": "🧊",
+            "stock": 450,
+            "reorder": 200,
+            "max": 600,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A",
+            "price": 146.55
+        },
+        "Dry Ice Pellets (5kg)": {
+            "icon": "❄️",
+            "stock": 320,
+            "reorder": 150,
+            "max": 500,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A"
+        },
+        "Dry Ice Slices (2kg)": {
+            "icon": "💎",
+            "stock": 180,
+            "reorder": 100,
+            "max": 300,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse B"
+        },
+        "Insulated Containers": {
+            "icon": "📦",
+            "stock": 45,
+            "reorder": 20,
+            "max": 60,
+            "unit": "units",
+            "category": "Packaging",
+            "location": "Warehouse B"
+        },
+        "CO2 Gas Cylinders": {
+            "icon": "🛢️",
+            "stock": 12,
+            "reorder": 5,
+            "max": 20,
+            "unit": "units",
+            "category": "Equipment",
+            "location": "Storage Unit #1"
+        },
+        "Dry Ice Bags (25kg)": {
+            "icon": "🎒",
+            "stock": 85,
+            "reorder": 40,
+            "max": 150,
+            "unit": "kg",
+            "category": "Dry Ice",
+            "location": "Warehouse A"
+        },
+        "Safety Gloves": {
+            "icon": "🧤",
+            "stock": 28,
+            "reorder": 15,
+            "max": 50,
+            "unit": "pairs",
+            "category": "Safety",
+            "location": "Storage Unit #2"
+        }
+    }
 
 
 def inventory_stats_summary(items):
