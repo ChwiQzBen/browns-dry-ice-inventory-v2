@@ -7693,6 +7693,7 @@ def main():
             create_scenario_analysis_fn=create_scenario_analysis,
             render_scenario_analysis_fn=render_scenario_analysis,
             render_scenario_summary_fn=render_scenario_summary,
+            transactions=st.session_state.transactions,
         )
         render_dry_ice_mode(dry_ice_ctx, has_permission=has_permission)
 

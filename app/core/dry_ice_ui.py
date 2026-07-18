@@ -82,7 +82,7 @@ class DryIceContext:
     create_scenario_analysis_fn: Optional[Callable] = None
     render_scenario_analysis_fn: Optional[Callable] = None
     render_scenario_summary_fn: Optional[Callable] = None
-
+    transactions: list = field(default_factory=list)
 
 def render_dry_ice_mode(ctx: DryIceContext,
                          has_permission: Optional[Callable[[str], bool]] = None) -> None:
@@ -1512,10 +1512,13 @@ def _render_transaction_history_tab(ctx: DryIceContext) -> None:
 
     st.markdown("## 📜 Inventory Transaction History")
 
-    if not st.session_state.transactions:
+    # Use transactions from context instead of session_state
+    transactions = ctx.transactions
+
+    if not transactions:
         st.info("No transactions recorded for this period yet. Use the sidebar to record usage or receipts.")
     else:
-        trans_df = pd.DataFrame(st.session_state.transactions)
+        trans_df = pd.DataFrame(transactions)
         trans_df['date'] = pd.to_datetime(trans_df['date'])
         trans_df = trans_df.sort_values('date', ascending=False)
         trans_df = compress_dataframe(trans_df)
