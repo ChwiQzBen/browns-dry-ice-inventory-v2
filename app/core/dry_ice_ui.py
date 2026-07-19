@@ -128,7 +128,7 @@ def render_dry_ice_mode(ctx: DryIceContext,
 
     visible = [name for name, perm in DRY_ICE_TAB_REQUIREMENTS.items() if _allowed(perm)]
     if not visible:
-        st.warning("This section isn't available for your current role.")
+        st.warning("This section isn't available for your current role. If you feel this is a mistake, please contact your administrator.")
         return
 
     tabs = st.tabs(visible)

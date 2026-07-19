@@ -104,7 +104,7 @@ def render_cheese_production_mode(supabase_client=None,
     }.items() if _allowed(perm)]
 
     if not visible:
-        st.warning("This section isn't available for your current role.")
+        st.warning("This section isn't available for your current role. If you feel this is a mistake, please contact your administrator.")
         return
 
     tabs = st.tabs(visible)
