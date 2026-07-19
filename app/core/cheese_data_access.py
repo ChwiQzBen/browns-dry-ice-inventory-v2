@@ -98,6 +98,13 @@ def init_cheese_storage(supabase_client=None) -> None:
         contact_person TEXT, phone TEXT, email TEXT, address TEXT,
         credit_terms_days INTEGER DEFAULT 0, notes TEXT, created_at TEXT
     )""")
+    # one-time migration: customer_id FK on cheese_sales / lpo_lines
+    c.execute("PRAGMA table_info(cheese_sales)")
+    if 'customer_id' not in [col[1] for col in c.fetchall()]:
+        c.execute("ALTER TABLE cheese_sales ADD COLUMN customer_id INTEGER")
+    c.execute("PRAGMA table_info(lpo_lines)")
+    if 'customer_id' not in [col[1] for col in c.fetchall()]:
+        c.execute("ALTER TABLE lpo_lines ADD COLUMN customer_id INTEGER")
     c.execute("""INSERT OR IGNORE INTO aging_room_config (room_name, max_capacity_kg, notes)
                  VALUES ('default', ?, 'Set this to your real aging room capacity in kg')""",
               (DEFAULT_AGING_ROOM_CAPACITY_KG,))
@@ -303,20 +310,26 @@ def get_milk_liters_for_date(target_date: date, supabase_client=None) -> float:
 def save_cheese_sale(sale_date: date, cheese_name: str, quantity_kg: float,
                       price_per_kg: float, batch_lines: List[Dict[str, Any]],
                       customer: str = "", notes: str = "",
-                      supabase_client=None) -> Optional[int]:
+                      supabase_client=None, customer_id: Optional[int] = None) -> Optional[int]:
     """Persists one sale EVENT, including which batch(es) it was fulfilled
     from (batch_lines = [{"batch_id": ..., "quantity_kg": ...}, ...] — the
     same shape as FEFOAllocationResult.lines), so a sale stays traceable
     back to a specific ProductionBatch via BatchTracker.trace(). This does
     NOT decrement stock itself — call FEFOInventory.allocate(commit=True)
     for that, then pass its .lines here. Keeping them separate matches this
-    module's stated scope: persistence only, business logic lives elsewhere."""
+    module's stated scope: persistence only, business logic lives elsewhere.
+
+    customer_id links this sale to the customers table for Customer
+    Analytics — optional and appended at the end of the signature (not
+    inserted between existing params) so old positional call sites don't
+    silently shift their other arguments."""
     date_str = sale_date.isoformat() if hasattr(sale_date, "isoformat") else str(sale_date)
     revenue = quantity_kg * price_per_kg
     row = {
         "date": date_str, "cheese_name": cheese_name, "quantity_kg": quantity_kg,
         "price_per_kg": price_per_kg, "revenue": revenue,
-        "batch_lines": json.dumps(batch_lines), "customer": customer, "notes": notes,
+        "batch_lines": json.dumps(batch_lines), "customer": customer,
+        "customer_id": customer_id, "notes": notes,
     }
     if supabase_client:
         try:
@@ -327,10 +340,10 @@ def save_cheese_sale(sale_date: date, cheese_name: str, quantity_kg: float,
     conn = _sqlite()
     c = conn.cursor()
     c.execute("""INSERT INTO cheese_sales
-        (date, cheese_name, quantity_kg, price_per_kg, revenue, batch_lines, customer, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (date, cheese_name, quantity_kg, price_per_kg, revenue, batch_lines, customer, customer_id, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               (date_str, cheese_name, quantity_kg, price_per_kg, revenue,
-               json.dumps(batch_lines), customer, notes, datetime.now().isoformat()))
+               json.dumps(batch_lines), customer, customer_id, notes, datetime.now().isoformat()))
     new_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -634,10 +647,10 @@ def get_weighted_milk_cost_for_date(target_date: date, supabase_client) -> float
 def save_lpo_line(lpo_number: str, customer_name: str, delivery_date: date,
                    cheese_name: str, quantity_kg: float, price_per_kg: float = 0.0,
                    date_received: Optional[date] = None, notes: str = "",
-                   supabase_client=None) -> Optional[int]:
+                   supabase_client=None, customer_id: Optional[int] = None) -> Optional[int]:
     date_received = date_received or date.today()
     row = {
-        "lpo_number": lpo_number, "customer_name": customer_name,
+        "lpo_number": lpo_number, "customer_name": customer_name, "customer_id": customer_id,
         "date_received": date_received.isoformat(), "delivery_date": delivery_date.isoformat(),
         "cheese_name": cheese_name, "quantity_kg": quantity_kg,
         "quantity_delivered_kg": None, "price_per_kg": price_per_kg,
@@ -652,10 +665,10 @@ def save_lpo_line(lpo_number: str, customer_name: str, delivery_date: date,
     conn = _sqlite()
     c = conn.cursor()
     c.execute("""INSERT INTO lpo_lines
-        (lpo_number, customer_name, date_received, delivery_date, cheese_name,
+        (lpo_number, customer_name, customer_id, date_received, delivery_date, cheese_name,
          quantity_kg, quantity_delivered_kg, price_per_kg, status, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'Pending', ?, ?)""",
-              (lpo_number, customer_name, date_received.isoformat(), delivery_date.isoformat(),
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'Pending', ?, ?)""",
+              (lpo_number, customer_name, customer_id, date_received.isoformat(), delivery_date.isoformat(),
                cheese_name, quantity_kg, price_per_kg, notes, datetime.now().isoformat()))
     new_id = c.lastrowid
     conn.commit()
@@ -823,3 +836,92 @@ def delete_customer(customer_id: int, supabase_client=None) -> None:
     conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     conn.commit()
     conn.close()
+    
+def reconcile_customers_from_history(supabase_client=None) -> Dict[str, int]:
+    """One-time (safe to re-run) backfill: matches freetext customer names in
+    cheese_sales.customer and lpo_lines.customer_name to a customers row —
+    case-insensitive, trimmed — creating a new customer record for any name
+    that doesn't already exist, then sets customer_id on the historical row.
+    Returns {'customers_created': N, 'sales_linked': N, 'lpo_linked': N}.
+    Call this once before trusting any customer-level analytics; safe to
+    call again later if new unlinked freetext names show up."""
+    existing = get_customers(supabase_client)
+    by_normalized = {c["name"].strip().lower(): c["id"] for c in existing}
+    customers_created_before = len(by_normalized)
+
+    def _get_or_create(raw_name: str) -> Optional[int]:
+        name = (raw_name or "").strip()
+        if not name:
+            return None
+        key = name.lower()
+        if key in by_normalized:
+            return by_normalized[key]
+        new_id = save_customer(name=name, supabase_client=supabase_client)
+        by_normalized[key] = new_id
+        return new_id
+
+    sales_linked = 0
+    if supabase_client:
+        try:
+            unlinked = supabase_client.table("cheese_sales").select("id, customer") \
+                .is_("customer_id", "null").execute().data
+        except Exception:
+            unlinked = []
+    else:
+        conn = _sqlite()
+        conn.row_factory = sqlite3.Row
+        unlinked = [dict(r) for r in conn.execute(
+            "SELECT id, customer FROM cheese_sales WHERE customer_id IS NULL").fetchall()]
+        conn.close()
+
+    for row in unlinked:
+        cid = _get_or_create(row.get("customer"))
+        if cid is None:
+            continue
+        if supabase_client:
+            try:
+                supabase_client.table("cheese_sales").update({"customer_id": cid}).eq("id", row["id"]).execute()
+            except Exception:
+                continue
+        else:
+            conn = _sqlite()
+            conn.execute("UPDATE cheese_sales SET customer_id = ? WHERE id = ?", (cid, row["id"]))
+            conn.commit()
+            conn.close()
+        sales_linked += 1
+
+    lpo_linked = 0
+    if supabase_client:
+        try:
+            unlinked_lpo = supabase_client.table("lpo_lines").select("id, customer_name") \
+                .is_("customer_id", "null").execute().data
+        except Exception:
+            unlinked_lpo = []
+    else:
+        conn = _sqlite()
+        conn.row_factory = sqlite3.Row
+        unlinked_lpo = [dict(r) for r in conn.execute(
+            "SELECT id, customer_name FROM lpo_lines WHERE customer_id IS NULL").fetchall()]
+        conn.close()
+
+    for row in unlinked_lpo:
+        cid = _get_or_create(row.get("customer_name"))
+        if cid is None:
+            continue
+        if supabase_client:
+            try:
+                supabase_client.table("lpo_lines").update({"customer_id": cid}).eq("id", row["id"]).execute()
+            except Exception:
+                continue
+        else:
+            conn = _sqlite()
+            conn.execute("UPDATE lpo_lines SET customer_id = ? WHERE id = ?", (cid, row["id"]))
+            conn.commit()
+            conn.close()
+        lpo_linked += 1
+
+    return {
+        "customers_created": len(by_normalized) - customers_created_before,
+        "sales_linked": sales_linked,
+        "lpo_linked": lpo_linked,
+    }    

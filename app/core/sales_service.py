@@ -38,7 +38,8 @@ def dispatch_and_record_sale(tracker: BatchTracker,
                               sale_date: date,
                               customer: str = "",
                               notes: str = "",
-                              supabase_client=None) -> SaleResult:
+                              supabase_client=None,
+                              customer_id: Optional[int] = None) -> SaleResult:
     """Allocates FEFO stock for a sale/delivery and persists the sale in one
     call. This is the ONE path both the Sales tab and (later) LPO delivery
     fulfillment should call — never allocate FEFO stock or call
@@ -49,7 +50,7 @@ def dispatch_and_record_sale(tracker: BatchTracker,
 
     sale_id = save_cheese_sale(
         sale_date, cheese_name, result.allocated_kg, price_per_kg,
-        batch_lines, customer, notes, supabase_client,
+        batch_lines, customer, notes, supabase_client, customer_id=customer_id,
     )
 
     return SaleResult(
