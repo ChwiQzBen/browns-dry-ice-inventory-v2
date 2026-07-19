@@ -496,27 +496,7 @@ class AuthManager:
             with col2:
                 st.caption(" ")
             
-            # ============================================================
-            # 🔑 DEMO CREDENTIALS - FIXED (No nested expander)
-            # ============================================================
-            # Use checkbox instead of expander (works in all Streamlit versions)
-            if st.checkbox("🔑 Show Demo Credentials"):
-                st.markdown("""
-                <div style="
-                    background: rgba(102, 126, 234, 0.08);
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    margin-top: 4px;
-                    font-size: 12px;
-                    border: 1px solid rgba(102, 126, 234, 0.15);
-                ">
-                    <strong>Admin:</strong> admin@browns.com / Admin123!<br>
-                    <strong>Manager:</strong> manager@browns.com / Manager123!<br>
-                    <strong>User:</strong> user@browns.com / User123!<br>
-                    <strong>Viewer:</strong> viewer@browns.com / Viewer123!
-                </div>
-                """, unsafe_allow_html=True)
-            
+              
             return False
 
 # ============================================================
