@@ -63,7 +63,8 @@ def run_scenario(planner: ProductionPlanner,
                   selling_prices: Dict[str, float],
                   scenario: Scenario,
                   aging_room_capacity_kg: Optional[float] = None,
-                  aging_room_used_kg: float = 0.0) -> ProductionPlan:
+                  aging_room_used_kg: float = 0.0,
+                  confirmed_demand: Optional[Dict[str, float]] = None) -> ProductionPlan:
     """Applies a scenario's multipliers to the base inputs and runs one plan.
     Does not mutate planner/tracker state beyond what build_plan() already does
     (build_plan is read-only against BatchTracker; nothing is committed).
@@ -72,6 +73,14 @@ def run_scenario(planner: ProductionPlanner,
     exactly as the real planning tab passes them, so a scenario run reflects
     the same physical space constraint the baseline plan is subject to.
     Omit (None) to run unconstrained, matching build_plan()'s own default.
+
+    confirmed_demand is forwarded UNMODIFIED by the scenario's multipliers —
+    an LPO is a real, already-committed order, not a forecast to hedge
+    against. "Demand spikes 30%" describes uncertainty around the forecast,
+    not more confirmed orders, so scaling it here would misrepresent what
+    the scenario is testing. A milk-drop scenario can still show a confirmed
+    order going unmet if reduced supply can't cover it — build_plan()'s
+    existing under-allocation warning handles that.
     """
 
     adjusted_milk = base_milk_l * scenario.milk_multiplier
@@ -89,6 +98,8 @@ def run_scenario(planner: ProductionPlanner,
     if aging_room_capacity_kg is not None:
         kwargs["aging_room_capacity_kg"] = aging_room_capacity_kg
         kwargs["aging_room_used_kg"] = aging_room_used_kg
+    if confirmed_demand:
+        kwargs["confirmed_demand"] = confirmed_demand
 
     return planner.build_plan(**kwargs)
 
@@ -100,14 +111,15 @@ def _run_scenario_safely(planner: ProductionPlanner,
                           scenario: Scenario,
                           base_plan: ProductionPlan,
                           aging_room_capacity_kg: Optional[float],
-                          aging_room_used_kg: float) -> ScenarioResult:
+                          aging_room_used_kg: float,
+                          confirmed_demand: Optional[Dict[str, float]] = None) -> ScenarioResult:
     """Runs one scenario and catches any exception so one bad 'what if'
     doesn't take down the whole comparison. Failures are recorded on the
     returned ScenarioResult (plan=None, error=<message>) instead of
     propagating."""
     try:
         plan = run_scenario(planner, base_milk_l, base_demand, selling_prices, scenario,
-                             aging_room_capacity_kg, aging_room_used_kg)
+                             aging_room_capacity_kg, aging_room_used_kg, confirmed_demand)
         return ScenarioResult(
             scenario=scenario, plan=plan,
             profit_delta_vs_base=plan.total_profit - base_plan.total_profit,
@@ -130,7 +142,8 @@ def compare_scenarios(planner: ProductionPlanner,
                        selling_prices: Dict[str, float],
                        scenarios: List[Scenario],
                        aging_room_capacity_kg: Optional[float] = None,
-                       aging_room_used_kg: float = 0.0) -> List[ScenarioResult]:
+                       aging_room_used_kg: float = 0.0,
+                       confirmed_demand: Optional[Dict[str, float]] = None) -> List[ScenarioResult]:
     """Runs a baseline (multiplier 1.0, always included first) plus every
     given scenario, and returns each with deltas vs. the baseline.
 
@@ -141,11 +154,14 @@ def compare_scenarios(planner: ProductionPlanner,
     _run_scenario_safely) rather than aborting the whole comparison — if
     the baseline itself fails, that exception is allowed to propagate,
     since there'd be nothing left to compare against.
+
+    confirmed_demand applies to the baseline AND every scenario, unscaled
+    by any scenario multiplier — see run_scenario()'s docstring for why.
     """
 
     baseline = Scenario(name="Baseline", description="Today's actual milk and forecast, unmodified")
     base_plan = run_scenario(planner, base_milk_l, base_demand, selling_prices, baseline,
-                              aging_room_capacity_kg, aging_room_used_kg)
+                              aging_room_capacity_kg, aging_room_used_kg, confirmed_demand)
 
     results = [ScenarioResult(
         scenario=baseline, plan=base_plan,
@@ -154,7 +170,8 @@ def compare_scenarios(planner: ProductionPlanner,
 
     for scenario in scenarios:
         result = _run_scenario_safely(planner, base_milk_l, base_demand, selling_prices,
-                                       scenario, base_plan, aging_room_capacity_kg, aging_room_used_kg)
+                                       scenario, base_plan, aging_room_capacity_kg, aging_room_used_kg,
+                                       confirmed_demand)
         results.append(result)
 
     return results

@@ -42,6 +42,7 @@ from app.core.cheese_data_access import (
     save_cheese_sale, get_sales_history, get_daily_sales_kg,
     load_batch_tracker, get_aging_room_capacity_kg, set_aging_room_capacity_kg,
     get_aging_room_used_kg, check_aging_room_capacity,
+    get_confirmed_demand_for_date,
 )
 
 CHEESE_TAB_NAMES = [
@@ -411,7 +412,8 @@ def _render_sales_tab(book: RecipeBook, tracker: BatchTracker, supabase_client) 
 def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,
                              milk_cost_per_liter: float, raw_milk_price_per_liter: float,
                              milk_available_l: float, demand_forecast: dict, selling_prices: dict,
-                             base_plan, aging_room_capacity_kg: float, aging_room_used_kg: float) -> None:
+                             base_plan, aging_room_capacity_kg: float, aging_room_used_kg: float,
+                             confirmed_demand: dict) -> None:
     """
     'What if?' analysis for today's production plan — sliders react
     immediately (same pattern as the Dry Ice What-If Simulator in main.py),
@@ -426,6 +428,7 @@ def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,
     # Same filter the main plan build uses — only cheeses with real demand + price
     active_demand = {k: v for k, v in demand_forecast.items() if v[0] > 0 and selling_prices.get(k, 0) > 0}
     active_prices = {k: selling_prices[k] for k in active_demand}
+    active_confirmed = {k: v for k, v in confirmed_demand.items() if k in active_demand}
 
     if not active_demand:
         st.info("🔮 What-If Analysis needs at least one cheese with demand and price set above.")
@@ -498,6 +501,7 @@ def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,
             sim_plan = run_scenario(
                 whatif_planner, milk_available_l, active_demand, active_prices, sim_scenario,
                 aging_room_capacity_kg=sim_aging_capacity, aging_room_used_kg=aging_room_used_kg,
+                confirmed_demand=active_confirmed,
             )
 
             st.markdown("---")
@@ -561,6 +565,7 @@ def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,
                 results = compare_scenarios(
                     whatif_planner, milk_available_l, active_demand, active_prices, selected_scenarios,
                     aging_room_capacity_kg=aging_room_capacity_kg, aging_room_used_kg=aging_room_used_kg,
+                    confirmed_demand=active_confirmed,
                 )
 
                 rows = []
@@ -599,6 +604,16 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
     if not book.list_names():
         st.warning("Add at least one recipe in the 🧀 Recipes tab before planning production.")
         return
+
+    planning_date = date.today() + timedelta(days=1)
+    st.caption(f"Planning production for delivery on {planning_date.strftime('%Y-%m-%d')} (tomorrow).")
+    confirmed_demand = get_confirmed_demand_for_date(planning_date, supabase_client)
+
+    planning_date = date.today() + timedelta(days=1)
+    confirmed_demand = get_confirmed_demand_for_date(planning_date, supabase_client)
+    if confirmed_demand:
+        st.caption(f"📄 {sum(confirmed_demand.values()):.0f}kg confirmed via open LPOs "
+                   f"for delivery on {planning_date.strftime('%b %d')}.")
 
     default_milk = get_milk_liters_for_date(date.today(), supabase_client)
     milk_available_l = st.number_input(
@@ -658,6 +673,12 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
                     st.session_state.cheese_demand_overrides[name] = (round(fcast.mean, 1), round(fcast.std, 1))
                     st.rerun()
 
+            confirmed_kg = confirmed_demand.get(name, 0.0)
+            if confirmed_kg > 0:
+                st.caption(f"📄 Confirmed via LPO for {planning_date.strftime('%b %d')}: {confirmed_kg:.1f}kg")
+            confirmed_kg = confirmed_demand.get(name, 0.0)
+            if confirmed_kg > 0:
+                st.caption(f"📄 {confirmed_kg:.1f}kg confirmed via LPO — production won't go below this")
             st.caption(f"ℹ️ {fcast.confidence_note}")
             demand_forecast[name] = (mean_kg, std_kg if std_kg > 0 else mean_kg * 0.3)
             selling_prices[name] = price
@@ -677,6 +698,7 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
                 selling_prices={k: selling_prices[k] for k in active_demand},
                 aging_room_capacity_kg=capacity_kg,
                 aging_room_used_kg=used_kg,
+                confirmed_demand={k: v for k, v in confirmed_demand.items() if k in active_demand},
             )
             st.session_state.cheese_last_plan = plan
         except Exception as e:
@@ -700,7 +722,7 @@ def _render_production_planning_tab(book: RecipeBook, tracker: BatchTracker, sup
         _render_whatif_expander(
             book, tracker, milk_cost_per_liter, raw_milk_price_per_liter,
             milk_available_l, demand_forecast, selling_prices,
-            plan, capacity_kg, used_kg,
+            plan, capacity_kg, used_kg, confirmed_demand,
         )
 
         with st.expander("🚀 Execute this plan (creates real production batches)"):

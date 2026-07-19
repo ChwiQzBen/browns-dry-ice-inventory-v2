@@ -87,6 +87,12 @@ def init_cheese_storage(supabase_client=None) -> None:
     c.execute("""CREATE TABLE IF NOT EXISTS aging_room_config (
         room_name TEXT PRIMARY KEY, max_capacity_kg REAL, notes TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS lpo_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, lpo_number TEXT, customer_name TEXT,
+        date_received TEXT, delivery_date TEXT, cheese_name TEXT,
+        quantity_kg REAL, quantity_delivered_kg REAL, price_per_kg REAL,
+        status TEXT, notes TEXT, created_at TEXT
+    )""")
     c.execute("""INSERT OR IGNORE INTO aging_room_config (room_name, max_capacity_kg, notes)
                  VALUES ('default', ?, 'Set this to your real aging room capacity in kg')""",
               (DEFAULT_AGING_ROOM_CAPACITY_KG,))
@@ -615,3 +621,118 @@ def get_weighted_milk_cost_for_date(target_date: date, supabase_client) -> float
         return 0.0
     total_cost = sum(r["liters"] * r["cost_per_liter"] for r in todays)
     return total_cost / total_liters
+
+# ============================================================
+# LPO REGISTER  (confirmed customer demand — floors production_plan.py's
+# newsvendor quantity instead of being blended into the forecast mean)
+# ============================================================
+def save_lpo_line(lpo_number: str, customer_name: str, delivery_date: date,
+                   cheese_name: str, quantity_kg: float, price_per_kg: float = 0.0,
+                   date_received: Optional[date] = None, notes: str = "",
+                   supabase_client=None) -> Optional[int]:
+    date_received = date_received or date.today()
+    row = {
+        "lpo_number": lpo_number, "customer_name": customer_name,
+        "date_received": date_received.isoformat(), "delivery_date": delivery_date.isoformat(),
+        "cheese_name": cheese_name, "quantity_kg": quantity_kg,
+        "quantity_delivered_kg": None, "price_per_kg": price_per_kg,
+        "status": "Pending", "notes": notes,
+    }
+    if supabase_client:
+        try:
+            result = supabase_client.table("lpo_lines").insert(row).execute()
+            return result.data[0]["id"] if result.data else None
+        except Exception:
+            pass
+    conn = _sqlite()
+    c = conn.cursor()
+    c.execute("""INSERT INTO lpo_lines
+        (lpo_number, customer_name, date_received, delivery_date, cheese_name,
+         quantity_kg, quantity_delivered_kg, price_per_kg, status, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'Pending', ?, ?)""",
+              (lpo_number, customer_name, date_received.isoformat(), delivery_date.isoformat(),
+               cheese_name, quantity_kg, price_per_kg, notes, datetime.now().isoformat()))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_lpo_lines(delivery_date: Optional[date] = None, status: Optional[str] = None,
+                   supabase_client=None) -> List[Dict[str, Any]]:
+    if supabase_client:
+        try:
+            query = supabase_client.table("lpo_lines").select("*").order("delivery_date")
+            if delivery_date:
+                query = query.eq("delivery_date", delivery_date.isoformat())
+            if status:
+                query = query.eq("status", status)
+            return query.execute().data
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.row_factory = sqlite3.Row
+    sql = "SELECT * FROM lpo_lines WHERE 1=1"
+    params = []
+    if delivery_date:
+        sql += " AND delivery_date = ?"
+        params.append(delivery_date.isoformat())
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    sql += " ORDER BY delivery_date"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn.close()
+    return rows
+
+
+def get_confirmed_demand_for_date(target_date: date, supabase_client=None) -> Dict[str, float]:
+    """Sum of open LPO quantity per cheese for a delivery date — this is
+    what production_plan.py's build_plan(confirmed_demand=...) floors
+    production against. Excludes Cancelled and already-Delivered lines."""
+    lines = get_lpo_lines(delivery_date=target_date, supabase_client=supabase_client)
+    confirmed: Dict[str, float] = {}
+    for line in lines:
+        if line["status"] in ("Cancelled", "Delivered"):
+            continue
+        confirmed[line["cheese_name"]] = confirmed.get(line["cheese_name"], 0.0) + float(line["quantity_kg"])
+    return confirmed
+
+
+def record_lpo_delivery(lpo_line_id: int, quantity_delivered_kg: float,
+                         supabase_client=None) -> None:
+    """Call this when a delivery against an LPO line happens. Sets status
+    to 'Delivered' if fully met, else 'Partially Delivered' — the shortfall
+    is what should feed a lost-sales metric in Customer Analytics later."""
+    rows = None
+    if supabase_client:
+        try:
+            rows = supabase_client.table("lpo_lines").select("*").eq("id", lpo_line_id).execute().data
+        except Exception:
+            rows = None
+    if rows is None:
+        conn = _sqlite()
+        conn.row_factory = sqlite3.Row
+        r = conn.execute("SELECT * FROM lpo_lines WHERE id = ?", (lpo_line_id,)).fetchone()
+        conn.close()
+        rows = [dict(r)] if r else []
+
+    if not rows:
+        raise ValueError(f"LPO line {lpo_line_id} not found")
+
+    requested_kg = float(rows[0]["quantity_kg"])
+    status = "Delivered" if quantity_delivered_kg >= requested_kg - 1e-6 else "Partially Delivered"
+
+    if supabase_client:
+        try:
+            supabase_client.table("lpo_lines").update({
+                "quantity_delivered_kg": quantity_delivered_kg, "status": status,
+            }).eq("id", lpo_line_id).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("UPDATE lpo_lines SET quantity_delivered_kg = ?, status = ? WHERE id = ?",
+                 (quantity_delivered_kg, status, lpo_line_id))
+    conn.commit()
+    conn.close()

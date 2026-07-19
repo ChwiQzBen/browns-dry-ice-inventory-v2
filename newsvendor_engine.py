@@ -197,6 +197,13 @@ class NewsvendorModel:
         aging_loss_factor = self.yield_rate ** self.aging_years if self.aging_years else 1.0
         production_qty = optimal_qty / aging_loss_factor if aging_loss_factor > 0 else optimal_qty
 
+        # Confirmed LPO demand is a FLOOR, not blended into mean_demand — it's
+        # already-committed volume, not something to hedge with safety stock.
+        floor_applied = False
+        if min_production_quantity is not None and production_qty < min_production_quantity:
+            production_qty = min_production_quantity
+            floor_applied = True
+
         capacity_applied = False
         if capacity is not None and production_qty > capacity:
             production_qty = max(0.0, capacity)
@@ -236,6 +243,7 @@ class NewsvendorModel:
             underage_penalty=self.underage_penalty,
             overage_penalty=self.overage_penalty,
             capacity_applied=capacity_applied,
+            floor_applied=floor_applied,
             shelf_life_multiplier=self.shelf_life_multiplier,
         )
 
@@ -257,6 +265,7 @@ class CheeseLine:
     salvage_rate: float = 0.30     # fraction of production_cost recovered if unsold
     aging: Optional[AgingConfig] = None
     shelf_life_days: Optional[int] = None
+    confirmed_demand_kg: float = 0.0   # from open LPOs — floors production, not blended into demand_mean
 
 
 @dataclass
@@ -274,6 +283,8 @@ class AllocationLine:
     profit_per_liter: float
     fully_allocated: bool
     capacity_applied: bool = False
+    floor_applied: bool = False
+    confirmed_demand_kg: float = 0.0
     shelf_life_multiplier: float = 1.0
 
 
@@ -350,6 +361,7 @@ class MilkAllocator:
                 std_demand=line.demand_std,
                 current_inventory=line.current_inventory,
                 capacity=line_capacity,
+                min_production_quantity=line.confirmed_demand_kg if line.confirmed_demand_kg > 0 else None,
             )
             milk_needed = (result.production_quantity / line.yield_kg_per_liter
                             if line.yield_kg_per_liter > 0 else 0.0)
@@ -399,6 +411,8 @@ class MilkAllocator:
                 profit_per_liter=(profit / allocated_milk) if allocated_milk > 0 else 0.0,
                 fully_allocated=fully_allocated,
                 capacity_applied=result.capacity_applied,
+                floor_applied=result.floor_applied,
+                confirmed_demand_kg=line.confirmed_demand_kg,
                 shelf_life_multiplier=result.shelf_life_multiplier,
             ))
 

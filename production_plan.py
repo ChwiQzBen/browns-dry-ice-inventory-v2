@@ -96,7 +96,8 @@ class ProductionPlanner:
                    demand_forecast: Dict[str, Tuple[float, float]],  # name -> (mean, std)
                    selling_prices: Dict[str, float],
                    aging_room_capacity_kg: Optional[float] = None,
-                   aging_room_used_kg: float = 0.0) -> ProductionPlan:
+                   aging_room_used_kg: float = 0.0,
+                   confirmed_demand: Optional[Dict[str, float]] = None) -> ProductionPlan:
         """
         Args:
             aging_room_capacity_kg: total aging room capacity, if you want the
@@ -107,6 +108,7 @@ class ProductionPlanner:
                 batches still aging (see cheese_data_access.get_aging_room_used_kg).
         """
 
+        confirmed_demand = confirmed_demand or {}
         cheese_lines = []
         for cheese_name, (mean, std) in demand_forecast.items():
             recipe = self.recipes.get(cheese_name)
@@ -121,6 +123,7 @@ class ProductionPlanner:
                 current_inventory=current_stock,
                 aging=recipe.aging,
                 shelf_life_days=recipe.shelf_life_days,
+                confirmed_demand_kg=confirmed_demand.get(cheese_name, 0.0),
             ))
 
         # Aging-room constraint: every aged cheese is capped at whatever
@@ -162,6 +165,11 @@ class ProductionPlanner:
                     f"Capped by aging-room capacity — newsvendor-optimal quantity was "
                     f"higher, but the room doesn't have space for more"
                 )
+            if line.floor_applied:
+                reasons.append(
+                    f"Raised to {line.confirmed_demand_kg:.0f}kg to cover confirmed LPO "
+                    f"orders — newsvendor-optimal quantity alone was lower"
+                )
             if line.shelf_life_multiplier > 1.05:
                 reasons.append(
                     f"Short shelf life ({recipe.shelf_life_days}d) raises the effective "
@@ -171,6 +179,11 @@ class ProductionPlanner:
             if not line.fully_allocated:
                 reasons.append("Milk-constrained — below newsvendor-optimal quantity")
                 warnings.append(f"{line.cheese}: under-produced due to milk shortage today")
+                if line.confirmed_demand_kg > 0 and line.cheese_produced_kg < line.confirmed_demand_kg:
+                    warnings.append(
+                        f"{line.cheese}: confirmed LPO demand ({line.confirmed_demand_kg:.0f}kg) "
+                        f"not fully covered — {line.confirmed_demand_kg - line.cheese_produced_kg:.0f}kg short"
+                    )
             if line.expected_leftover_kg > max(line.cheese_produced_kg * 0.15, 1e-6):
                 warnings.append(
                     f"{line.cheese}: expected leftover {line.expected_leftover_kg:.1f}kg "
