@@ -66,6 +66,7 @@ class NewsvendorResult:
     underage_penalty: float
     overage_penalty: float
     capacity_applied: bool = False
+    floor_applied: bool = False 
     shelf_life_multiplier: float = 1.0
 
 
@@ -178,7 +179,8 @@ class NewsvendorModel:
               mean_demand: float,
               std_demand: float,
               current_inventory: float = 0.0,
-              capacity: Optional[float] = None) -> NewsvendorResult:
+              capacity: Optional[float] = None,
+              min_production_quantity: Optional[float] = None) -> NewsvendorResult:   
         """
         Args:
             mean_demand: expected demand AT POINT OF SALE (i.e. in `aging_years`
@@ -187,6 +189,10 @@ class NewsvendorModel:
             current_inventory: stock already on hand, netted out of Q*
             capacity: optional hard cap on production_quantity (e.g. aging
                       room space, daily production capacity)
+            min_production_quantity: optional floor on production_quantity   
+                      (e.g. confirmed LPO demand). Applied BEFORE capacity,
+                      so a hard physical constraint still wins if the two
+                      ever conflict.
         """
         z = self.z_score
 
