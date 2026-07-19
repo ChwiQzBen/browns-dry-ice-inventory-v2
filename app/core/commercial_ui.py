@@ -76,6 +76,7 @@ def render_commercial_mode(supabase_client=None,
         "📄 LPO Register": "manage_lpo",
         "💰 Sales": "record_cheese_sale",
         "👥 Customers": "manage_customers",
+        "📊 Customer Analytics": "view_customer_analytics",
         "📋 Commercial Reports": "view_commercial_reports",
     }.items() if _allowed(perm)]
 
@@ -95,6 +96,9 @@ def render_commercial_mode(supabase_client=None,
     if "👥 Customers" in tab_lookup:
         with tab_lookup["👥 Customers"]:
             _render_customers_tab(supabase_client)
+    if "📊 Customer Analytics" in tab_lookup:
+        with tab_lookup["📊 Customer Analytics"]:
+            _render_customer_analytics_tab(supabase_client)
     if "📋 Commercial Reports" in tab_lookup:
         with tab_lookup["📋 Commercial Reports"]:
             _render_commercial_reports_tab(supabase_client)
@@ -354,7 +358,45 @@ def _render_customers_tab(supabase_client) -> None:
                 delete_customer(editing["id"], supabase_client)
                 st.success(f"Deleted '{editing['name']}'.")
                 st.rerun()
+# ============================================================
+# TAB: CUSTOMER ANALYTICS
+# ============================================================
+def _render_customer_analytics_tab(supabase_client) -> None:
+    st.markdown("### 📊 Customer Analytics")
+    st.caption("Customer insights, RFM analysis, and ordering patterns.")
 
+    from app.core.customer_analytics import (
+        get_rfm_analysis,
+        get_customer_segments,
+        get_ordering_patterns,
+        get_product_mix,
+        get_churn_risk,
+        get_customer_lifetime_value,
+        get_customer_analytics_summary,
+    )
+
+    sales = get_sales_history(supabase_client=supabase_client)
+    lpos = get_lpo_lines(supabase_client=supabase_client)
+
+    if not sales and not lpos:
+        st.info("No sales or LPO data available for analytics.")
+        return
+
+    summary = get_customer_analytics_summary(sales, lpos)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Customers", summary.get("total_customers", 0))
+    c2.metric("Active Customers", summary.get("active_customers", 0))
+    c3.metric("Avg Order Value", f"KSh {summary.get('avg_order_value', 0):,.0f}")
+    c4.metric("Repeat Rate", f"{summary.get('repeat_rate', 0):.0f}%")
+
+    st.markdown("---")
+
+    st.markdown("#### 🎯 RFM Analysis")
+    rfm_df = get_rfm_analysis(sales)
+    if rfm_df is not None and not rfm_df.empty:
+        st.dataframe(rfm_df, use_container_width=True, hide_index=True)
+    else:
+        st.caption("Not enough data for RFM analysis.")
 
 # ============================================================
 # TAB: COMMERCIAL REPORTS  (rollups over existing Sales/LPO data, no new
