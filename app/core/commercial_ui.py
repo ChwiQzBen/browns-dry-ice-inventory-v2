@@ -1,41 +1,4 @@
 from __future__ import annotations
-"""
-app/core/commercial_ui.py
-===========================
-Streamlit tab bodies for "💰 Commercial Mode" — customer-facing operations,
-split out from "🧀 Manufacturing Mode" (recipes, milk, batches, aging,
-production planning — see cheese_production_ui.py).
-
-Shares session state with Manufacturing Mode via
-app.core.cheese_shared_state.ensure_cheese_state() — both modes read/write
-the SAME RecipeBook and BatchTracker instances within a session, not
-independent copies.
-
-Entry point:
-
-    from app.core.commercial_ui import render_commercial_mode
-    render_commercial_mode(supabase_client=init_supabase(), has_permission=has_permission)
-
-CURRENT SCOPE: LPO Register, Sales, Customers, Commercial Reports.
-Customer Analytics (RFM/CLV/churn/segments) is deliberately NOT here yet —
-it needs customer_id-linked Sales/LPO history (both still use freetext
-customer names) and the milk-cost-in-profitability fix first. Building it
-against freetext-grouped, milk-cost-understated data now would mean
-rebuilding it once those land.
-
-Deliberate cuts in THIS slice (documented so they're a choice, not an
-oversight):
-- No separate "Confirmed" status step — an LPO counts toward
-  get_confirmed_demand_for_date() the moment it's saved (status defaults
-  to "Pending", which the floor logic already treats as confirmed).
-- customer_name is freetext, matching the existing Sales tab. Switch this
-  to a customer_id select once the Customers tab exists — freetext here
-  will need the same one-time reconciliation pass as cheese_sales.history.
-- No dedicated "Tomorrow's Deliveries" sub-view — the Pending LPOs list is
-  sorted by delivery_date, so tomorrow's (and any overdue) LPOs surface at
-  the top on their own; a headline metric above it gives the number
-  Production Planning will floor against.
-"""
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -44,27 +7,29 @@ from typing import Optional, Callable
 import streamlit as st
 import pandas as pd
 
-from app.core.sales_service import dispatch_and_record_sale, available_stock_kg
+from sales_service import dispatch_and_record_sale, available_stock_kg
 from app.core.cheese_shared_state import ensure_cheese_state
 from app.core.cheese_data_access import (
     save_lpo_line, get_lpo_lines, record_lpo_delivery, cancel_lpo_line,
     get_sales_history, save_customer, get_customers, delete_customer,
+    reconcile_customers_from_history,
+)
+from app.core.customer_analytics import compute_ordering_patterns, compute_product_mix
+from app.core.commercial_reports import (
+    build_commercial_report_data, summarize_commercial_report_data, generate_commercial_report,
 )
 
 COMMERCIAL_TAB_NAMES = [
     "📄 LPO Register",
     "💰 Sales",
     "👥 Customers",
-    "� Commercial Reports",
-    # "📊 Customer Analytics",  # needs customer_id migration + milk-cost fix first
+    "📊 Customer Analytics",
+    "📋 Commercial Reports",
 ]
 
 
 def render_commercial_mode(supabase_client=None,
                             has_permission: Optional[Callable[[str], bool]] = None) -> None:
-    """Main entry point — call this from main.py inside the
-    '💰 Commercial Mode' branch, the same way Manufacturing Mode is called."""
-
     def _allowed(permission: str) -> bool:
         return has_permission(permission) if has_permission else True
 
@@ -81,7 +46,7 @@ def render_commercial_mode(supabase_client=None,
     }.items() if _allowed(perm)]
 
     if not visible:
-        st.warning("This section isn't available for your current role. If you feel this is a mistake, please contact your administrator.")
+        st.warning("This section isn't available for your current role.")
         return
 
     tabs = st.tabs(visible)
@@ -104,6 +69,35 @@ def render_commercial_mode(supabase_client=None,
             _render_commercial_reports_tab(supabase_client)
 
 
+def _customer_picker(customers: list, key_prefix: str):
+    """Customer selectbox + always-visible 'or type a new name' fallback.
+    Deliberately NOT a conditional reveal (e.g. text_input only shown after
+    picking '+ New customer') — widgets inside st.form() don't rerun until
+    submit, so a selectbox-triggered reveal wouldn't appear reliably. At
+    submit time, a typed name here takes priority over the dropdown pick."""
+    options = ["(select existing)"] + [c["name"] for c in customers]
+    pick = st.selectbox("Customer", options, key=f"{key_prefix}_customer_pick")
+    new_name = st.text_input("...or type a new customer name", key=f"{key_prefix}_customer_new")
+
+    if new_name.strip():
+        return None, new_name.strip()
+    if pick != "(select existing)":
+        match = next((c for c in customers if c["name"] == pick), None)
+        return (match["id"], match["name"]) if match else (None, pick)
+    return None, ""
+
+
+def _resolve_customer_id(customer_id, customer_name, supabase_client):
+    """If the picker returned a brand-new typed name (customer_id is None
+    but a name was given), create the customer record now so the sale/LPO
+    being saved links to it immediately."""
+    if customer_id is not None:
+        return customer_id
+    if customer_name:
+        return save_customer(name=customer_name, supabase_client=supabase_client)
+    return None
+
+
 # ============================================================
 # TAB: LPO REGISTER
 # ============================================================
@@ -113,31 +107,27 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
         "Confirmed customer orders. Open quantities here floor tomorrow's "
         "production plan in 🧀 Manufacturing → 📋 Production Planning."
     )
-
     if not book.list_names():
         st.info("Add a recipe in 🧀 Manufacturing → Recipes before receiving LPOs.")
         return
+
+    customers = get_customers(supabase_client=supabase_client)
 
     tomorrow = date.today() + timedelta(days=1)
     tomorrow_lines = get_lpo_lines(delivery_date=tomorrow, supabase_client=supabase_client)
     tomorrow_open = [l for l in tomorrow_lines if l["status"] not in ("Cancelled", "Delivered")]
     if tomorrow_open:
         total_kg = sum(l["quantity_kg"] for l in tomorrow_open)
-        st.metric(
-            f"Confirmed for {tomorrow.strftime('%b %d')} (tomorrow)",
-            f"{total_kg:,.1f} kg",
-            help="This is what Production Planning will floor tomorrow's plan against.",
-        )
+        st.metric(f"Confirmed for {tomorrow.strftime('%b %d')} (tomorrow)", f"{total_kg:,.1f} kg")
     else:
         st.caption(f"No open LPOs due {tomorrow.strftime('%b %d')} (tomorrow) yet.")
 
-    # ---- Receive LPO ----
     with st.expander("➕ Receive LPO", expanded=not tomorrow_open):
         with st.form("receive_lpo_form"):
             col1, col2 = st.columns(2)
             with col1:
                 lpo_number = st.text_input("LPO Number")
-                customer_name = st.text_input("Customer")
+                customer_id, customer_name = _customer_picker(customers, "lpo")
                 cheese_name = st.selectbox("Cheese", book.list_names(), key="lpo_cheese")
             with col2:
                 delivery_date = st.date_input("Delivery Date", value=tomorrow, min_value=date.today())
@@ -145,7 +135,6 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
                 price_per_kg = st.number_input("Price per kg (KSh, optional)", min_value=0.0,
                                                 value=0.0, step=10.0)
             notes = st.text_input("Notes (optional)")
-
             if st.form_submit_button("📥 Record LPO", type="primary"):
                 if not lpo_number or not customer_name:
                     st.error("LPO number and customer are required.")
@@ -153,11 +142,13 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
                     st.error("Enter a quantity greater than 0.")
                 else:
                     try:
+                        resolved_id = _resolve_customer_id(customer_id, customer_name, supabase_client)
                         new_id = save_lpo_line(
                             lpo_number=lpo_number, customer_name=customer_name,
                             delivery_date=delivery_date, cheese_name=cheese_name,
                             quantity_kg=quantity_kg, price_per_kg=price_per_kg,
                             notes=notes, supabase_client=supabase_client,
+                            customer_id=resolved_id,
                         )
                         st.success(f"✅ Recorded LPO {lpo_number} — {quantity_kg:.1f}kg of "
                                    f"{cheese_name} due {delivery_date.strftime('%b %d')} (line #{new_id}).")
@@ -165,13 +156,11 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
                     except Exception as e:
                         st.error(f"❌ Could not record LPO: {e}")
 
-    # ---- Pending LPOs (sorted by delivery date — soonest/overdue first) ----
     st.markdown("---")
     st.markdown("#### Pending LPOs")
     all_lines = get_lpo_lines(supabase_client=supabase_client)
     pending = [l for l in all_lines if l["status"] in ("Pending", "Confirmed")]
     pending.sort(key=lambda l: l["delivery_date"])
-
     if not pending:
         st.info("No open LPOs.")
     else:
@@ -202,7 +191,6 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
                         st.rerun()
                 st.markdown("---")
 
-    # ---- History ----
     with st.expander("📜 LPO History (delivered / cancelled)", expanded=False):
         history = [l for l in all_lines if l["status"] in ("Delivered", "Partially Delivered", "Cancelled")]
         if history:
@@ -217,9 +205,9 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
         else:
             st.caption("Nothing delivered or cancelled yet.")
 
+
 # ============================================================
-# TAB: SALES  (moved from Manufacturing — routes through sales_service
-# instead of importing FEFOInventory/BatchTracker business logic directly)
+# TAB: SALES
 # ============================================================
 def _render_sales_tab(book, tracker, supabase_client) -> None:
     st.markdown("### 💰 Record a Sale")
@@ -234,6 +222,8 @@ def _render_sales_tab(book, tracker, supabase_client) -> None:
                  "and release some stock before recording sales.")
         return
 
+    customers = get_customers(supabase_client=supabase_client)
+
     with st.form("record_sale_form"):
         col1, col2 = st.columns(2)
         with col1:
@@ -242,7 +232,7 @@ def _render_sales_tab(book, tracker, supabase_client) -> None:
         with col2:
             quantity_kg = st.number_input("Quantity Sold (kg)", min_value=0.0, value=1.0, step=0.5)
             price_per_kg = st.number_input("Price per kg (KSh)", min_value=0.0, value=0.0, step=10.0)
-        customer = st.text_input("Customer (optional)")
+        customer_id, customer = _customer_picker(customers, "sale")
         notes = st.text_input("Notes (optional)")
 
         available = available_stock_kg(tracker, cheese_name) if cheese_name else 0.0
@@ -258,9 +248,10 @@ def _render_sales_tab(book, tracker, supabase_client) -> None:
                          f"can't record a sale for {quantity_kg:,.1f}kg.")
             else:
                 try:
+                    resolved_id = _resolve_customer_id(customer_id, customer, supabase_client)
                     result = dispatch_and_record_sale(
                         tracker, cheese_name, quantity_kg, price_per_kg, sale_date,
-                        customer, notes, supabase_client,
+                        customer, notes, supabase_client, customer_id=resolved_id,
                     )
                     st.success(f"✅ Sold {result.allocated_kg:,.1f}kg of {cheese_name} "
                                f"for KSh {result.revenue:,.0f}, drawn from "
@@ -290,15 +281,14 @@ def _render_sales_tab(book, tracker, supabase_client) -> None:
 
 
 # ============================================================
-# TAB: CUSTOMERS  (registry only; Sales/LPO still use freetext customer
-# names, see module docstring)
+# TAB: CUSTOMERS
 # ============================================================
 def _render_customers_tab(supabase_client) -> None:
     st.markdown("### 👥 Customers")
     st.caption(
-        "Customer registry. Sales and LPOs still use freetext customer names for "
-        "now — linking them to this registry (and reconciling existing history) "
-        "is a separate follow-up before Customer Analytics can trust the data."
+        "Customer registry. New Sales/LPOs can now pick a customer directly — "
+        "existing history still needs reconciliation (below) before Customer "
+        "Analytics can trust it."
     )
 
     customers = get_customers(supabase_client=supabase_client)
@@ -358,56 +348,103 @@ def _render_customers_tab(supabase_client) -> None:
                 delete_customer(editing["id"], supabase_client)
                 st.success(f"Deleted '{editing['name']}'.")
                 st.rerun()
+
+    with st.expander("🔄 Reconcile existing Sales/LPO history", expanded=False):
+        st.caption(
+            "One-time backfill: matches freetext customer names on past sales "
+            "and LPOs to this registry (case-insensitive), creating a new "
+            "customer record for any name that doesn't already exist. Safe to "
+            "run again later — already-linked rows are skipped."
+        )
+        if st.button("Run Reconciliation", key="run_customer_reconciliation"):
+            with st.spinner("Matching historical records..."):
+                result = reconcile_customers_from_history(supabase_client=supabase_client)
+            st.success(
+                f"✅ Linked {result['sales_linked']} sale(s) and {result['lpo_linked']} "
+                f"LPO(s); created {result['customers_created']} new customer record(s)."
+            )
+            st.rerun()
+
+
 # ============================================================
-# TAB: CUSTOMER ANALYTICS
+# TAB: CUSTOMER ANALYTICS  (Product Preferences + Ordering Patterns —
+# the two foundational views RFM/CLV/churn will build on next)
 # ============================================================
 def _render_customer_analytics_tab(supabase_client) -> None:
     st.markdown("### 📊 Customer Analytics")
-    st.caption("Customer insights, RFM analysis, and ordering patterns.")
-
-    from app.core.customer_analytics import (
-        get_rfm_analysis,
-        get_customer_segments,
-        get_ordering_patterns,
-        get_product_mix,
-        get_churn_risk,
-        get_customer_lifetime_value,
-        get_customer_analytics_summary,
+    st.caption(
+        "Product Preferences and Ordering Patterns — the foundational views "
+        "RFM, CLV, and churn detection will build on next. Only customer_id-"
+        "linked sales count here."
     )
 
+    customers = get_customers(supabase_client=supabase_client)
     sales = get_sales_history(supabase_client=supabase_client)
-    lpos = get_lpo_lines(supabase_client=supabase_client)
+    linked_count = sum(1 for s in sales if s.get("customer_id") is not None)
 
-    if not sales and not lpos:
-        st.info("No sales or LPO data available for analytics.")
+    if not sales:
+        st.info("No sales recorded yet.")
         return
+    if linked_count == 0:
+        st.warning(
+            "No sales are linked to a customer yet. Run reconciliation in the "
+            "👥 Customers tab, or start picking customers from the dropdown "
+            "in 💰 Sales going forward."
+        )
+        return
+    if linked_count < len(sales):
+        st.caption(f"ℹ️ {linked_count} of {len(sales)} sales are customer-linked — "
+                    f"{len(sales) - linked_count} unlinked sale(s) excluded below.")
 
-    summary = get_customer_analytics_summary(sales, lpos)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Customers", summary.get("total_customers", 0))
-    c2.metric("Active Customers", summary.get("active_customers", 0))
-    c3.metric("Avg Order Value", f"KSh {summary.get('avg_order_value', 0):,.0f}")
-    c4.metric("Repeat Rate", f"{summary.get('repeat_rate', 0):.0f}%")
+    patterns = compute_ordering_patterns(sales, customers)
+    mixes = compute_product_mix(sales, customers)
+    mix_by_id = {m.customer_id: m for m in mixes}
+
+    st.markdown("#### Ordering Patterns")
+    if patterns:
+        rows = []
+        for p in patterns:
+            rows.append({
+                "Customer": p.customer_name,
+                "Orders": p.total_orders,
+                "Total Kg": f"{p.total_kg:,.1f}",
+                "Revenue": f"KSh {p.total_revenue:,.0f}",
+                "Avg Days Between Orders": p.avg_days_between_orders if p.avg_days_between_orders else "—",
+                "Usual Day": p.most_common_weekday or "—",
+                "Last Order": p.last_order_date,
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No customer-linked orders yet.")
 
     st.markdown("---")
+    st.markdown("#### Product Preferences")
+    if patterns:
+        selected_name = st.selectbox(
+            "Customer", [p.customer_name for p in patterns], key="analytics_customer_pick",
+        )
+        selected = next((p for p in patterns if p.customer_name == selected_name), None)
+        mix = mix_by_id.get(selected.customer_id) if selected else None
+        if mix and mix.by_cheese_kg:
+            mix_df = pd.DataFrame(
+                sorted(mix.by_cheese_kg.items(), key=lambda kv: kv[1], reverse=True),
+                columns=["Cheese", "Kg Purchased"],
+            )
+            st.dataframe(mix_df, use_container_width=True, hide_index=True)
+            st.caption(f"Top product: **{mix.top_cheese}**")
+        else:
+            st.caption("No purchase history for this customer.")
 
-    st.markdown("#### 🎯 RFM Analysis")
-    rfm_df = get_rfm_analysis(sales)
-    if rfm_df is not None and not rfm_df.empty:
-        st.dataframe(rfm_df, use_container_width=True, hide_index=True)
-    else:
-        st.caption("Not enough data for RFM analysis.")
 
 # ============================================================
-# TAB: COMMERCIAL REPORTS  (rollups over existing Sales/LPO data, no new
-# schema needed)
+# TAB: COMMERCIAL REPORTS
 # ============================================================
 def _render_commercial_reports_tab(supabase_client) -> None:
     st.markdown("### 📋 Commercial Reports")
     st.caption(
         "Rollups over Sales and LPO data. Customer-level breakdowns use freetext "
-        "customer names for now — expect some fragmentation (e.g. 'Java House' vs "
-        "'java house') until Sales/LPO are linked to the Customers registry."
+        "customer names — expect some fragmentation until Sales/LPO are fully "
+        "linked to the Customers registry (see 👥 Customers → Reconciliation)."
     )
 
     col1, col2 = st.columns(2)
@@ -421,76 +458,73 @@ def _render_commercial_reports_tab(supabase_client) -> None:
         st.error("Start date must be before end date.")
         return
 
-    sales = get_sales_history(start_date=start_date, end_date=end_date, supabase_client=supabase_client)
-    all_lpo = get_lpo_lines(supabase_client=supabase_client)
-    lpo_lines = [l for l in all_lpo
-                 if start_date.isoformat() <= l["delivery_date"] <= end_date.isoformat()]
+    if st.button("📊 Generate Report", type="primary", key="generate_commercial_report_btn"):
+        try:
+            sales = get_sales_history(start_date=start_date, end_date=end_date, supabase_client=supabase_client)
+            all_lpo = get_lpo_lines(supabase_client=supabase_client)
+            lpo_lines = [l for l in all_lpo
+                         if start_date.isoformat() <= l["delivery_date"] <= end_date.isoformat()]
+            st.session_state.commercial_report = build_commercial_report_data(
+                sales, lpo_lines, start_date, end_date,
+            )
+            st.success("Report generated successfully.")
+        except Exception as e:
+            st.error(f"Could not generate report: {e}")
+            return
 
-    if not sales and not lpo_lines:
-        st.info("No sales or LPO activity in this date range.")
+    if "commercial_report" not in st.session_state:
         return
 
-    sales_df = pd.DataFrame(sales) if sales else pd.DataFrame(
-        columns=["date", "cheese_name", "quantity_kg", "price_per_kg", "revenue", "customer"])
-
-    total_revenue = sales_df["revenue"].sum() if not sales_df.empty else 0.0
-    total_kg = sales_df["quantity_kg"].sum() if not sales_df.empty else 0.0
+    data = st.session_state.commercial_report
+    st.divider()
+    st.subheader("📊 Summary")
+    st.text(summarize_commercial_report_data(data))
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Revenue", f"KSh {total_revenue:,.0f}")
-    c2.metric("Total Volume", f"{total_kg:,.1f} kg")
-    c3.metric("Sales Transactions", len(sales_df))
+    c1.metric("Total Revenue", f"KSh {data.total_revenue:,.0f}")
+    c2.metric("Total Volume", f"{data.total_kg:,.1f} kg")
+    c3.metric("Sales Transactions", data.total_sales_transactions)
 
-    st.markdown("---")
+    c4, c5, c6 = st.columns(3)
+    c4.metric("LPO Volume", f"{data.lpo_total_kg:,.1f} kg")
+    c5.metric("LPO Fill Rate", f"{data.lpo_fill_rate_pct:.0f}%")
+    c6.metric("LPOs Cancelled", data.lpo_cancelled_count)
 
-    st.markdown("#### Revenue by Product")
-    if not sales_df.empty:
-        by_product = sales_df.groupby("cheese_name").agg(
-            Revenue=("revenue", "sum"), Kg=("quantity_kg", "sum"), Sales=("revenue", "count"),
-        ).reset_index().sort_values("Revenue", ascending=False)
-        by_product["Revenue"] = by_product["Revenue"].map(lambda v: f"KSh {v:,.0f}")
-        by_product["Kg"] = by_product["Kg"].map(lambda v: f"{v:,.1f}")
-        st.dataframe(by_product.rename(columns={"cheese_name": "Cheese"}),
-                     use_container_width=True, hide_index=True)
-    else:
-        st.caption("No sales in this range.")
+    if data.revenue_by_product:
+        st.subheader("Revenue by Product")
+        prod_df = pd.DataFrame(data.revenue_by_product).rename(
+            columns={"cheese_name": "Cheese", "revenue": "Revenue", "kg": "Kg", "count": "Sales"})
+        prod_df["Revenue"] = prod_df["Revenue"].map(lambda v: f"KSh {v:,.0f}")
+        prod_df["Kg"] = prod_df["Kg"].map(lambda v: f"{v:,.1f}")
+        st.dataframe(prod_df, use_container_width=True, hide_index=True)
 
-    st.markdown("#### Revenue by Customer")
-    if not sales_df.empty and sales_df["customer"].fillna("").str.strip().any():
-        tagged = sales_df[sales_df["customer"].fillna("").str.strip() != ""]
-        by_customer = tagged.groupby("customer").agg(
-            Revenue=("revenue", "sum"), Kg=("quantity_kg", "sum"), Sales=("revenue", "count"),
-        ).reset_index().sort_values("Revenue", ascending=False)
-        by_customer["Revenue"] = by_customer["Revenue"].map(lambda v: f"KSh {v:,.0f}")
-        by_customer["Kg"] = by_customer["Kg"].map(lambda v: f"{v:,.1f}")
-        st.dataframe(by_customer.rename(columns={"customer": "Customer"}),
-                     use_container_width=True, hide_index=True)
-    else:
-        st.caption("No customer-tagged sales in this range.")
+    if data.revenue_by_customer:
+        st.subheader("Revenue by Customer")
+        cust_df = pd.DataFrame(data.revenue_by_customer).rename(
+            columns={"customer": "Customer", "revenue": "Revenue", "kg": "Kg", "count": "Sales"})
+        cust_df["Revenue"] = cust_df["Revenue"].map(lambda v: f"KSh {v:,.0f}")
+        cust_df["Kg"] = cust_df["Kg"].map(lambda v: f"{v:,.1f}")
+        st.dataframe(cust_df, use_container_width=True, hide_index=True)
 
-    st.markdown("#### LPO Fulfillment")
-    if lpo_lines:
-        total_lpo_kg = sum(l["quantity_kg"] for l in lpo_lines)
-        delivered = [l for l in lpo_lines if l["status"] in ("Delivered", "Partially Delivered")]
-        delivered_kg = sum(l.get("quantity_delivered_kg") or 0 for l in delivered)
-        fill_rate = (delivered_kg / total_lpo_kg * 100) if total_lpo_kg > 0 else 0.0
-        cancelled = sum(1 for l in lpo_lines if l["status"] == "Cancelled")
+    if data.lpo_status_counts:
+        st.subheader("LPO Status Breakdown")
+        status_df = pd.DataFrame(list(data.lpo_status_counts.items()), columns=["Status", "Count"])
+        st.dataframe(status_df, use_container_width=True, hide_index=True)
 
-        lc1, lc2, lc3 = st.columns(3)
-        lc1.metric("LPO Volume", f"{total_lpo_kg:,.1f} kg")
-        lc2.metric("Fill Rate", f"{fill_rate:.0f}%")
-        lc3.metric("Cancelled", cancelled)
-
-        status_counts = pd.DataFrame(lpo_lines)["status"].value_counts().reset_index()
-        status_counts.columns = ["Status", "Count"]
-        st.dataframe(status_counts, use_container_width=True, hide_index=True)
-    else:
-        st.caption("No LPOs due in this range.")
-
-    st.markdown("#### Sales vs LPO Volume")
-    lpo_kg_total = sum(l["quantity_kg"] for l in lpo_lines)
-    st.caption(
-        f"Sold: {total_kg:,.1f} kg via {len(sales_df)} transaction(s)  •  "
-        f"LPO-confirmed: {lpo_kg_total:,.1f} kg across {len(lpo_lines)} line(s) "
-        f"due in this window."
-    )           
+    st.divider()
+    if st.button("📄 Generate PDF Report", key="generate_commercial_pdf_btn"):
+        try:
+            filename = f"commercial_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            pdf_path = generate_commercial_report(data, output_path=filename)
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.download_button(
+                label="📥 Download PDF Report", data=pdf_bytes, file_name=filename,
+                mime="application/pdf", key="download_commercial_pdf",
+            )
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+        except ImportError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Could not generate PDF: {e}")
