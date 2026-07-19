@@ -164,3 +164,4 @@ wheels/
 *.csv
 reports/*.pdf
 app_logs.txt
+users.json
