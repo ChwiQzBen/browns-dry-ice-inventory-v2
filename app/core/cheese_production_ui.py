@@ -49,8 +49,7 @@ from app.core.cheese_data_access import (
 CHEESE_TAB_NAMES = [
     "🧀 Recipes",
     "🥛 Milk Receipts",
-    "💰 Sales",
-    "📋 Production Planning",
+    " Production Planning",
     "🏭 Batch Tracking & QC",
     "🧊 Aging Room",
     "📦 FEFO Inventory",
@@ -97,8 +96,7 @@ def render_cheese_production_mode(supabase_client=None,
     visible = [name for name, perm in {
         "🧀 Recipes": "view_cheese_recipes",
         "🥛 Milk Receipts": "record_milk_receipt",
-        "💰 Sales": "record_cheese_sale",
-        "📋 Production Planning": "run_production_plan",
+        " Production Planning": "run_production_plan",
         "🏭 Batch Tracking & QC": "manage_cheese_batches",
         "🧊 Aging Room": "view_cheese_production",
         "📦 FEFO Inventory": "view_cheese_production",
@@ -118,10 +116,7 @@ def render_cheese_production_mode(supabase_client=None,
     if "🥛 Milk Receipts" in tab_lookup:
         with tab_lookup["🥛 Milk Receipts"]:
             _render_milk_receipts_tab(supabase_client)
-    if "💰 Sales" in tab_lookup:  
-        with tab_lookup["💰 Sales"]:  
-            _render_sales_tab(book, tracker, supabase_client)
-    if "📋 Production Planning" in tab_lookup:  
+    if " Production Planning" in tab_lookup:  
         with tab_lookup["📋 Production Planning"]: 
             _render_production_planning_tab(book, tracker, supabase_client,
                                             milk_cost_per_liter, raw_milk_price_per_liter)
@@ -319,80 +314,6 @@ def _render_milk_receipts_tab(supabase_client) -> None:
                             file_name=f"milk_receipts_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
     else:
         st.info("No milk receipts in the last 30 days.")
-
-
-# ============================================================
-# TAB: SALES  (feeds cheese_sales -> CheeseDemandForecaster)
-# ============================================================
-def _render_sales_tab(book: RecipeBook, tracker: BatchTracker, supabase_client) -> None:
-    st.markdown("### 💰 Record a Sale")
-    st.caption(
-        "Recording a sale here dispatches stock via FEFO (earliest-expiry batches "
-        "consumed first — same allocation logic as 📦 FEFO Inventory) AND saves the "
-        "sale to history, so 📋 Production Planning's demand forecast has real data."
-    )
-
-    if not book.list_names():
-        st.info("Add a recipe first, then produce and release some stock before recording sales.")
-        return
-
-    fefo = FEFOInventory(tracker)
-
-    with st.form("record_sale_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            sale_date = st.date_input("Sale Date", value=date.today())
-            cheese_name = st.selectbox("Cheese", book.list_names(), key="sale_cheese")
-        with col2:
-            quantity_kg = st.number_input("Quantity Sold (kg)", min_value=0.0, value=1.0, step=0.5)
-            price_per_kg = st.number_input("Price per kg (KSh)", min_value=0.0, value=0.0, step=10.0)
-        customer = st.text_input("Customer (optional)")
-        notes = st.text_input("Notes (optional)")
-
-        available = fefo.total_available_kg(cheese_name) if cheese_name else 0.0
-        st.caption(f"Available stock: {available:,.1f} kg")
-
-        if st.form_submit_button("💰 Record Sale", type="primary"):
-            if quantity_kg <= 0:
-                st.error("Enter a quantity greater than 0.")
-            elif price_per_kg <= 0:
-                st.error("Enter a price greater than 0.")
-            elif quantity_kg > available:
-                st.error(f"Only {available:,.1f}kg of {cheese_name} available — "
-                         f"can't record a sale for {quantity_kg:,.1f}kg.")
-            else:
-                try:
-                    result = fefo.allocate(cheese_name, quantity_kg, commit=True)
-                    batch_lines = [{"batch_id": l.batch_id, "quantity_kg": l.quantity_kg}
-                                   for l in result.lines]
-                    save_cheese_sale(sale_date, cheese_name, result.allocated_kg,
-                                      price_per_kg, batch_lines, customer, notes, supabase_client)
-                    st.success(f"✅ Sold {result.allocated_kg:,.1f}kg of {cheese_name} "
-                               f"for KSh {result.allocated_kg * price_per_kg:,.0f}, "
-                               f"drawn from {len(batch_lines)} batch(es).")
-                    if result.shortfall_kg > 0:
-                        st.warning(f"⚠️ {result.shortfall_kg:.1f}kg short — recorded what was "
-                                   f"actually available. Stock may have changed since the page loaded.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Could not record sale: {e}")
-
-    st.markdown("---")
-    st.markdown("#### Recent Sales")
-    start = date.today() - timedelta(days=30)
-    sales = get_sales_history(start_date=start, supabase_client=supabase_client)
-    if sales:
-        df = pd.DataFrame(sales)
-        st.dataframe(
-            df[["id", "date", "cheese_name", "quantity_kg", "price_per_kg", "revenue", "customer", "notes"]],
-            use_container_width=True, hide_index=True,
-        )
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Download Sales CSV", csv,
-                            file_name=f"cheese_sales_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
-    else:
-        st.info("No sales recorded in the last 30 days.")
-
 
 
 def _render_whatif_expander(book: RecipeBook, tracker: BatchTracker,

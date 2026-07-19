@@ -744,6 +744,8 @@ class Permission(str, Enum):
     RUN_PRODUCTION_PLAN = "run_production_plan"
     MANAGE_CHEESE_BATCHES = "manage_cheese_batches"
     MANAGE_LPO = "manage_lpo"
+    MANAGE_CUSTOMERS = "manage_customers"
+    VIEW_COMMERCIAL_REPORTS = "view_commercial_reports"
 
 ROLE_PERMISSIONS = {
     "admin": set(Permission),
@@ -757,7 +759,7 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
         Permission.RECORD_MILK_RECEIPT, Permission.RECORD_CHEESE_SALE,
         Permission.RUN_PRODUCTION_PLAN, Permission.MANAGE_CHEESE_BATCHES,
-        Permission.MANAGE_LPO,
+        Permission.MANAGE_LPO, Permission.MANAGE_CUSTOMERS, Permission.VIEW_COMMERCIAL_REPORTS,
     },
     "user": {
         Permission.VIEW_STOCK, Permission.VIEW_STOCK_TAKE,
@@ -765,12 +767,13 @@ ROLE_PERMISSIONS = {
         # --- cheese: day-to-day recording only, no planning/batch release ---
         Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
         Permission.RECORD_MILK_RECEIPT, Permission.RECORD_CHEESE_SALE,
-        Permission.MANAGE_LPO,
+        Permission.MANAGE_LPO, Permission.MANAGE_CUSTOMERS,
     },
     "viewer": {
         Permission.VIEW_STOCK, Permission.VIEW_ANALYTICS, Permission.VIEW_REPORTS,
         # --- cheese: read-only ---
         Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
+        Permission.VIEW_COMMERCIAL_REPORTS,
     },
 }
 

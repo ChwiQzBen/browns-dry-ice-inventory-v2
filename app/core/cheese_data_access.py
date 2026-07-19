@@ -93,6 +93,11 @@ def init_cheese_storage(supabase_client=None) -> None:
         quantity_kg REAL, quantity_delivered_kg REAL, price_per_kg REAL,
         status TEXT, notes TEXT, created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        contact_person TEXT, phone TEXT, email TEXT, address TEXT,
+        credit_terms_days INTEGER DEFAULT 0, notes TEXT, created_at TEXT
+    )""")
     c.execute("""INSERT OR IGNORE INTO aging_room_config (room_name, max_capacity_kg, notes)
                  VALUES ('default', ?, 'Set this to your real aging room capacity in kg')""",
               (DEFAULT_AGING_ROOM_CAPACITY_KG,))
@@ -750,5 +755,71 @@ def cancel_lpo_line(lpo_line_id: int, supabase_client=None) -> None:
     
     conn = _sqlite()
     conn.execute("UPDATE lpo_lines SET status = 'Cancelled' WHERE id = ?", (lpo_line_id,))
+    conn.commit()
+    conn.close()
+
+# ============================================================
+# CUSTOMERS  (registry only for now — Sales/LPO customer fields stay
+# freetext until a reconciliation pass links existing history to this
+# table; see commercial_ui.py's module docstring)
+# ============================================================
+def save_customer(name: str, contact_person: str = "", phone: str = "", email: str = "",
+                   address: str = "", credit_terms_days: int = 0, notes: str = "",
+                   customer_id: Optional[int] = None, supabase_client=None) -> Optional[int]:
+    row = {
+        "name": name, "contact_person": contact_person, "phone": phone, "email": email,
+        "address": address, "credit_terms_days": credit_terms_days, "notes": notes,
+    }
+    if supabase_client:
+        try:
+            if customer_id is not None:
+                supabase_client.table("customers").update(row).eq("id", customer_id).execute()
+                return customer_id
+            row["created_at"] = datetime.now().isoformat()
+            result = supabase_client.table("customers").insert(row).execute()
+            return result.data[0]["id"] if result.data else None
+        except Exception:
+            pass
+    conn = _sqlite()
+    c = conn.cursor()
+    if customer_id is not None:
+        row["id"] = customer_id
+        c.execute("""UPDATE customers SET name=:name, contact_person=:contact_person, phone=:phone,
+            email=:email, address=:address, credit_terms_days=:credit_terms_days, notes=:notes
+            WHERE id=:id""", row)
+        new_id = customer_id
+    else:
+        row["created_at"] = datetime.now().isoformat()
+        c.execute("""INSERT INTO customers (name, contact_person, phone, email, address,
+            credit_terms_days, notes, created_at)
+            VALUES (:name, :contact_person, :phone, :email, :address, :credit_terms_days, :notes, :created_at)""", row)
+        new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_customers(supabase_client=None) -> List[Dict[str, Any]]:
+    if supabase_client:
+        try:
+            return supabase_client.table("customers").select("*").order("name").execute().data
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.row_factory = sqlite3.Row
+    rows = [dict(r) for r in conn.execute("SELECT * FROM customers ORDER BY name").fetchall()]
+    conn.close()
+    return rows
+
+
+def delete_customer(customer_id: int, supabase_client=None) -> None:
+    if supabase_client:
+        try:
+            supabase_client.table("customers").delete().eq("id", customer_id).execute()
+            return
+        except Exception:
+            pass
+    conn = _sqlite()
+    conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     conn.commit()
     conn.close()
