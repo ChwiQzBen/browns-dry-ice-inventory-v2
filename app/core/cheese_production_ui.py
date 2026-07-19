@@ -36,6 +36,7 @@ from app.core.cheese_forecast_adapter import make_ensemble_demand_forecaster
 from app.core.production_reports import build_report_data, generate_production_report, summarize_report_data
 from scenario_analysis import Scenario, run_scenario, compare_scenarios
 
+from app.core.cheese_shared_state import ensure_cheese_state
 from app.core.cheese_data_access import (
     init_cheese_storage, load_recipe_book, save_recipe, delete_recipe,
     save_milk_receipt, get_milk_receipts, get_milk_liters_for_date,
@@ -71,26 +72,11 @@ def _cached_ensemble_demand(cheese_name: str, daily_sales_kg: Tuple[float, ...])
 # SESSION STATE / SETUP
 # ============================================================
 def _ensure_state(supabase_client) -> None:
-    if "cheese_storage_initialized" not in st.session_state:
-        init_cheese_storage(supabase_client)
-        st.session_state.cheese_storage_initialized = True
-
-    if "cheese_recipe_book" not in st.session_state:
-        st.session_state.cheese_recipe_book = load_recipe_book(supabase_client)
-
-    if "cheese_tracker" not in st.session_state:
-        st.session_state.cheese_tracker = load_batch_tracker(supabase_client)
-
-    if "cheese_demand_overrides" not in st.session_state:
-        # {cheese_name: (mean_kg, std_kg)} — manual planning inputs until
-        # cheese_sales_history has enough rows for the forecaster to take over
-        st.session_state.cheese_demand_overrides = {}
-
-    if "cheese_selling_prices" not in st.session_state:
-        st.session_state.cheese_selling_prices = {}
-
-    if "cheese_last_plan" not in st.session_state:
-        st.session_state.cheese_last_plan = None
+    """Thin wrapper — the actual init now lives in cheese_shared_state.py so
+    Commercial Mode can call the same function and share the same
+    RecipeBook/BatchTracker instances within a session, instead of each
+    mode silently loading its own independent copy."""
+    ensure_cheese_state(supabase_client)
 
 
 def render_cheese_production_mode(supabase_client=None,

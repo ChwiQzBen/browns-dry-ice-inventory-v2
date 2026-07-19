@@ -38,7 +38,8 @@ from app.core.advanced_forecasting_v2 import AdvancedForecaster
 from app.core.external_factors import ExternalFactors
 from app.core.realtime_forecast import get_realtime_forecaster
 from app.core.decision_engine import InventorySnapshot, InventoryDecisionEngine, generate_ai_insights
-from app.core.cheese_production_ui import render_cheese_production_mode
+from app.core.bcpos_ui import render_bcpos_mode
+from app.core.commercial_ui import render_commercial_mode
 from app.core.all_items_ui import render_all_items_mode, AllItemsContext
 from app.core.dry_ice_ui import render_dry_ice_mode, DryIceContext
 from app.core.theme import THEME, kpi_card
@@ -742,6 +743,7 @@ class Permission(str, Enum):
     RECORD_CHEESE_SALE = "record_cheese_sale"
     RUN_PRODUCTION_PLAN = "run_production_plan"
     MANAGE_CHEESE_BATCHES = "manage_cheese_batches"
+    MANAGE_LPO = "manage_lpo"
 
 ROLE_PERMISSIONS = {
     "admin": set(Permission),
@@ -755,6 +757,7 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
         Permission.RECORD_MILK_RECEIPT, Permission.RECORD_CHEESE_SALE,
         Permission.RUN_PRODUCTION_PLAN, Permission.MANAGE_CHEESE_BATCHES,
+        Permission.MANAGE_LPO,
     },
     "user": {
         Permission.VIEW_STOCK, Permission.VIEW_STOCK_TAKE,
@@ -762,6 +765,7 @@ ROLE_PERMISSIONS = {
         # --- cheese: day-to-day recording only, no planning/batch release ---
         Permission.VIEW_CHEESE_PRODUCTION, Permission.VIEW_CHEESE_RECIPES,
         Permission.RECORD_MILK_RECEIPT, Permission.RECORD_CHEESE_SALE,
+        Permission.MANAGE_LPO,
     },
     "viewer": {
         Permission.VIEW_STOCK, Permission.VIEW_ANALYTICS, Permission.VIEW_REPORTS,
@@ -7666,13 +7670,12 @@ def main():
     elif mode == "🧀 BCPOS Mode":
         from app.core.cheese_data_access import get_weighted_milk_cost_for_date
         todays_milk_cost = get_weighted_milk_cost_for_date(datetime.today().date(), init_supabase())
-        render_cheese_production_mode(
+        render_bcpos_mode(  # ← Change to this
             supabase_client=init_supabase(),
             has_permission=has_permission,
-            milk_cost_per_liter=todays_milk_cost if todays_milk_cost > 0 else 45.0,  # fallback pre-first-receipt
+            milk_cost_per_liter=todays_milk_cost if todays_milk_cost > 0 else 45.0,
             raw_milk_price_per_liter=35.0
         )
-
     # ============================================================
     # CONTAINER 3: DRY ICE MODE (7 TABS)
     else:  # "❄️ Dry Ice Mode"

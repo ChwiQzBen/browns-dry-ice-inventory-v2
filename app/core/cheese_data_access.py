@@ -736,3 +736,19 @@ def record_lpo_delivery(lpo_line_id: int, quantity_delivered_kg: float,
                  (quantity_delivered_kg, status, lpo_line_id))
     conn.commit()
     conn.close()
+
+def cancel_lpo_line(lpo_line_id: int, supabase_client=None) -> None:
+    """Cancel an LPO line - sets status to 'Cancelled'."""
+    if supabase_client:
+        try:
+            supabase_client.table("lpo_lines").update({
+                "status": "Cancelled"
+            }).eq("id", lpo_line_id).execute()
+            return
+        except Exception:
+            pass
+    
+    conn = _sqlite()
+    conn.execute("UPDATE lpo_lines SET status = 'Cancelled' WHERE id = ?", (lpo_line_id,))
+    conn.commit()
+    conn.close()
