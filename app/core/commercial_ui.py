@@ -44,7 +44,7 @@ from typing import Optional, Callable
 import streamlit as st
 import pandas as pd
 
-from sales_service import dispatch_and_record_sale, available_stock_kg
+from app.core.sales_service import dispatch_and_record_sale, available_stock_kg
 from app.core.cheese_shared_state import ensure_cheese_state
 from app.core.cheese_data_access import (
     save_lpo_line, get_lpo_lines, record_lpo_delivery, cancel_lpo_line,
