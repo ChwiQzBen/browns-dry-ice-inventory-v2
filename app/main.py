@@ -6065,7 +6065,10 @@ def main():
         print("✅ Database initialized")
     
     # THIS LINE IS MODIFIED to use the selected period from the dropdown
-    df = get_historical_orders_from_db(st.session_state.selected_period)
+    status = st.status("📊 Loading order history from database...", expanded=False)
+    with status:
+        df = get_historical_orders_from_db(st.session_state.selected_period)
+    status.update(label="✅ Historical orders loaded!", state="complete")
 
     # ADD THIS BLOCK to handle cases where a new period has no data yet
     if df.empty:
@@ -6246,12 +6249,18 @@ def main():
             st.info("💡 Please check your Google Sheets configuration and try again.")
             return get_sample_inventory_data(), None
 
-    inventory_items, stock_df = load_inventory_data()
+    status = st.status("📤 Syncing inventory data from cloud...", expanded=False)
+    with status:
+        inventory_items, stock_df = load_inventory_data()
+    status.update(label="✅ Inventory data synced!", state="complete")
     
     # Initialize session state for transactions
     if 'last_loaded_period' not in st.session_state or st.session_state.last_loaded_period != st.session_state.selected_period:
         print(f"Period changed. Loading transactions for {st.session_state.selected_period}...")
-        st.session_state.transactions = get_transactions_from_db(st.session_state.selected_period)
+        status = st.status("📜 Retrieving transaction history...", expanded=False)
+        with status:
+            st.session_state.transactions = get_transactions_from_db(st.session_state.selected_period)
+        status.update(label="✅ Transactions loaded!", state="complete")
         st.session_state.last_loaded_period = st.session_state.selected_period # Update the tracker
     
     
@@ -6318,9 +6327,10 @@ def main():
     
     # Check if we have data before generating forecast
     if not df.empty and len(df) >= 5:
-        with st.spinner("🔄 Generating forecast with auto-tuned models..."):
-            # ✅ FIX: Use get_forecast_data() which aggregates by day
+        status = st.status("� Generating 7-model ensemble forecast...", expanded=False)
+        with status:
             fig_ensemble, ensemble_forecast_values, model_forecasts, backtest_accuracy, total_forecasted_demand, forecast_std_dev = get_forecast_data(df)
+            status.update(label="✅ Forecast complete!", state="complete")
             
             # Update model forecasts with proper names
             if model_forecasts:
