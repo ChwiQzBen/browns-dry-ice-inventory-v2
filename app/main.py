@@ -1242,6 +1242,7 @@ def get_transactions_from_db(period):
 
     return transaction_list
 
+@st.cache_data(ttl=30)
 def get_current_stock_from_db():
     """Get current stock from Supabase or SQLite"""
     
@@ -1292,6 +1293,7 @@ def update_current_stock_in_db(new_stock, date):
                 }
                 supabase.table('inventory').insert(inventory_data).execute()
                 print(f"Stock updated in Supabase: {new_stock} kg on {date_str}")
+                get_current_stock_from_db.clear()
                 return
             except Exception as e:
                 print(f"Supabase error updating stock: {e}. Falling back to SQLite.")
