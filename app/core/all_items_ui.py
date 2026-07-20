@@ -629,33 +629,41 @@ def _render_inventory_tab() -> None:
                 else:
                     st.info("No valid data available for category summary.")
 
-        # Search + Filter
-        col1, col2 = st.columns(2)
+        # Search + Filter — wrapped in a form so typing/selecting no longer
+        # triggers a full-app rerun per keystroke. Before this, every
+        # character typed here re-ran the entire app: sidebar, auth, RBAC,
+        # and — worst of all — the unguarded ABC Analysis / Replenishment
+        # Strategy blocks above (row-by-row .iterrows() + Styler.applymap),
+        # which is the "hangs while interacting" symptom.
+        with st.form("inventory_search_form"):
+            col1, col2 = st.columns(2)
 
-        with col1:
-            search = st.text_input(
-                "🔍 Search Items",
-                placeholder="Type item name..."
-            )
+            with col1:
+                search = st.text_input(
+                    "🔍 Search Items",
+                    placeholder="Type item name..."
+                )
 
-        with col2:
-            if 'ITEM_CATEGORY' in tab_stock_df.columns:
-                categories = (
-                    ['All'] +
-                    sorted(
-                        tab_stock_df['ITEM_CATEGORY']
-                        .dropna()
-                        .unique()
-                        .tolist()
+            with col2:
+                if 'ITEM_CATEGORY' in tab_stock_df.columns:
+                    categories = (
+                        ['All'] +
+                        sorted(
+                            tab_stock_df['ITEM_CATEGORY']
+                            .dropna()
+                            .unique()
+                            .tolist()
+                        )
                     )
-                )
 
-                category_filter = st.selectbox(
-                    "📂 Category",
-                    categories
-                )
-            else:
-                category_filter = "All"
+                    category_filter = st.selectbox(
+                        "📂 Category",
+                        categories
+                    )
+                else:
+                    category_filter = "All"
+
+            st.form_submit_button("🔍 Apply Filters")
 
         # Apply filters
         filtered_df = tab_stock_df.copy()
