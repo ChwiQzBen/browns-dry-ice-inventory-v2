@@ -32,6 +32,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 import json
 import sqlite3
+import streamlit as st
 
 from newsvendor_engine import AgingConfig
 from production_tracking import (
@@ -254,6 +255,7 @@ def save_milk_receipt(receipt_date: date, liters: float, cost_per_liter: float,
     if supabase_client:
         try:
             result = supabase_client.table("milk_receipts").insert(row).execute()
+            get_weighted_milk_cost_for_date.clear()
             return result.data[0]["id"] if result.data else None
         except Exception:
             pass
@@ -265,6 +267,7 @@ def save_milk_receipt(receipt_date: date, liters: float, cost_per_liter: float,
     new_id = c.lastrowid
     conn.commit()
     conn.close()
+    get_weighted_milk_cost_for_date.clear()
     return new_id
 
 
@@ -629,9 +632,12 @@ def check_aging_room_capacity(tracker: BatchTracker, additional_kg: float,
     ok = additional_kg <= remaining
     return ok, used, capacity, remaining
 
+@st.cache_data(ttl=60)
 def get_weighted_milk_cost_for_date(target_date: date, supabase_client) -> float:
     """Weighted-average cost/liter across today's receipts. Returns 0.0
-    if nothing's been received yet — caller should fall back to a default."""
+    if nothing's been received yet — caller should fall back to a default.
+    Cached 60s: this was hitting Supabase on every BCPOS rerun; the leading
+    underscore on _supabase_client keeps st.cache_data from trying to hash it."""
     receipts = get_milk_receipts(start_date=target_date, supabase_client=supabase_client)
     todays = [r for r in receipts if r["date"] == target_date.isoformat()]
     total_liters = sum(r["liters"] for r in todays)

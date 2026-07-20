@@ -4040,21 +4040,23 @@ def main():
     else:
         with st.expander("🔮 What-If Simulator", expanded=False):
             st.caption("Adjust assumptions below to see how they'd affect inventory recommendations. This does not change your live data.")
-            sim_col1, sim_col2 = st.columns(2)
-            with sim_col1:
-                demand_change_pct = st.slider(
-                    "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
-                    help="Simulate a demand increase or decrease vs. current forecast",
-                    key="sim_demand_change"
-                )
-            with sim_col2:
-                lead_time_delta = st.slider(
-                    "Additional supplier lead time (days)", min_value=0, max_value=10, value=0, step=1,
-                    help="Simulate a supplier delay",
-                    key="sim_lead_time_delta"
-                )
+            with st.form("whatif_form"):
+                sim_col1, sim_col2 = st.columns(2)
+                with sim_col1:
+                    demand_change_pct = st.slider(
+                        "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
+                        help="Simulate a demand increase or decrease vs. current forecast",
+                        key="sim_demand_change"
+                    )
+                with sim_col2:
+                    lead_time_delta = st.slider(
+                        "Additional supplier lead time (days)", min_value=0, max_value=10, value=0, step=1,
+                        help="Simulate a supplier delay",
+                        key="sim_lead_time_delta"
+                    )
+                run_sim = st.form_submit_button("Apply scenario")
 
-            if demand_change_pct != 0 or lead_time_delta != 0:
+            if run_sim and (demand_change_pct != 0 or lead_time_delta != 0):
                 sim_monthly_demand = monthly_demand_input * (1 + demand_change_pct / 100)
                 sim_adjusted_demand = sim_monthly_demand * sublimation_factor
                 sim_lead_time_days = constants.LEAD_TIME_DAYS + lead_time_delta
