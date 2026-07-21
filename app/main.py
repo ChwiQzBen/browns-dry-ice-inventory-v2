@@ -4008,7 +4008,7 @@ def main():
     # ============================================================
     elif mode == "🧀 BCPOS Mode":
         from app.core.cheese_data_access import get_weighted_milk_cost_for_date
-        todays_milk_cost = get_weighted_milk_cost_for_date(datetime.today().date(), init_supabase())
+        todays_milk_cost = get_weighted_milk_cost_for_date(datetime.today().date())
         render_bcpos_mode(  # ← Change to this
             supabase_client=init_supabase(),
             has_permission=has_permission,

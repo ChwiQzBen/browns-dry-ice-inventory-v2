@@ -633,11 +633,14 @@ def check_aging_room_capacity(tracker: BatchTracker, additional_kg: float,
     return ok, used, capacity, remaining
 
 @st.cache_data(ttl=60)
-def get_weighted_milk_cost_for_date(target_date: date, supabase_client) -> float:
+def get_weighted_milk_cost_for_date(target_date: date) -> float:
     """Weighted-average cost/liter across today's receipts. Returns 0.0
     if nothing's been received yet — caller should fall back to a default.
-    Cached 60s: this was hitting Supabase on every BCPOS rerun; the leading
-    underscore on _supabase_client keeps st.cache_data from trying to hash it."""
+    Cached 60s: this was hitting Supabase on every BCPOS rerun."""
+    # Initialize Supabase INSIDE the function to avoid hashing issues
+    from app.main import init_supabase
+    supabase_client = init_supabase()
+    
     receipts = get_milk_receipts(start_date=target_date, supabase_client=supabase_client)
     todays = [r for r in receipts if r["date"] == target_date.isoformat()]
     total_liters = sum(r["liters"] for r in todays)
