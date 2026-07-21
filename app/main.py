@@ -3949,161 +3949,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # 🎯 DECISION CENTER
-    # ============================================================
-    decision = st.session_state.get('decision')
-    if decision:
-        RISK_COLORS = {
-            "Critical": "#dc3545",
-            "High": "#ff9800",
-            "Medium": "#ffc107",
-            "Low": "#28a745",
-        }
-        decision_color = RISK_COLORS.get(decision["risk"]["level"], "#888888")
-        inv = decision["inventory"]
-        risk = decision["risk"]
-        fin = decision["financial"]
-
-        st.markdown(f"""
-        <div style="
-            border: 2px solid {decision_color};
-            border-radius: 16px;
-            padding: 20px;
-            margin: 20px 0;
-            background: {decision_color}0d;
-        ">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="font-size:18px; font-weight:700;">🎯 Decision Center</span>
-                <span style="background:{decision_color}; color:white; padding:4px 14px; border-radius:20px; font-size:12px; font-weight:600;">
-                    {risk['level']} Risk ({risk['score']}/100)
-                </span>
-            </div>
-            <div style="font-size:20px; font-weight:700; color:{decision_color}; margin-bottom:6px;">
-                {inv['action']}
-            </div>
-            <div style="font-size:14px; color:#555; margin-bottom:10px;">
-                {inv['recommendation']}
-            </div>
-            <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:13px; color:#888; margin-bottom:12px;">
-                <span>📅 Days remaining: <strong>{inv['days_remaining']}</strong></span>
-                <span>📦 Recommended qty: <strong>{inv['recommended_quantity']:,.0f} kg</strong></span>
-                <span>🎯 Forecast confidence: <strong>{decision['forecast_accuracy']:.0f}%</strong></span>
-                <span>💰 Potential savings: <strong>KSh {fin['potential_monthly_savings']:,.0f}/mo</strong></span>
-            </div>
-            <div style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 10px;">
-                <div style="font-size:12px; font-weight:600; color:#666; margin-bottom:4px;">Why?</div>
-                {''.join(f'<div style="font-size:13px; color:#555; margin-bottom:2px;">• {reason}</div>' for reason in decision['explanation'])}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ============================================================
-    # 🤖 AI INSIGHTS FEED
-    # ============================================================
-    avg_daily_forecast_val = float(np.mean(ensemble_forecast_values)) if len(ensemble_forecast_values) > 0 else 0
-    historical_avg_daily_val = kpis.get('current_monthly_volume', 0) / 30
-
-    ai_insights = generate_ai_insights(
-        current_stock=inventory_tracker.current_stock,
-        safety_stock=safety_stock,
-        reorder_point=reorder_point,
-        eoq=eoq,
-        avg_daily_forecast=avg_daily_forecast_val,
-        historical_avg_daily=historical_avg_daily_val,
-        forecast_accuracy=backtest_accuracy * 100,
-        container_efficiency=kpis.get('container_utilization', 0) * 100,
-    )
-
-    if ai_insights:
-        insight_lines = "".join(
-            f'<div style="font-size:13px; color:#444; margin-bottom:6px;">{i["icon"]} {i["text"]}</div>'
-            for i in ai_insights
-        )
-        st.markdown(f"""
-        <div style="
-            border: 1px solid rgba(102,126,234,0.2);
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin: 16px 0;
-            background: rgba(102,126,234,0.03);
-        ">
-            <div style="font-size:14px; font-weight:700; margin-bottom:10px; color:#333;">🤖 AI Insights</div>
-            {insight_lines}
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ============================================================
-    # 🔮 WHAT-IF SIMULATOR
-    # ============================================================
-    if not decision:
-        st.info("🔮 What-If Simulator will be available after the next page refresh — the Decision Center needs one full run first.")
-    else:
-        with st.expander("🔮 What-If Simulator", expanded=False):
-            st.caption("Adjust assumptions below to see how they'd affect inventory recommendations. This does not change your live data.")
-            with st.form("whatif_form"):
-                sim_col1, sim_col2 = st.columns(2)
-                with sim_col1:
-                    demand_change_pct = st.slider(
-                        "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
-                        help="Simulate a demand increase or decrease vs. current forecast",
-                        key="sim_demand_change"
-                    )
-                with sim_col2:
-                    lead_time_delta = st.slider(
-                        "Additional supplier lead time (days)", min_value=0, max_value=10, value=0, step=1,
-                        help="Simulate a supplier delay",
-                        key="sim_lead_time_delta"
-                    )
-                run_sim = st.form_submit_button("Apply scenario")
-
-            if run_sim and (demand_change_pct != 0 or lead_time_delta != 0):
-                sim_monthly_demand = monthly_demand_input * (1 + demand_change_pct / 100)
-                sim_adjusted_demand = sim_monthly_demand * sublimation_factor
-                sim_lead_time_days = constants.LEAD_TIME_DAYS + lead_time_delta
-
-                sim_eoq = math.sqrt(
-                    (2 * sim_adjusted_demand * constants.TRANSPORT_COST) / (constants.HOLDING_RATE * constants.PRICE_PER_KG)
-                ) if (constants.HOLDING_RATE * constants.PRICE_PER_KG) > 0 else 0
-
-                sim_safety_stock = z_score * demand_stddev_input * math.sqrt(sim_lead_time_days) * sublimation_factor
-                sim_reorder_point = (sim_adjusted_demand / 30 * sim_lead_time_days) + sim_safety_stock
-                sim_forecast_values = ensemble_forecast_values * (1 + demand_change_pct / 100)
-
-                sim_snapshot = InventorySnapshot(
-                    current_stock=inventory_tracker.current_stock,
-                    eoq=sim_eoq,
-                    safety_stock=sim_safety_stock,
-                    reorder_point=sim_reorder_point,
-                    forecast_values=sim_forecast_values,
-                    forecast_accuracy=backtest_accuracy * 100,
-                    lead_time_days=sim_lead_time_days,
-                    transport_cost=constants.TRANSPORT_COST,
-                    avg_order_size=kpis.get('avg_order_size', 300),
-                    monthly_holding_cost=annual_holding_cost / 12,
-                )
-                sim_decision = InventoryDecisionEngine(sim_snapshot).executive_summary()
-
-                st.markdown("---")
-                compare_col1, compare_col2 = st.columns(2)
-                with compare_col1:
-                    st.markdown("**📍 Current (Baseline)**")
-                    st.metric("Days Remaining", f"{decision['inventory']['days_remaining']}")
-                    st.metric("Action", decision['inventory']['action'])
-                    st.metric("Recommended Qty", f"{decision['inventory']['recommended_quantity']:,.0f} kg")
-                with compare_col2:
-                    st.markdown("**🔮 Simulated Scenario**")
-                    delta_days = sim_decision['inventory']['days_remaining'] - decision['inventory']['days_remaining']
-                    st.metric("Days Remaining", f"{sim_decision['inventory']['days_remaining']}", delta=f"{delta_days:+d} days")
-                    st.metric("Action", sim_decision['inventory']['action'])
-                    st.metric("Recommended Qty", f"{sim_decision['inventory']['recommended_quantity']:,.0f} kg")
-
-                st.info(f"**{sim_decision['inventory']['recommendation']}**")
-
-                if sim_decision['risk']['level'] in ('Critical', 'High') and decision['risk']['level'] not in ('Critical', 'High'):
-                    st.warning(f"⚠️ This scenario would raise your risk level from {decision['risk']['level']} to {sim_decision['risk']['level']}.")
-            else:
-                st.caption("Move a slider above to see the simulated impact.")
-
+    
     # ============================================================
     # 🎨 SINGLE KPI CARD - Like Sidebar Container Style
     # Calculate monthly savings and percentage
@@ -4265,7 +4111,7 @@ def main():
     if eoq > 0 and safety_stock > 0:
         max_stock = eoq + safety_stock
         current_pct = min(100, (inventory_tracker.current_stock / max_stock) * 100) if max_stock > 0 else 0
-        
+
         # Determine color
         if current_pct < 30:
             gauge_color = "#dc3545"
@@ -4276,7 +4122,7 @@ def main():
         else:
             gauge_color = "#28a745"
             gauge_text = "Healthy"
-        
+
         st.markdown(f"""
         <div style="
             margin-top: 12px;
@@ -4315,6 +4161,159 @@ def main():
 
     # Close the card
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # 🎯 DECISION CENTER
+    # ============================================================
+    decision = st.session_state.get('decision')
+    if decision:
+        RISK_COLORS = {
+            "Critical": "#dc3545",
+            "High": "#ff9800",
+            "Medium": "#ffc107",
+            "Low": "#28a745",
+        }
+        decision_color = RISK_COLORS.get(decision["risk"]["level"], "#888888")
+        inv = decision["inventory"]
+        risk = decision["risk"]
+        fin = decision["financial"]
+
+        st.markdown(f"""
+        <div style="
+            border: 2px solid {decision_color};
+            border-radius: 16px;
+            padding: 20px;
+            margin: 20px 0;
+            background: {decision_color}0d;
+        ">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:18px; font-weight:700;">🎯 Decision Center</span>
+                <span style="background:{decision_color}; color:white; padding:4px 14px; border-radius:20px; font-size:12px; font-weight:600;">
+                    {risk['level']} Risk ({risk['score']}/100)
+                </span>
+            </div>
+            <div style="font-size:20px; font-weight:700; color:{decision_color}; margin-bottom:6px;">
+                {inv['action']}
+            </div>
+            <div style="font-size:14px; color:#555; margin-bottom:10px;">
+                {inv['recommendation']}
+            </div>
+            <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:13px; color:#888; margin-bottom:12px;">
+                <span>📅 Days remaining: <strong>{inv['days_remaining']}</strong></span>
+                <span>📦 Recommended qty: <strong>{inv['recommended_quantity']:,.0f} kg</strong></span>
+                <span>🎯 Forecast confidence: <strong>{decision['forecast_accuracy']:.0f}%</strong></span>
+                <span>💰 Potential savings: <strong>KSh {fin['potential_monthly_savings']:,.0f}/mo</strong></span>
+            </div>
+            <div style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 10px;">
+                <div style="font-size:12px; font-weight:600; color:#666; margin-bottom:4px;">Why?</div>
+                {''.join(f'<div style="font-size:13px; color:#555; margin-bottom:2px;">• {reason}</div>' for reason in decision['explanation'])}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ============================================================
+    # 🔎 INSIGHTS & SCENARIOS (AI Insights + What-If, merged into tabs
+    # inside one expander so they read as a single surface, not two
+    # separately-floating blocks)
+    # ============================================================
+    avg_daily_forecast_val = float(np.mean(ensemble_forecast_values)) if len(ensemble_forecast_values) > 0 else 0
+    historical_avg_daily_val = kpis.get('current_monthly_volume', 0) / 30
+
+    ai_insights = generate_ai_insights(
+        current_stock=inventory_tracker.current_stock,
+        safety_stock=safety_stock,
+        reorder_point=reorder_point,
+        eoq=eoq,
+        avg_daily_forecast=avg_daily_forecast_val,
+        historical_avg_daily=historical_avg_daily_val,
+        forecast_accuracy=backtest_accuracy * 100,
+        container_efficiency=kpis.get('container_utilization', 0) * 100,
+    )
+
+    with st.expander("🔎 Insights & Scenarios", expanded=False):
+        insights_tab, whatif_tab = st.tabs(["🤖 AI Insights", "🔮 What-If Simulator"])
+
+        with insights_tab:
+            if ai_insights:
+                insight_lines = "".join(
+                    f'<div style="font-size:13px; color:#444; margin-bottom:6px;">{i["icon"]} {i["text"]}</div>'
+                    for i in ai_insights
+                )
+                st.markdown(f"""
+                <div style="padding: 4px 0 0 0;">
+                    {insight_lines}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.caption("No notable insights right now.")
+
+        with whatif_tab:
+            if not decision:
+                st.info("🔮 What-If Simulator will be available after the next page refresh — the Decision Center needs one full run first.")
+            else:
+                st.caption("Adjust assumptions below to see how they'd affect inventory recommendations. This does not change your live data.")
+                with st.form("whatif_form"):
+                    sim_col1, sim_col2 = st.columns(2)
+                    with sim_col1:
+                        demand_change_pct = st.slider(
+                            "Demand change (%)", min_value=-50, max_value=100, value=0, step=5,
+                            help="Simulate a demand increase or decrease vs. current forecast",
+                            key="sim_demand_change"
+                        )
+                    with sim_col2:
+                        lead_time_delta = st.slider(
+                            "Additional supplier lead time (days)", min_value=0, max_value=10, value=0, step=1,
+                            help="Simulate a supplier delay",
+                            key="sim_lead_time_delta"
+                        )
+                    run_sim = st.form_submit_button("Apply scenario")
+
+                if run_sim and (demand_change_pct != 0 or lead_time_delta != 0):
+                    sim_monthly_demand = monthly_demand_input * (1 + demand_change_pct / 100)
+                    sim_adjusted_demand = sim_monthly_demand * sublimation_factor
+                    sim_lead_time_days = constants.LEAD_TIME_DAYS + lead_time_delta
+
+                    sim_eoq = math.sqrt(
+                        (2 * sim_adjusted_demand * constants.TRANSPORT_COST) / (constants.HOLDING_RATE * constants.PRICE_PER_KG)
+                    ) if (constants.HOLDING_RATE * constants.PRICE_PER_KG) > 0 else 0
+
+                    sim_safety_stock = z_score * demand_stddev_input * math.sqrt(sim_lead_time_days) * sublimation_factor
+                    sim_reorder_point = (sim_adjusted_demand / 30 * sim_lead_time_days) + sim_safety_stock
+                    sim_forecast_values = ensemble_forecast_values * (1 + demand_change_pct / 100)
+
+                    sim_snapshot = InventorySnapshot(
+                        current_stock=inventory_tracker.current_stock,
+                        eoq=sim_eoq,
+                        safety_stock=sim_safety_stock,
+                        reorder_point=sim_reorder_point,
+                        forecast_values=sim_forecast_values,
+                        forecast_accuracy=backtest_accuracy * 100,
+                        lead_time_days=sim_lead_time_days,
+                        transport_cost=constants.TRANSPORT_COST,
+                        avg_order_size=kpis.get('avg_order_size', 300),
+                        monthly_holding_cost=annual_holding_cost / 12,
+                    )
+                    sim_decision = InventoryDecisionEngine(sim_snapshot).executive_summary()
+
+                    st.markdown("---")
+                    compare_col1, compare_col2 = st.columns(2)
+                    with compare_col1:
+                        st.markdown("**📍 Current (Baseline)**")
+                        st.metric("Days Remaining", f"{decision['inventory']['days_remaining']}")
+                        st.metric("Action", decision['inventory']['action'])
+                        st.metric("Recommended Qty", f"{decision['inventory']['recommended_quantity']:,.0f} kg")
+                    with compare_col2:
+                        st.markdown("**🔮 Simulated Scenario**")
+                        delta_days = sim_decision['inventory']['days_remaining'] - decision['inventory']['days_remaining']
+                        st.metric("Days Remaining", f"{sim_decision['inventory']['days_remaining']}", delta=f"{delta_days:+d} days")
+                        st.metric("Action", sim_decision['inventory']['action'])
+                        st.metric("Recommended Qty", f"{sim_decision['inventory']['recommended_quantity']:,.0f} kg")
+
+                    st.info(f"**{sim_decision['inventory']['recommendation']}**")
+
+                    if sim_decision['risk']['level'] in ('Critical', 'High') and decision['risk']['level'] not in ('Critical', 'High'):
+                        st.warning(f"⚠️ This scenario would raise your risk level from {decision['risk']['level']} to {sim_decision['risk']['level']}.")
+                else:
+                    st.caption("Move a slider above to see the simulated impact.")
 
     # ============================================================
     # 🏢 SYSTEM-WIDE ROI SUMMARY (Tier 3 — Combined, auto-recomputed)
