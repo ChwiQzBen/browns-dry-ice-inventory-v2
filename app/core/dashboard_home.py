@@ -100,6 +100,7 @@ def render_dashboard_home(ctx: DashboardContext) -> None:
     sublimation_factor = ctx.sublimation_factor
     z_score = ctx.z_score
     annual_transport_savings = ctx.annual_transport_savings
+    monthly_savings=st.session_state.get('monthly_savings', 0),
     annual_holding_cost = ctx.annual_holding_cost
     total_annual_spending = ctx.total_annual_spending
     current_monthly_orders = ctx.current_monthly_orders

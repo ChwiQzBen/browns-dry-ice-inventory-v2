@@ -1787,6 +1787,7 @@ def main():
 
     # Ensure savings cannot be negative
     annual_transport_savings = max(0, annual_transport_savings)
+    monthly_savings = annual_transport_savings / 12 if annual_transport_savings else 0
 
     # --- 4. Recalculate Total Annual Spending & Other Costs ---
     annual_volume = kpis.get('total_volume', 0)
@@ -2709,6 +2710,7 @@ def main():
             annual_volume=annual_volume, annual_product_cost=annual_product_cost,
             annual_holding_cost=annual_holding_cost, annual_sublimation_loss=annual_sublimation_loss,
             total_annual_spending=total_annual_spending,
+            monthly_savings=monthly_savings, 
             create_ensemble_forecast_fn=create_ensemble_forecast,
             create_scenario_analysis_fn=create_scenario_analysis,
             render_scenario_analysis_fn=render_scenario_analysis,
