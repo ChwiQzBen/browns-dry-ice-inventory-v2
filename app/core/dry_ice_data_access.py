@@ -62,7 +62,7 @@ def fix_order_date():
 
     # Fix in Supabase first
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         supabase = init_supabase()
         if supabase:
             try:
@@ -113,7 +113,7 @@ def fix_order_date():
 def init_db():
     """Initialize database (Supabase or SQLite)"""
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         if init_supabase():
             # Supabase tables are created manually in the Supabase dashboard
             # Or you can run a one-time setup script
@@ -291,7 +291,7 @@ def add_transaction_to_db(transaction_type, quantity, description, date, period)
     # ============================================================
     if USE_SUPABASE:
         try:
-            from app.main import init_supabase
+            from app.core.supabase_client import init_supabase
             supabase = init_supabase()
             if supabase:
                 logger.info("Attempting Supabase transaction...")
@@ -484,7 +484,7 @@ def get_transactions_from_db(period):
 
     # Try Supabase first
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         supabase = init_supabase()
         if supabase:
             try:
@@ -535,7 +535,7 @@ def get_current_stock_from_db():
 
     # Try Supabase first
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         supabase = init_supabase()
         if supabase:
             try:
@@ -566,7 +566,7 @@ def update_current_stock_in_db(new_stock, date):
 
     # Try Supabase first if enabled
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         supabase = init_supabase()
         if supabase:
             try:
@@ -745,7 +745,7 @@ def get_historical_orders_from_db(period):
 
     # Try Supabase first
     if USE_SUPABASE:
-        from app.main import init_supabase
+        from app.core.supabase_client import init_supabase
         supabase = init_supabase()
         if supabase:
             try:

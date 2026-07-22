@@ -44,6 +44,7 @@ from app.core.all_items_ui import render_all_items_mode, AllItemsContext
 from app.core.dry_ice_ui import render_dry_ice_mode, DryIceContext
 from app.core.theme import THEME, kpi_card, inject_global_css
 from app.core.dashboard_home import DashboardContext, render_dashboard_home
+from app.core.supabase_client import init_supabase
 from app.core.visual_inventory import get_sample_inventory_data
 from app.core.forecasting import (
       create_ensemble_forecast,
@@ -148,18 +149,6 @@ def get_image_base64(image_path):
     except Exception as e:
         print(f"Error loading image: {e}")
         return ""
-
-@st.cache_resource
-def init_supabase():
-    """Initialize Supabase client using Streamlit secrets"""
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Failed to connect to Supabase: {e}")
-        st.info("Please add SUPABASE_URL and SUPABASE_KEY to your Streamlit secrets")
-        return None
 
 
 st.set_page_config(

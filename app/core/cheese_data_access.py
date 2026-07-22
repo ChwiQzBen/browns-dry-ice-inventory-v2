@@ -19,7 +19,7 @@ Usage from main.py:
         load_batch_tracker, get_aging_room_capacity_kg,
         set_aging_room_capacity_kg, get_aging_room_used_kg,
     )
-
+    from app.core.supabase_client import init_supabase
     supabase = init_supabase()          # you already have this
     init_cheese_storage(supabase)       # safe to call every run
     book = load_recipe_book(supabase)
@@ -638,7 +638,7 @@ def get_weighted_milk_cost_for_date(target_date: date) -> float:
     if nothing's been received yet — caller should fall back to a default.
     Cached 60s: this was hitting Supabase on every BCPOS rerun."""
     # Initialize Supabase INSIDE the function to avoid hashing issues
-    from app.main import init_supabase
+    from app.core.supabase_client import init_supabase
     supabase_client = init_supabase()
     
     receipts = get_milk_receipts(start_date=target_date, supabase_client=supabase_client)
