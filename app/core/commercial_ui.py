@@ -159,7 +159,7 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
     st.markdown("---")
     st.markdown("#### Pending LPOs")
     all_lines = get_lpo_lines(supabase_client=supabase_client)
-    pending = [l for l in all_lines if l["status"] in ("Pending", "Confirmed")]
+    pending = [l for l in all_lines if l["status"] in ("Pending", "Confirmed", "Partially Delivered")]
     pending.sort(key=lambda l: l["delivery_date"])
     if not pending:
         st.info("No open LPOs.")
@@ -167,21 +167,27 @@ def _render_lpo_register_tab(book, supabase_client) -> None:
         today_str = date.today().isoformat()
         for line in pending:
             overdue = line["delivery_date"] < today_str
+            already_delivered_kg = float(line.get("quantity_delivered_kg") or 0.0)
+            remaining_kg = max(0.0, float(line["quantity_kg"]) - already_delivered_kg)
             with st.container():
                 st.markdown(
                     f"{'⚠️ OVERDUE — ' if overdue else ''}**{line['lpo_number']}** — "
                     f"{line['customer_name']} — {line['cheese_name']} — "
                     f"{line['quantity_kg']:.1f}kg — due {line['delivery_date']} — *{line['status']}*"
                 )
+                if already_delivered_kg > 0:
+                    st.caption(f"📦 {already_delivered_kg:.1f}kg delivered so far — "
+                               f"{remaining_kg:.1f}kg remaining")
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1:
-                    delivered_kg = st.number_input(
-                        "Deliver (kg)", min_value=0.0, value=float(line["quantity_kg"]),
+                    deliver_now_kg = st.number_input(
+                        "Deliver now (kg)", min_value=0.0, value=float(remaining_kg),
                         step=1.0, key=f"deliver_kg_{line['id']}", label_visibility="collapsed",
                     )
                 with c2:
-                    if st.button("✅ Mark Delivered", key=f"deliver_{line['id']}"):
-                        record_lpo_delivery(line["id"], delivered_kg, supabase_client)
+                    if st.button("✅ Record Delivery", key=f"deliver_{line['id']}"):
+                        cumulative_delivered = already_delivered_kg + deliver_now_kg
+                        record_lpo_delivery(line["id"], cumulative_delivered, supabase_client)
                         st.success(f"Recorded delivery for {line['lpo_number']}.")
                         st.rerun()
                 with c3:

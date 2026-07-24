@@ -714,15 +714,23 @@ def get_lpo_lines(delivery_date: Optional[date] = None, status: Optional[str] = 
 
 
 def get_confirmed_demand_for_date(target_date: date, supabase_client=None) -> Dict[str, float]:
-    """Sum of open LPO quantity per cheese for a delivery date — this is
-    what production_plan.py's build_plan(confirmed_demand=...) floors
-    production against. Excludes Cancelled and already-Delivered lines."""
+    """Sum of REMAINING (undelivered) open LPO quantity per cheese for a
+    delivery date — this is what production_plan.py's build_plan(
+    confirmed_demand=...) floors production against. Excludes Cancelled
+    and fully-Delivered lines. A Partially Delivered line contributes only
+    what's still owed (quantity_kg - quantity_delivered_kg), not the
+    original quantity_kg — otherwise the floor keeps demanding cheese
+    that's already left the building."""
     lines = get_lpo_lines(delivery_date=target_date, supabase_client=supabase_client)
     confirmed: Dict[str, float] = {}
     for line in lines:
         if line["status"] in ("Cancelled", "Delivered"):
             continue
-        confirmed[line["cheese_name"]] = confirmed.get(line["cheese_name"], 0.0) + float(line["quantity_kg"])
+        delivered_kg = float(line.get("quantity_delivered_kg") or 0.0)
+        remaining_kg = float(line["quantity_kg"]) - delivered_kg
+        if remaining_kg <= 0:
+            continue
+        confirmed[line["cheese_name"]] = confirmed.get(line["cheese_name"], 0.0) + remaining_kg
     return confirmed
 
 
