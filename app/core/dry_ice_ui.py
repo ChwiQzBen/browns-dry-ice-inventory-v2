@@ -724,7 +724,7 @@ def _render_cost_optimization_tab(ctx: DryIceContext) -> None:
     st.dataframe(
         cost_components.style
         .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-        .applymap(lambda x: 'font-weight: bold', subset=['Component'])
+        .map(lambda x: 'font-weight: bold', subset=['Component'])
         .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
         use_container_width=True,
         height=220,
@@ -1065,7 +1065,7 @@ def _render_recommendations_tab(ctx: DryIceContext) -> None:
 
     # Styled dataframe with highlighting
     st.dataframe(
-        roadmap.style.applymap(lambda x: 'font-weight: bold', subset=['Timeline'])
+        roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
         .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
         use_container_width=True,
         height=200,
@@ -1235,8 +1235,8 @@ def _render_maintenance_tab(ctx: DryIceContext) -> None:
 
     st.dataframe(
         maintenance_data.style
-        .applymap(style_status, subset=['Status'])
-        .applymap(style_priority, subset=['Priority']),
+        .map(style_status, subset=['Status'])
+        .map(style_priority, subset=['Priority']),
         use_container_width=True,
         height=250,
         hide_index=True
@@ -1246,7 +1246,7 @@ def _render_maintenance_tab(ctx: DryIceContext) -> None:
     st.markdown("---")
     st.markdown("#### 💰 Maintenance Costs")
     cost_data = pd.DataFrame({
-        'Month': pd.date_range('2024-01-01', periods=6, freq='M'),
+        'Month': pd.date_range('2024-01-01', periods=6, freq='ME'),
         'Preventive': [2500, 3200, 2800, 4100, 2900, 3500],
         'Reactive': [1200, 800, 2100, 600, 1800, 900],
         'Emergency': [0, 0, 1500, 0, 0, 2200]
@@ -1256,7 +1256,8 @@ def _render_maintenance_tab(ctx: DryIceContext) -> None:
         cost_data.melt(id_vars=['Month'], var_name='Type', value_name='Cost'),
         x='Month', y='Cost', color='Type',
         title="Monthly Maintenance Costs (KSh)",
-        color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'}
+        color_discrete_map={'Preventive': '#28a745', 'Reactive': '#ffc107', 'Emergency': '#dc3545'},
+        height=mobile_ui.get_chart_height()
     )
     fig_maintenance_cost = mobile_ui.optimize_chart_for_mobile(fig_maintenance_cost)
     st.plotly_chart(fig_maintenance_cost, use_container_width=True,
