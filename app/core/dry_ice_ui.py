@@ -1323,7 +1323,7 @@ def _render_transaction_history_tab(ctx: DryIceContext) -> None:
         if show_limit != "All":
             filtered_df = filtered_df.head(int(show_limit))
 
-        with st.expander("📋 View Transaction Records", expanded=not mobile_ui.should_collapse_advanced()):
+        with st.expander("📋 View Transaction Records", expanded=True):
             if len(filtered_df) > 100:
                 paginated_df, paginator = paginate_dataframe(
                     filtered_df, page_size=50, key_prefix="transactions",
