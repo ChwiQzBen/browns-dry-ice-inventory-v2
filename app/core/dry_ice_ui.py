@@ -43,6 +43,13 @@ DRY_ICE_TAB_REQUIREMENTS = {
     "📜 Transaction History": "view_reports",
 }
 
+def _style_map(styler, func, subset=None):
+    """Styler.applymap() was renamed to .map() in pandas 2.1 and removed in
+    pandas 3.0. Use whichever one actually exists on this Styler instance."""
+    if hasattr(styler, "map"):
+        return styler.map(func, subset=subset)
+    return styler.applymap(func, subset=subset)
+
 
 @dataclass
 class DryIceContext:
@@ -719,11 +726,15 @@ def _render_cost_optimization_tab(ctx: DryIceContext) -> None:
         ]
     }
     cost_components = pd.DataFrame(cost_components_data)
+    styled_cost_components = cost_components.style.format(
+        {'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'}
+    )
+    styled_cost_components = _style_map(
+        styled_cost_components, lambda x: 'font-weight: bold', subset=['Component']
+    ).bar(subset=['Annual Cost (KSh)'], color='#5fba7d')
+
     st.dataframe(
-        cost_components.style
-        .format({'Annual Cost (KSh)': '{:,.0f}', '% of Total': '{:.1f}%'})
-        .map(lambda x: 'font-weight: bold', subset=['Component'])
-        .bar(subset=['Annual Cost (KSh)'], color='#5fba7d'),
+        styled_cost_components,
         use_container_width=True,
         height=220,
         hide_index=True
@@ -1062,9 +1073,12 @@ def _render_recommendations_tab(ctx: DryIceContext) -> None:
     roadmap = pd.DataFrame(roadmap_data)
 
     # Styled dataframe with highlighting
+    styled_roadmap = _style_map(
+        roadmap.style, lambda x: 'font-weight: bold', subset=['Timeline']
+    ).set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'})
+
     st.dataframe(
-        roadmap.style.map(lambda x: 'font-weight: bold', subset=['Timeline'])
-        .set_properties(**{'background-color': '#f8f9fa', 'color': '#212529'}),
+        styled_roadmap,
         use_container_width=True,
         height=200,
         hide_index=True
@@ -1231,10 +1245,11 @@ def _render_maintenance_tab(ctx: DryIceContext) -> None:
         lambda x: f"{x} days" if x > 0 else "On schedule"
     )
 
+    styled_maintenance = _style_map(maintenance_data.style, style_status, subset=['Status'])
+    styled_maintenance = _style_map(styled_maintenance, style_priority, subset=['Priority'])
+
     st.dataframe(
-        maintenance_data.style
-        .map(style_status, subset=['Status'])
-        .map(style_priority, subset=['Priority']),
+        styled_maintenance,
         use_container_width=True,
         height=250,
         hide_index=True
