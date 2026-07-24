@@ -37,7 +37,7 @@ rather than a silent failure.
 
 from dataclasses import dataclass, field
 from datetime import datetime, date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import os
 
 from production_tracking import (
@@ -95,6 +95,7 @@ class ProductionReportData:
     currently_aging: List[AgingBatch]
     yield_comparisons: List[YieldComparison]
     finished_batches_in_period: List[FinishedGoodBatch]
+    kg_produced_by_day: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _in_range(dt: datetime, start: Optional[datetime], end: Optional[datetime]) -> bool:
@@ -146,6 +147,14 @@ def build_report_data(tracker: BatchTracker, book: RecipeBook,
     for b in production_in_period:
         batches_by_status[b.status.value] = batches_by_status.get(b.status.value, 0) + 1
 
+    kg_by_day: Dict[str, float] = {}
+    for b in production_in_period:
+        day = b.created_at.date().isoformat()
+        kg_by_day[day] = kg_by_day.get(day, 0.0) + b.quantity_kg
+    kg_produced_by_day = sorted(
+        [{"date": k, "kg": v} for k, v in kg_by_day.items()], key=lambda r: r["date"],
+    )
+
     production_qc_stats = _tally_checkpoints(production_in_period, lambda b: b.checkpoints)
     aging_qc_stats = _tally_checkpoints(aging_in_period, lambda b: b.checkpoints)
 
@@ -196,6 +205,7 @@ def build_report_data(tracker: BatchTracker, book: RecipeBook,
         currently_aging=currently_aging,
         yield_comparisons=yield_comparisons,
         finished_batches_in_period=finished_in_period,
+        kg_produced_by_day=kg_produced_by_day,
     )
 
 

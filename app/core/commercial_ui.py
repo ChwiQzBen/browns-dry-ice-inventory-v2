@@ -15,9 +15,16 @@ from app.core.cheese_data_access import (
     reconcile_customers_from_history,
 )
 from app.core.customer_analytics import compute_ordering_patterns, compute_product_mix
+# Find:
 from app.core.commercial_reports import (
     build_commercial_report_data, summarize_commercial_report_data, generate_commercial_report,
 )
+
+# Replace:
+from app.core.commercial_reports import (
+    build_commercial_report_data, summarize_commercial_report_data, generate_commercial_report,
+)
+from app.core.report_ui import render_report_tab, KPI, TableSection, ChartSection
 
 COMMERCIAL_TAB_NAMES = [
     "📄 LPO Register",
@@ -446,91 +453,59 @@ def _render_customer_analytics_tab(supabase_client) -> None:
 # TAB: COMMERCIAL REPORTS
 # ============================================================
 def _render_commercial_reports_tab(supabase_client) -> None:
-    st.markdown("### 📋 Commercial Reports")
-    st.caption(
-        "Rollups over Sales and LPO data. Customer-level breakdowns use freetext "
-        "customer names — expect some fragmentation until Sales/LPO are fully "
-        "linked to the Customers registry (see 👥 Customers → Reconciliation)."
+    def _build(start_date, end_date):
+        sales = get_sales_history(start_date=start_date, end_date=end_date, supabase_client=supabase_client)
+        all_lpo = get_lpo_lines(supabase_client=supabase_client)
+        lpo_lines = [l for l in all_lpo
+                     if start_date.isoformat() <= l["delivery_date"] <= end_date.isoformat()]
+        return build_commercial_report_data(sales, lpo_lines, start_date, end_date)
+
+    render_report_tab(
+        title="📋 Commercial Reports",
+        caption="Rollups over Sales and LPO data. Customer-level breakdowns use freetext "
+                "customer names — expect some fragmentation until Sales/LPO are fully "
+                "linked to the Customers registry (see 👥 Customers → Reconciliation).",
+        session_key="commercial_report",
+        build_fn=_build,
+        summarize_fn=summarize_commercial_report_data,
+        pdf_fn=generate_commercial_report,
+        pdf_filename_prefix="commercial_report",
+        date_key_prefix="comm_report",
+        kpis=[
+            KPI("Total Revenue", lambda d: f"KSh {d.total_revenue:,.0f}"),
+            KPI("Total Volume", lambda d: f"{d.total_kg:,.1f} kg"),
+            KPI("Sales Transactions", lambda d: d.total_sales_transactions),
+            KPI("LPO Volume", lambda d: f"{d.lpo_total_kg:,.1f} kg"),
+            KPI("LPO Fill Rate", lambda d: f"{d.lpo_fill_rate_pct:.0f}%"),
+            KPI("LPOs Cancelled", lambda d: d.lpo_cancelled_count),
+        ],
+        chart_sections=[
+            ChartSection(
+                "Revenue Over Time",
+                lambda d: bool(d.revenue_by_day),
+                lambda d: d.revenue_by_day,
+                x="date", y="revenue", kind="line",
+            ),
+        ],
+        table_sections=[
+            TableSection(
+                "Revenue by Product",
+                lambda d: bool(d.revenue_by_product),
+                lambda d: [{"Cheese": r["cheese_name"], "Revenue": f"KSh {r['revenue']:,.0f}",
+                            "Kg": f"{r['kg']:,.1f}", "Sales": r["count"]}
+                           for r in d.revenue_by_product],
+            ),
+            TableSection(
+                "Revenue by Customer",
+                lambda d: bool(d.revenue_by_customer),
+                lambda d: [{"Customer": r["customer"], "Revenue": f"KSh {r['revenue']:,.0f}",
+                            "Kg": f"{r['kg']:,.1f}", "Sales": r["count"]}
+                           for r in d.revenue_by_customer],
+            ),
+            TableSection(
+                "LPO Status Breakdown",
+                lambda d: bool(d.lpo_status_counts),
+                lambda d: [{"Status": k, "Count": v} for k, v in d.lpo_status_counts.items()],
+            ),
+        ],
     )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", value=date.today() - timedelta(days=30),
-                                    key="comm_report_start")
-    with col2:
-        end_date = st.date_input("End Date", value=date.today(), key="comm_report_end")
-
-    if start_date > end_date:
-        st.error("Start date must be before end date.")
-        return
-
-    if st.button("📊 Generate Report", type="primary", key="generate_commercial_report_btn"):
-        try:
-            sales = get_sales_history(start_date=start_date, end_date=end_date, supabase_client=supabase_client)
-            all_lpo = get_lpo_lines(supabase_client=supabase_client)
-            lpo_lines = [l for l in all_lpo
-                         if start_date.isoformat() <= l["delivery_date"] <= end_date.isoformat()]
-            st.session_state.commercial_report = build_commercial_report_data(
-                sales, lpo_lines, start_date, end_date,
-            )
-            st.success("Report generated successfully.")
-        except Exception as e:
-            st.error(f"Could not generate report: {e}")
-            return
-
-    if "commercial_report" not in st.session_state:
-        return
-
-    data = st.session_state.commercial_report
-    st.divider()
-    st.subheader("📊 Summary")
-    st.text(summarize_commercial_report_data(data))
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Revenue", f"KSh {data.total_revenue:,.0f}")
-    c2.metric("Total Volume", f"{data.total_kg:,.1f} kg")
-    c3.metric("Sales Transactions", data.total_sales_transactions)
-
-    c4, c5, c6 = st.columns(3)
-    c4.metric("LPO Volume", f"{data.lpo_total_kg:,.1f} kg")
-    c5.metric("LPO Fill Rate", f"{data.lpo_fill_rate_pct:.0f}%")
-    c6.metric("LPOs Cancelled", data.lpo_cancelled_count)
-
-    if data.revenue_by_product:
-        st.subheader("Revenue by Product")
-        prod_df = pd.DataFrame(data.revenue_by_product).rename(
-            columns={"cheese_name": "Cheese", "revenue": "Revenue", "kg": "Kg", "count": "Sales"})
-        prod_df["Revenue"] = prod_df["Revenue"].map(lambda v: f"KSh {v:,.0f}")
-        prod_df["Kg"] = prod_df["Kg"].map(lambda v: f"{v:,.1f}")
-        st.dataframe(prod_df, use_container_width=True, hide_index=True)
-
-    if data.revenue_by_customer:
-        st.subheader("Revenue by Customer")
-        cust_df = pd.DataFrame(data.revenue_by_customer).rename(
-            columns={"customer": "Customer", "revenue": "Revenue", "kg": "Kg", "count": "Sales"})
-        cust_df["Revenue"] = cust_df["Revenue"].map(lambda v: f"KSh {v:,.0f}")
-        cust_df["Kg"] = cust_df["Kg"].map(lambda v: f"{v:,.1f}")
-        st.dataframe(cust_df, use_container_width=True, hide_index=True)
-
-    if data.lpo_status_counts:
-        st.subheader("LPO Status Breakdown")
-        status_df = pd.DataFrame(list(data.lpo_status_counts.items()), columns=["Status", "Count"])
-        st.dataframe(status_df, use_container_width=True, hide_index=True)
-
-    st.divider()
-    if st.button("📄 Generate PDF Report", key="generate_commercial_pdf_btn"):
-        try:
-            filename = f"commercial_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            pdf_path = generate_commercial_report(data, output_path=filename)
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-            st.download_button(
-                label="📥 Download PDF Report", data=pdf_bytes, file_name=filename,
-                mime="application/pdf", key="download_commercial_pdf",
-            )
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-        except ImportError as e:
-            st.error(str(e))
-        except Exception as e:
-            st.error(f"Could not generate PDF: {e}")

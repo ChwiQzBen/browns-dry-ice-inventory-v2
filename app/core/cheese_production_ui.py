@@ -33,7 +33,8 @@ from production_tracking import (
 from production_plan import ProductionPlanner
 from demand_forecast import CheeseDemandForecaster
 from app.core.cheese_forecast_adapter import make_ensemble_demand_forecaster
-from app.core.production_reports import build_report_data, generate_production_report, summarize_report_data
+from app.core.production_reports import build_report_data, generate_production_report_pdf, summarize_report_data
+from app.core.report_ui import render_report_tab, KPI, TableSection, ChartSection
 from scenario_analysis import Scenario, run_scenario, compare_scenarios
 
 from app.core.cheese_shared_state import ensure_cheese_state
@@ -884,193 +885,59 @@ def _render_fefo_inventory_tab(book: RecipeBook, tracker: BatchTracker) -> None:
 # ============================================================
 
 def _render_reports_tab(book: RecipeBook, tracker: BatchTracker) -> None:
-    import os
-    import pandas as pd
-    from datetime import datetime, timedelta
-
-    st.markdown("### 📄 Production Reports")
-    st.caption(
-        "Generate production reports covering batch yield and QC statistics."
+    render_report_tab(
+        title="📄 Production Reports",
+        caption="Generate production reports covering batch yield and QC statistics.",
+        session_key="production_report",
+        build_fn=lambda start_date, end_date: build_report_data(tracker, book, start_date, end_date),
+        summarize_fn=summarize_report_data,
+        pdf_fn=generate_production_report_pdf,
+        pdf_filename_prefix="production_report",
+        date_key_prefix="cheese_report",
+        kpis=[
+            KPI("Batches Started", lambda d: d.total_batches_started),
+            KPI("Produced", lambda d: f"{d.total_kg_produced:.1f} kg"),
+            KPI("Released", lambda d: f"{d.total_kg_released:.1f} kg"),
+            KPI("Currently Aging", lambda d: len(d.currently_aging)),
+            KPI("Failed QC", lambda d: len(d.failed_qc_batches)),
+            KPI("Failed Aging", lambda d: len(d.failed_aging_batches)),
+        ],
+        chart_sections=[
+            ChartSection(
+                "Kg Produced Over Time",
+                lambda d: bool(d.kg_produced_by_day),
+                lambda d: d.kg_produced_by_day,
+                x="date", y="kg", kind="bar",
+            ),
+        ],
+        table_sections=[
+            TableSection(
+                "Production Status",
+                lambda d: bool(d.batches_by_status),
+                lambda d: [{"Status": k, "Count": v} for k, v in d.batches_by_status.items()],
+            ),
+            TableSection(
+                "Production QC Statistics",
+                lambda d: bool(d.production_qc_stats),
+                lambda d: [{"Stage": s.stage, "Passed": s.passed, "Failed": s.failed,
+                            "Pending": s.pending, "Pass Rate": f"{s.pass_rate:.0%}"}
+                           for s in d.production_qc_stats],
+            ),
+            TableSection(
+                "Aging QC Statistics",
+                lambda d: bool(d.aging_qc_stats),
+                lambda d: [{"Stage": s.stage, "Passed": s.passed, "Failed": s.failed,
+                            "Pending": s.pending, "Pass Rate": f"{s.pass_rate:.0%}"}
+                           for s in d.aging_qc_stats],
+            ),
+            TableSection(
+                "Yield Comparison",
+                lambda d: bool(d.yield_comparisons),
+                lambda d: [{"Batch": y.aging_batch_id, "Cheese": y.cheese_name,
+                            "Expected (kg)": round(y.expected_yield_kg, 2),
+                            "Actual (kg)": round(y.actual_yield_kg, 2),
+                            "Variance (%)": round(y.variance_pct, 2)}
+                           for y in d.yield_comparisons],
+            ),
+        ],
     )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now().date() - timedelta(days=30),
-            key="report_start_date"
-        )
-
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now().date(),
-            key="report_end_date"
-        )
-
-    if start_date > end_date:
-        st.error("Start date must be before end date.")
-        return
-
-    # -----------------------------
-    # Generate Report
-    # -----------------------------
-    if st.button("📊 Generate Report", type="primary", key="generate_report_btn"):
-        try:
-            st.session_state.production_report = build_report_data(
-                tracker=tracker,
-                book=book,
-                start_date=start_date,
-                end_date=end_date
-            )
-            st.success("Report generated successfully.")
-
-        except Exception as e:
-            st.error(f"Could not generate report: {e}")
-            return
-
-    # -----------------------------
-    # Display Report
-    # -----------------------------
-    if "production_report" not in st.session_state:
-        return
-
-    data = st.session_state.production_report
-
-    st.divider()
-
-    st.subheader("📊 Summary")
-    st.text(summarize_report_data(data))
-
-    # KPI Cards
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "Batches Started",
-        data.total_batches_started
-    )
-
-    c2.metric(
-        "Produced",
-        f"{data.total_kg_produced:.1f} kg"
-    )
-
-    c3.metric(
-        "Released",
-        f"{data.total_kg_released:.1f} kg"
-    )
-
-    c4, c5, c6 = st.columns(3)
-
-    c4.metric(
-        "Currently Aging",
-        len(data.currently_aging)
-    )
-
-    c5.metric(
-        "Failed QC",
-        len(data.failed_qc_batches)
-    )
-
-    c6.metric(
-        "Failed Aging",
-        len(data.failed_aging_batches)
-    )
-
-    # Status Breakdown
-    if data.batches_by_status:
-        st.subheader("Production Status")
-        status_df = pd.DataFrame(
-            list(data.batches_by_status.items()),
-            columns=["Status", "Count"]
-        )
-        st.dataframe(status_df, use_container_width=True)
-
-    # Production QC
-    if data.production_qc_stats:
-        st.subheader("Production QC Statistics")
-
-        prod_df = pd.DataFrame([
-            {
-                "Stage": s.stage,
-                "Passed": s.passed,
-                "Failed": s.failed,
-                "Pending": s.pending,
-                "Pass Rate": f"{s.pass_rate:.0%}"
-            }
-            for s in data.production_qc_stats
-        ])
-
-        st.dataframe(prod_df, use_container_width=True)
-
-    # Aging QC
-    if data.aging_qc_stats:
-        st.subheader("Aging QC Statistics")
-
-        aging_df = pd.DataFrame([
-            {
-                "Stage": s.stage,
-                "Passed": s.passed,
-                "Failed": s.failed,
-                "Pending": s.pending,
-                "Pass Rate": f"{s.pass_rate:.0%}"
-            }
-            for s in data.aging_qc_stats
-        ])
-
-        st.dataframe(aging_df, use_container_width=True)
-
-    # Yield Comparison
-    if data.yield_comparisons:
-        st.subheader("Yield Comparison")
-
-        yield_df = pd.DataFrame([
-            {
-                "Batch": y.aging_batch_id,
-                "Cheese": y.cheese_name,
-                "Expected (kg)": round(y.expected_yield_kg, 2),
-                "Actual (kg)": round(y.actual_yield_kg, 2),
-                "Variance (%)": round(y.variance_pct, 2)
-            }
-            for y in data.yield_comparisons
-        ])
-
-        st.dataframe(yield_df, use_container_width=True)
-
-    # PDF Download
-    st.divider()
-
-    if st.button("📄 Generate PDF Report", key="generate_pdf_btn"):
-        try:
-            filename = (
-                f"production_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            )
-
-            pdf_path = generate_production_report(
-                tracker=tracker,
-                book=book,
-                start_date=start_date,
-                end_date=end_date,
-                output_path=filename
-            )
-
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-
-            st.download_button(
-                label="📥 Download PDF Report",
-                data=pdf_bytes,
-                file_name=filename,
-                mime="application/pdf",
-                key="download_pdf_report"
-            )
-
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-
-        except ImportError as e:
-            st.error(str(e))
-
-        except Exception as e:
-            st.error(f"Could not generate PDF: {e}")

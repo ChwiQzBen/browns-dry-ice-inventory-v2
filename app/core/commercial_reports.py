@@ -24,6 +24,7 @@ class CommercialReportData:
     lpo_fill_rate_pct: float = 0.0
     lpo_cancelled_count: int = 0
     lpo_status_counts: Dict[str, int] = field(default_factory=dict)
+    revenue_by_day: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def build_commercial_report_data(sales: List[Dict[str, Any]],
@@ -57,6 +58,15 @@ def build_commercial_report_data(sales: List[Dict[str, Any]],
         key=lambda r: r["revenue"], reverse=True,
     )
 
+    by_day: Dict[str, Dict[str, float]] = {}
+    for s in sales:
+        d = by_day.setdefault(s["date"], {"revenue": 0.0, "kg": 0.0})
+        d["revenue"] += float(s["revenue"])
+        d["kg"] += float(s["quantity_kg"])
+    revenue_by_day = sorted(
+        [{"date": k, **v} for k, v in by_day.items()], key=lambda r: r["date"],
+    )
+
     lpo_total_kg = sum(float(l["quantity_kg"]) for l in lpo_lines)
     delivered = [l for l in lpo_lines if l["status"] in ("Delivered", "Partially Delivered")]
     delivered_kg = sum(float(l.get("quantity_delivered_kg") or 0) for l in delivered)
@@ -72,6 +82,7 @@ def build_commercial_report_data(sales: List[Dict[str, Any]],
         revenue_by_product=revenue_by_product, revenue_by_customer=revenue_by_customer,
         lpo_total_kg=lpo_total_kg, lpo_fill_rate_pct=fill_rate,
         lpo_cancelled_count=cancelled, lpo_status_counts=status_counts,
+        revenue_by_day=revenue_by_day,
     )
 
 
