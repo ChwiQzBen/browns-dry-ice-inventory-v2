@@ -313,12 +313,12 @@ def _render_demand_forecast_tab(ctx: DryIceContext) -> None:
             if st.button("✅ Select All", use_container_width=True, key="select_all_models"):
                 for model in model_options.keys():
                     st.session_state[f"tab_model_{model}"] = True
-                st.rerun()
+                
         with col2:
             if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_models"):
                 for model in model_options.keys():
                     st.session_state[f"tab_model_{model}"] = False
-                st.rerun()
+                
         with col3:
             if st.button("🔄 Update Models", use_container_width=True, type="primary", key="update_models_btn"):
                 st.session_state.selected_models = selected_models
@@ -331,7 +331,6 @@ def _render_demand_forecast_tab(ctx: DryIceContext) -> None:
                 else:
                     st.warning("⚠️ No models selected! Using all models as fallback.")
 
-                st.rerun()
 
     st.markdown("---")
 
@@ -344,11 +343,10 @@ def _render_demand_forecast_tab(ctx: DryIceContext) -> None:
     with col2:
         if st.button("▶️ Start Live Updates"):
             rt_forecaster.start(df, 30)
-            st.rerun()
+            
     with col3:
         if st.button("⏹️ Stop Live Updates"):
             rt_forecaster.stop()
-            st.rerun()
 
     st.markdown("---")
 
